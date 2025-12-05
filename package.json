@@ -7,6 +7,7 @@
     "start": "react-scripts start",
     "electron": "electron .",
     "dev": "concurrently \"cross-env BROWSER=none PORT=3001 npm start\" \"wait-on http://localhost:3001 && electron .\"",
+    "dev:test": "concurrently \"cross-env BROWSER=none PORT=3001 npm start\" \"wait-on http://localhost:3001 && electron public/main_test.js\"",
     "build": "react-scripts build",
     "package": "npm run build && electron-builder -w -c.extraMetadata.main=build/main.js"
   },
