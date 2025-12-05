@@ -6,13 +6,16 @@ import {
   XCircle,
   AlertCircle,
   FileText,
-  Settings,
   RefreshCw,
   History,
   Clock,
+  Bug,
 } from "lucide-react";
 
 const StatusBadge = ({ status }) => {
+  // Normalize status to lowercase for styling
+  const s = (status || "unknown").toLowerCase();
+
   const styles = {
     pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
     downloading: "bg-blue-100 text-blue-800 border-blue-200",
@@ -23,23 +26,13 @@ const StatusBadge = ({ status }) => {
     error: "bg-red-500 text-white border-red-600",
   };
 
-  const labels = {
-    pending: "Needs Approval",
-    downloading: "Downloading...",
-    printing: "Printing...",
-    ready: "Ready for Pickup",
-    completed: "History (Handed Over)",
-    rejected: "Rejected",
-    error: "Error",
-  };
-
   return (
     <span
       className={`px-3 py-1 rounded-full text-xs font-bold border uppercase tracking-wider ${
-        styles[status] || styles.pending
+        styles[s] || "bg-gray-200 text-gray-800"
       }`}
     >
-      {labels[status] || status}
+      {status || "Unknown"}
     </span>
   );
 };
@@ -48,10 +41,10 @@ const JobCard = ({ job, onClick }) => {
   return (
     <div
       onClick={onClick}
-      className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-md ${
-        job.status === "pending"
-          ? "bg-white border-l-4 border-l-yellow-400"
-          : "bg-white border-gray-200"
+      className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-md bg-white ${
+        job.status?.toLowerCase() === "pending"
+          ? "border-l-4 border-l-yellow-400"
+          : "border-gray-200"
       }`}
     >
       <div className="flex justify-between items-start mb-2">
@@ -76,8 +69,8 @@ const JobCard = ({ job, onClick }) => {
       <div className="flex justify-between items-end border-t pt-3 mt-2">
         <div className="text-sm text-gray-600">
           <p>
-            {job.printOptions.copies} Copies •{" "}
-            {job.printOptions.colorMode.toUpperCase()}
+            {job.printOptions?.copies || 1} Copies •{" "}
+            {job.printOptions?.colorMode?.toUpperCase() || "BW"}
           </p>
         </div>
         <div className="text-lg font-bold text-green-600">₹{job.cost}</div>
@@ -91,43 +84,52 @@ function App() {
   const [filteredJobs, setFilteredJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentTab, setCurrentTab] = useState("queue"); // 'queue' (pending/ready) or 'history' (completed/rejected)
+  const [currentTab, setCurrentTab] = useState("queue");
   const [printers, setPrinters] = useState([]);
   const [selectedPrinter, setSelectedPrinter] = useState("");
   const [error, setError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
 
   useEffect(() => {
-    window.electron.onJobsUpdate((data) => setJobs(data));
-    window.electron.onAuthError((msg) => setError(msg));
-    window.electron.onConnectionError((msg) => setError(msg));
+    // Listen for jobs
+    if (window.electron) {
+      window.electron.onJobsUpdate((data) => {
+        console.log("React received jobs:", data); // DEBUG LOG
+        setJobs(data);
+      });
+      window.electron.onAuthError((msg) => setError(msg));
+      window.electron.onConnectionError((msg) => setError(msg));
 
-    const loadPrinters = async () => {
-      const list = await window.electron.getPrinters();
-      setPrinters(list);
-      const def = list.find((p) => p.isDefault) || list[0];
-      if (def) setSelectedPrinter(def.deviceId || def.name);
-    };
-    loadPrinters();
+      const loadPrinters = async () => {
+        const list = await window.electron.getPrinters();
+        setPrinters(list);
+        const def = list.find((p) => p.isDefault) || list[0];
+        if (def) setSelectedPrinter(def.deviceId || def.name);
+      };
+      loadPrinters();
+    } else {
+      setError("Electron bridge failed. Check preload.js");
+    }
   }, []);
 
-  // --- Revised Filtering Logic ---
+  // --- Filtering Logic ---
   useEffect(() => {
     let result = jobs;
 
-    // 1. Tab Logic
+    // 1. Tab Logic (Relaxed Filter)
     if (currentTab === "queue") {
-      // Queue shows Pending, Printing, and Ready jobs
-      result = result.filter((j) =>
-        ["pending", "printing", "downloading", "ready", "error"].includes(
-          j.status
-        )
-      );
+      // Show EVERYTHING that is NOT history (Completed/Rejected)
+      // This ensures if status is "new" or "submitted" or "Paid", it still shows up here.
+      result = result.filter((j) => {
+        const s = (j.status || "").toLowerCase();
+        return !["completed", "rejected"].includes(s);
+      });
     } else {
-      // History shows Completed and Rejected
-      result = result.filter((j) =>
-        ["completed", "rejected"].includes(j.status)
-      );
+      // History: Completed, Rejected
+      result = result.filter((j) => {
+        const s = (j.status || "").toLowerCase();
+        return ["completed", "rejected"].includes(s);
+      });
     }
 
     // 2. Search Logic
@@ -157,7 +159,6 @@ function App() {
 
   const handleMarkCompleted = async () => {
     if (!selectedJob) return;
-    // This moves it from 'queue' tab to 'history' tab
     await window.electron.markCompleted(selectedJob.id);
     setSelectedJob(null);
   };
@@ -171,16 +172,13 @@ function App() {
   };
 
   const stats = useMemo(() => {
-    const today = new Date().setHours(0, 0, 0, 0);
-    const todayJobs = jobs.filter((j) => {
-      const jobDate = j.createdAt?._seconds * 1000;
-      return (
-        jobDate > today && (j.status === "completed" || j.status === "ready")
-      );
-    });
     return {
-      pending: jobs.filter((j) => j.status === "pending").length,
-      revenue: todayJobs.reduce((acc, curr) => acc + (curr.cost || 0), 0),
+      total: jobs.length,
+      // Count anything not completed/rejected as pending for stats
+      pending: jobs.filter(
+        (j) =>
+          !["completed", "rejected"].includes((j.status || "").toLowerCase())
+      ).length,
     };
   }, [jobs]);
 
@@ -198,25 +196,21 @@ function App() {
             </h1>
             <p className="text-xs text-green-600 flex items-center gap-1">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-              Live Sync Active
+              Connected
             </p>
           </div>
         </div>
 
         <div className="flex gap-8">
           <div className="text-center">
-            <p className="text-gray-500 text-xs uppercase font-bold tracking-wide">
-              Queue
-            </p>
-            <p className="font-bold text-xl text-yellow-600">
-              {stats.pending} Jobs
-            </p>
+            <p className="text-gray-400 text-xs font-bold">RAW DATA</p>
+            <p className="font-mono text-gray-600">{stats.total} Fetched</p>
           </div>
           <div className="text-center">
             <p className="text-gray-500 text-xs uppercase font-bold tracking-wide">
-              Today's Revenue
+              Pending
             </p>
-            <p className="font-bold text-xl text-green-600">₹{stats.revenue}</p>
+            <p className="font-bold text-xl text-yellow-600">{stats.pending}</p>
           </div>
         </div>
 
@@ -288,11 +282,36 @@ function App() {
         {/* Grid */}
         <div className="flex-1 overflow-y-auto">
           {filteredJobs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-              <Clock size={48} className="mb-4 opacity-50" />
-              <p>
-                No jobs in {currentTab === "queue" ? "active queue" : "history"}
-              </p>
+            <div className="flex flex-col items-center justify-center h-full pb-32 text-gray-400">
+              <Bug size={48} className="mb-4 opacity-50 text-red-300" />
+              <p>No jobs visible in {currentTab} list.</p>
+
+              {/* Debug Info */}
+              <div className="mt-6 p-4 bg-gray-100 rounded-lg text-xs text-left w-full max-w-sm border border-gray-200">
+                <p className="font-bold mb-2 text-gray-600">
+                  Debug Information:
+                </p>
+                <p>Total received from DB: {jobs.length}</p>
+                <div className="mt-2">
+                  <p className="font-semibold text-gray-500">
+                    Statuses found in your Database:
+                  </p>
+                  <ul className="list-disc pl-4 mt-1 text-gray-700 font-mono">
+                    {[...new Set(jobs.map((j) => j.status || "undefined"))].map(
+                      (s) => (
+                        <li key={s}>{s}</li>
+                      )
+                    )}
+                  </ul>
+                  {jobs.length > 0 && (
+                    <p className="mt-2 text-red-500 italic">
+                      If you see statuses above, they are being filtered
+                      correctly now. If the list is still empty, verify the
+                      30-day date filter in main.js.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
@@ -312,7 +331,6 @@ function App() {
       {selectedJob && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
-            {/* Modal Header */}
             <div className="bg-gray-50 border-b px-6 py-4 flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-gray-800">
@@ -330,7 +348,6 @@ function App() {
               </button>
             </div>
 
-            {/* Modal Content */}
             <div className="p-6 space-y-4">
               <div className="flex items-start gap-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
                 <FileText className="text-blue-600 mt-1" size={24} />
@@ -343,25 +360,9 @@ function App() {
 
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="space-y-1">
-                  <p className="text-gray-500">Mode</p>
-                  <p className="font-bold text-gray-900 capitalize">
-                    {selectedJob.printOptions.colorMode === "bw"
-                      ? "Black & White"
-                      : "Color"}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-gray-500">Sides</p>
-                  <p className="font-bold text-gray-900 capitalize">
-                    {selectedJob.printOptions.duplex === "two-sided"
-                      ? "Duplex"
-                      : "Single"}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-gray-500">Copies</p>
+                  <p className="text-gray-500">Status</p>
                   <p className="font-bold text-gray-900">
-                    {selectedJob.printOptions.copies}
+                    {selectedJob.status}
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -373,47 +374,37 @@ function App() {
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div className="bg-gray-50 px-6 py-4 flex justify-between items-center gap-3">
-              {/* STATUS: PENDING -> Show Approve */}
-              {selectedJob.status === "pending" && (
-                <>
-                  <button
-                    onClick={handleReject}
-                    className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg"
-                  >
-                    Reject
-                  </button>
-                  <button
-                    onClick={handleApproveAndPrint}
-                    disabled={!!processingId}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
-                  >
-                    {processingId === selectedJob.id ? (
-                      <RefreshCw className="animate-spin" />
-                    ) : (
-                      <Printer />
-                    )}
-                    Approve & Print
-                  </button>
-                </>
-              )}
+              <button
+                onClick={handleReject}
+                className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg"
+              >
+                Reject
+              </button>
 
-              {/* STATUS: READY -> Show Handover */}
-              {selectedJob.status === "ready" && (
+              {/* Show Action Button for ANYTHING that is not completed/rejected */}
+              {!["completed", "rejected"].includes(
+                (selectedJob.status || "").toLowerCase()
+              ) ? (
+                <button
+                  onClick={handleApproveAndPrint}
+                  disabled={!!processingId}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
+                >
+                  {processingId === selectedJob.id ? (
+                    <RefreshCw className="animate-spin" />
+                  ) : (
+                    <Printer />
+                  )}
+                  Approve & Print
+                </button>
+              ) : (
                 <button
                   onClick={handleMarkCompleted}
                   className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
                 >
                   <CheckCircle size={20} /> Handover to Customer
                 </button>
-              )}
-
-              {/* STATUS: COMPLETED -> Show Closed */}
-              {["completed", "rejected"].includes(selectedJob.status) && (
-                <span className="text-center w-full text-gray-500 text-sm font-medium">
-                  This order is in History.
-                </span>
               )}
             </div>
           </div>
