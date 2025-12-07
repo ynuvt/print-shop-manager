@@ -71,7 +71,6 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
-  // Cleanup on close
   mainWindow.on("closed", () => (mainWindow = null));
 }
 
@@ -93,24 +92,18 @@ async function cleanupOldRecords() {
       )
       .get();
 
-    if (snapshot.empty) {
-      console.log("--- No old records to delete ---");
-      return;
-    }
+    if (snapshot.empty) return;
 
     const batch = db.batch();
     snapshot.docs.forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
-    console.log(
-      `--- Successfully deleted ${snapshot.size} records older than 30 days ---`
-    );
+    console.log(`--- Deleted ${snapshot.size} old records from DB ---`);
   } catch (error) {
     console.error("--- Auto-deletion failed ---", error);
   }
 }
 
 // --- 24-Hour File Cleanup Logic ---
-// This runs on Startup AND every day at 8 PM
 function performFileCleanup() {
   console.log("--- Executing File Cleanup (Deleting files > 24h old) ---");
   try {
@@ -118,7 +111,7 @@ function performFileCleanup() {
 
     const files = fs.readdirSync(TEMP_DOWNLOAD_DIR);
     const now = Date.now();
-    const oneDay = 24 * 60 * 60 * 1000; // 24 hours
+    const oneDay = 24 * 60 * 60 * 1000;
 
     let deletedCount = 0;
 
@@ -130,9 +123,7 @@ function performFileCleanup() {
           fs.unlinkSync(filePath);
           deletedCount++;
         }
-      } catch (err) {
-        // Ignore locked files
-      }
+      } catch (err) {}
     });
 
     console.log(`--- Cleanup Complete. Deleted ${deletedCount} old files. ---`);
@@ -141,23 +132,15 @@ function performFileCleanup() {
   }
 }
 
-// Scheduler for 8 PM
 function setupDailyCleanup() {
   const now = new Date();
   let target = new Date();
-  target.setHours(20, 0, 0, 0); // 8:00 PM
+  target.setHours(20, 0, 0, 0);
 
   if (now > target) {
     target.setDate(target.getDate() + 1);
   }
-
   const msToWait = target - now;
-  console.log(
-    `--- Next file cleanup scheduled in ${(msToWait / 1000 / 60).toFixed(
-      1
-    )} minutes (at 8:00 PM) ---`
-  );
-
   setTimeout(() => {
     performFileCleanup();
     setInterval(performFileCleanup, 24 * 60 * 60 * 1000);
@@ -166,56 +149,25 @@ function setupDailyCleanup() {
 
 // --- Application Lifecycle ---
 app.on("ready", async () => {
-  console.log("\n========================================");
   console.log("--- Cloud Print Manager Starting ---");
-  console.log("========================================\n");
 
-  // 1. Ensure Temp Dir Exists
   fs.ensureDirSync(TEMP_DOWNLOAD_DIR);
-
-  // 2. Run Cleanup (Delete old files from yesterday)
   performFileCleanup();
-
-  // 3. Create Window
   createWindow();
-  console.log("--- Main window created ---");
 
-  // Wait for window to be ready
   await new Promise((resolve) => {
     mainWindow.webContents.once("did-finish-load", resolve);
   });
 
-  // Send initial status to renderer
-  mainWindow.webContents.executeJavaScript(`
-    console.log("%c--- Electron Main Process Connected ---", "color: #00ff00; font-weight: bold; font-size: 14px;");
-  `);
-
-  // 4. Init Firebase & Schedulers
   console.log("\n--- Initializing Firebase ---");
   const isAuth = initializeFirebase();
 
   if (isAuth) {
     console.log("--- Firebase authentication successful ---\n");
-
-    mainWindow.webContents.executeJavaScript(`
-      console.log("%c--- Firebase Initialized Successfully ---", "color: #00ff00; font-weight: bold; font-size: 14px;");
-    `);
-
-    console.log("--- Running database cleanup ---");
     await cleanupOldRecords();
-
-    console.log("--- Setting up realtime listener ---");
     setupRealtimeListener();
-
-    console.log("--- Scheduling daily cleanup ---");
     setupDailyCleanup();
-
-    console.log("\n========================================");
-    console.log("--- All systems operational ---");
-    console.log("========================================\n");
   } else {
-    console.error("\n--- Firebase initialization FAILED ---\n");
-
     setTimeout(() => {
       mainWindow.webContents.send(
         "auth-error",
@@ -229,33 +181,40 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// --- Real-time Listener (Admin SDK) ---
+// --- Real-time Listener ---
 function setupRealtimeListener() {
   if (!db) return;
+
+  if (mainWindow) {
+    mainWindow.webContents.executeJavaScript(
+      `console.log("%c--- 📡 Listening for jobs created in the last 2 MINUTES... ---", "color: #00aaff;");`
+    );
+  }
 
   jobListener = db
     .collection("jobs")
     .orderBy("createdAt", "desc")
-    .limit(200)
+    .limit(50)
     .onSnapshot(
       (snapshot) => {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const thirtyDaysAgoMs = thirtyDaysAgo.getTime();
+        const now = Date.now();
+        const twoMinutesAgo = now - 2 * 60 * 1000;
 
         const jobs = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
           const createdAtMs = data.createdAt?._seconds
             ? data.createdAt._seconds * 1000
-            : Date.now();
+            : 0;
 
-          if (createdAtMs > thirtyDaysAgoMs) {
+          if (createdAtMs > twoMinutesAgo) {
             jobs.push({ id: doc.id, ...data });
           }
         });
 
-        console.log(`--- Fetched ${jobs.length} jobs from Firebase ---`);
+        console.log(
+          `--- Filtered: ${jobs.length} new jobs found (Last 2 mins) ---`
+        );
 
         if (mainWindow) {
           mainWindow.webContents.send("jobs-update", jobs);
@@ -283,48 +242,89 @@ ipcMain.handle("get-printers", async () => {
   }
 });
 
-// --- PROCESS JOB (UPDATED LOGIC) ---
+// --- PROCESS JOB ---
 ipcMain.handle("process-job", async (event, { job, printerName }) => {
-  const { id, fileUrl, fileName, printOptions } = job;
-  // Unique filename prevents overwrites
-  const safeFileName = fileName.replace(/[^a-z0-9.]/gi, "_");
+  console.log("--- Processing Request Received ---");
+  console.log("Full Job Object:", JSON.stringify(job, null, 2));
+
+  const { id } = job;
+
+  // 1. DATA EXTRACTION LOGIC
+  // Your database has a 'files' array. We grab the first file.
+  let targetFile = {};
+  if (job.files && Array.isArray(job.files) && job.files.length > 0) {
+    targetFile = job.files[0];
+  } else {
+    // Fallback if structure is different
+    targetFile = job;
+  }
+
+  // Extract Name & URL
+  const rawFileName = targetFile.name || targetFile.fileName || "document.pdf";
+  const validFileName = String(rawFileName);
+  const validFileUrl =
+    targetFile.url || targetFile.fileUrl || targetFile.downloadUrl;
+
+  // Extract Print Options (your DB uses 'options', old code used 'printOptions')
+  const printOptions = job.options || job.printOptions || {};
+
+  const safeFileName = validFileName.replace(/[^a-z0-9.]/gi, "_");
   const localPath = path.join(TEMP_DOWNLOAD_DIR, `${id}_${safeFileName}`);
+
+  console.log(`Determined Filename: ${validFileName}`);
+  console.log(`Determined File URL: ${validFileUrl ? "Found" : "MISSING"}`);
+  console.log(`Print Options:`, printOptions);
 
   try {
     await updateJobStatus(id, "downloading");
-    await downloadFile(fileUrl, localPath);
+
+    if (!validFileUrl) {
+      throw new Error(
+        `File URL is missing. Job structure: ${JSON.stringify(job)}`
+      );
+    }
+
+    await downloadFile(validFileUrl, localPath);
 
     await updateJobStatus(id, "printing");
 
-    console.log(`--- Processing Job ${id} on ${printerName} ---`);
+    console.log(`--- Printing on ${printerName} ---`);
 
-    // CHECK: If "Microsoft Print to PDF" is selected, SKIP actual printing
+    // 2. PRINTER OPTIONS MAPPING
+    // Handle 'one'/'two' from your database to standard printer flags
+    let sideSetting = "simplex";
+    if (printOptions.duplex === "two" || printOptions.duplex === "two-sided") {
+      sideSetting = "duplex";
+    }
+
+    // Handle Page Range
+    let pagesSetting = undefined;
+    if (printOptions.pageRange && printOptions.pageRange !== "all") {
+      if (printOptions.pageRange === "custom" && printOptions.customRange) {
+        pagesSetting = printOptions.customRange;
+      } else {
+        pagesSetting = printOptions.pageRange;
+      }
+    }
+
     if (printerName.includes("Microsoft Print to PDF")) {
       console.log("--- PDF Printer detected. Skipping driver dialog. ---");
-      console.log("--- File saved to temp successfully. ---");
-      // Short delay to simulate print time
       await new Promise((r) => setTimeout(r, 1500));
     } else {
-      // Real Print for other printers
       const options = {
         printer: printerName,
-        copies: printOptions.copies || 1,
-        pages:
-          printOptions.pageRange === "all" ? undefined : printOptions.pageRange,
-        sides: printOptions.duplex === "two-sided" ? "duplex" : "simplex",
+        copies: parseInt(printOptions.copies) || 1,
+        pages: pagesSetting,
+        sides: sideSetting,
         monochrome: printOptions.colorMode === "bw",
         paperSize: printOptions.paperSize || "A4",
       };
       await ptp.print(localPath, options);
     }
 
-    // IMPORTANT: Status goes to 'ready'
     await updateJobStatus(id, "ready", {
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-
-    // NOTE: File deletion is DISABLED so it stays in Temp
-    // It will be cleaned up after 24 hours by performFileCleanup()
 
     return { success: true };
   } catch (error) {

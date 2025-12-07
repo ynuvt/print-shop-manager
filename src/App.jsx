@@ -8,12 +8,10 @@ import {
   FileText,
   RefreshCw,
   History,
-  Clock,
   Bug,
 } from "lucide-react";
 
 const StatusBadge = ({ status }) => {
-  // Normalize status to lowercase for styling
   const s = (status || "unknown").toLowerCase();
 
   const styles = {
@@ -91,10 +89,8 @@ function App() {
   const [processingId, setProcessingId] = useState(null);
 
   useEffect(() => {
-    // Listen for jobs
     if (window.electron) {
       window.electron.onJobsUpdate((data) => {
-        console.log("React received jobs:", data); // DEBUG LOG
         setJobs(data);
       });
       window.electron.onAuthError((msg) => setError(msg));
@@ -112,27 +108,23 @@ function App() {
     }
   }, []);
 
-  // --- Filtering Logic ---
   useEffect(() => {
     let result = jobs;
 
-    // 1. Tab Logic (Relaxed Filter)
     if (currentTab === "queue") {
-      // Show EVERYTHING that is NOT history (Completed/Rejected)
-      // This ensures if status is "new" or "submitted" or "Paid", it still shows up here.
+      // Show Pending, Processing, Ready, Error
       result = result.filter((j) => {
         const s = (j.status || "").toLowerCase();
         return !["completed", "rejected"].includes(s);
       });
     } else {
-      // History: Completed, Rejected
+      // Show History
       result = result.filter((j) => {
         const s = (j.status || "").toLowerCase();
         return ["completed", "rejected"].includes(s);
       });
     }
 
-    // 2. Search Logic
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(
@@ -148,13 +140,23 @@ function App() {
   const handleApproveAndPrint = async () => {
     if (!selectedJob || !selectedPrinter) return;
     setProcessingId(selectedJob.id);
-    const result = await window.electron.processJob({
-      job: selectedJob,
-      printerName: selectedPrinter,
-    });
-    if (!result.success) alert(`Print Failed: ${result.error}`);
-    setProcessingId(null);
-    setSelectedJob(null);
+
+    // Add try-catch safety net to UI
+    try {
+      const result = await window.electron.processJob({
+        job: selectedJob,
+        printerName: selectedPrinter,
+      });
+
+      if (!result.success) {
+        alert(`Print Failed: ${result.error}`);
+      }
+    } catch (e) {
+      alert(`System Error: ${e.message}`);
+    } finally {
+      setProcessingId(null);
+      setSelectedJob(null);
+    }
   };
 
   const handleMarkCompleted = async () => {
@@ -174,13 +176,57 @@ function App() {
   const stats = useMemo(() => {
     return {
       total: jobs.length,
-      // Count anything not completed/rejected as pending for stats
       pending: jobs.filter(
         (j) =>
           !["completed", "rejected"].includes((j.status || "").toLowerCase())
       ).length,
     };
   }, [jobs]);
+
+  // --- HELPER FOR BUTTON LOGIC ---
+  const renderModalActions = () => {
+    const status = (selectedJob.status || "").toLowerCase();
+
+    // 1. READY -> Show HANDOVER (This is the Priority Success State)
+    if (status === "ready") {
+      return (
+        <button
+          onClick={handleMarkCompleted}
+          className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md flex items-center justify-center gap-2 animate-pulse"
+        >
+          <CheckCircle size={20} /> Handover to Customer
+        </button>
+      );
+    }
+
+    // 2. HISTORY -> Show Closed
+    if (["completed", "rejected"].includes(status)) {
+      return (
+        <span className="text-center w-full text-gray-500 text-sm font-medium">
+          This order is in History ({status}).
+        </span>
+      );
+    }
+
+    // 3. PENDING, ERROR, OR STUCK PROCESSING -> Show APPROVE/RETRY
+    // We group 'downloading' and 'printing' here so you can 'Force Print' if it gets stuck.
+    return (
+      <button
+        onClick={handleApproveAndPrint}
+        disabled={!!processingId}
+        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
+      >
+        {processingId === selectedJob.id ? (
+          <RefreshCw className="animate-spin" />
+        ) : (
+          <Printer />
+        )}
+        {["downloading", "printing"].includes(status)
+          ? "Retry Print"
+          : "Approve & Print"}
+      </button>
+    );
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 text-slate-800 font-sans">
@@ -285,33 +331,6 @@ function App() {
             <div className="flex flex-col items-center justify-center h-full pb-32 text-gray-400">
               <Bug size={48} className="mb-4 opacity-50 text-red-300" />
               <p>No jobs visible in {currentTab} list.</p>
-
-              {/* Debug Info */}
-              <div className="mt-6 p-4 bg-gray-100 rounded-lg text-xs text-left w-full max-w-sm border border-gray-200">
-                <p className="font-bold mb-2 text-gray-600">
-                  Debug Information:
-                </p>
-                <p>Total received from DB: {jobs.length}</p>
-                <div className="mt-2">
-                  <p className="font-semibold text-gray-500">
-                    Statuses found in your Database:
-                  </p>
-                  <ul className="list-disc pl-4 mt-1 text-gray-700 font-mono">
-                    {[...new Set(jobs.map((j) => j.status || "undefined"))].map(
-                      (s) => (
-                        <li key={s}>{s}</li>
-                      )
-                    )}
-                  </ul>
-                  {jobs.length > 0 && (
-                    <p className="mt-2 text-red-500 italic">
-                      If you see statuses above, they are being filtered
-                      correctly now. If the list is still empty, verify the
-                      30-day date filter in main.js.
-                    </p>
-                  )}
-                </div>
-              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
@@ -361,7 +380,7 @@ function App() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="space-y-1">
                   <p className="text-gray-500">Status</p>
-                  <p className="font-bold text-gray-900">
+                  <p className="font-bold text-gray-900 capitalize">
                     {selectedJob.status}
                   </p>
                 </div>
@@ -382,30 +401,8 @@ function App() {
                 Reject
               </button>
 
-              {/* Show Action Button for ANYTHING that is not completed/rejected */}
-              {!["completed", "rejected"].includes(
-                (selectedJob.status || "").toLowerCase()
-              ) ? (
-                <button
-                  onClick={handleApproveAndPrint}
-                  disabled={!!processingId}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
-                >
-                  {processingId === selectedJob.id ? (
-                    <RefreshCw className="animate-spin" />
-                  ) : (
-                    <Printer />
-                  )}
-                  Approve & Print
-                </button>
-              ) : (
-                <button
-                  onClick={handleMarkCompleted}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
-                >
-                  <CheckCircle size={20} /> Handover to Customer
-                </button>
-              )}
+              {/* Dynamic Action Buttons */}
+              {renderModalActions()}
             </div>
           </div>
         </div>
