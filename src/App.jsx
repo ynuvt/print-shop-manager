@@ -36,6 +36,13 @@ const StatusBadge = ({ status }) => {
 };
 
 const JobCard = ({ job, onClick }) => {
+  // Safe Accessors for new JSON structure
+  const fileName = job.files?.[0]?.name || job.fileName || "Unknown File";
+  const copies = job.options?.copies || job.printOptions?.copies || 1;
+  const colorMode =
+    job.options?.colorMode || job.printOptions?.colorMode || "bw";
+  const displayCost = job.totalCost || job.cost || 0;
+
   return (
     <div
       onClick={onClick}
@@ -60,18 +67,17 @@ const JobCard = ({ job, onClick }) => {
       <div className="flex items-center gap-2 mb-3">
         <FileText size={16} className="text-blue-500" />
         <span className="font-medium text-gray-700 truncate max-w-[200px]">
-          {job.fileName}
+          {fileName}
         </span>
       </div>
 
       <div className="flex justify-between items-end border-t pt-3 mt-2">
         <div className="text-sm text-gray-600">
           <p>
-            {job.printOptions?.copies || 1} Copies •{" "}
-            {job.printOptions?.colorMode?.toUpperCase() || "BW"}
+            {copies} Copies • {colorMode.toUpperCase()}
           </p>
         </div>
-        <div className="text-lg font-bold text-green-600">₹{job.cost}</div>
+        <div className="text-lg font-bold text-green-600">₹{displayCost}</div>
       </div>
     </div>
   );
@@ -372,7 +378,10 @@ function App() {
                 <FileText className="text-blue-600 mt-1" size={24} />
                 <div className="flex-1">
                   <p className="font-semibold text-blue-900 break-all">
-                    {selectedJob.fileName}
+                    {/* Updated File Name Logic */}
+                    {selectedJob.files?.[0]?.name ||
+                      selectedJob.fileName ||
+                      "Unknown File"}
                   </p>
                 </div>
               </div>
@@ -387,7 +396,8 @@ function App() {
                 <div className="space-y-1">
                   <p className="text-gray-500">Total Cost</p>
                   <p className="font-bold text-green-600 text-lg">
-                    ₹{selectedJob.cost}
+                    {/* Updated Cost Logic */}₹
+                    {selectedJob.totalCost || selectedJob.cost || 0}
                   </p>
                 </div>
               </div>
