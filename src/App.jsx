@@ -140,8 +140,10 @@ function App() {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(
         (j) =>
-          j.jobCode?.toString().includes(lowerTerm) ||
-          j.customerPhone?.includes(lowerTerm)
+          j.verificationCode?.toString().toLowerCase().includes(lowerTerm) ||
+          j.jobCode?.toString().toLowerCase().includes(lowerTerm) ||
+          j.customerPhone?.includes(lowerTerm) ||
+          j.customerName?.toLowerCase().includes(lowerTerm)
       );
     }
 
@@ -313,7 +315,7 @@ function App() {
             />
             <input
               type="text"
-              placeholder="Search by Job Code (4721)..."
+              placeholder="Search by ID"
               className="w-full pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}

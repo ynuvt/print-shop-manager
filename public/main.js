@@ -191,7 +191,7 @@ function setupRealtimeListener() {
 
   if (mainWindow) {
     mainWindow.webContents.executeJavaScript(
-      `console.log("%c--- 📡 Listening for jobs created in the last 2 MINUTES... ---", "color: #00aaff;");`
+      `console.log("%c--- 📡 Listening for jobs created in the last 12 HOURS... ---", "color: #00aaff;");`
     );
   }
 
@@ -202,7 +202,7 @@ function setupRealtimeListener() {
     .onSnapshot(
       (snapshot) => {
         const now = Date.now();
-        const twoMinutesAgo = now - 2 * 60 * 1000;
+        const twelveHoursAgo = now - 12 * 60 * 60 * 1000;
 
         const jobs = [];
         snapshot.forEach((doc) => {
@@ -211,13 +211,13 @@ function setupRealtimeListener() {
             ? data.createdAt._seconds * 1000
             : 0;
 
-          if (createdAtMs > twoMinutesAgo) {
+          if (createdAtMs > twelveHoursAgo) {
             jobs.push({ id: doc.id, ...data });
           }
         });
 
         console.log(
-          `--- Filtered: ${jobs.length} new jobs found (Last 2 mins) ---`
+          `--- Filtered: ${jobs.length} jobs found (Last 12 hours) ---`
         );
 
         if (mainWindow) {
