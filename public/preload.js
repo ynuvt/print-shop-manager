@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("electron", {
   processJob: (data) => ipcRenderer.invoke("process-job", data), // data = { job, printerName }
   markCompleted: (jobId) => ipcRenderer.invoke("mark-completed", jobId),
   rejectJob: (data) => ipcRenderer.invoke("reject-job", data),
+  openFile: (data) => ipcRenderer.invoke("open-file", data), // data = { jobId, fileName }
 
   // Utils
   openExternal: (url) => ipcRenderer.send("open-external", url), // If needed for preview

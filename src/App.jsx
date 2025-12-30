@@ -37,11 +37,13 @@ const StatusBadge = ({ status }) => {
 
 const JobCard = ({ job, onClick }) => {
   // Safe Accessors for new JSON structure
-  const fileName = job.files?.[0]?.name || job.fileName || "Unknown File";
+  const fileCount = job.files?.length || 0;
   const copies = job.options?.copies || job.printOptions?.copies || 1;
   const colorMode =
     job.options?.colorMode || job.printOptions?.colorMode || "bw";
   const displayCost = job.totalCost || job.cost || 0;
+  const customerName = job.customerName || "Unknown Customer";
+  const verificationCode = job.verificationCode || job.jobCode;
 
   return (
     <div
@@ -54,8 +56,11 @@ const JobCard = ({ job, onClick }) => {
     >
       <div className="flex justify-between items-start mb-2">
         <div>
-          <h3 className="text-xl font-bold text-gray-800">#{job.jobCode}</h3>
-          <p className="text-sm text-gray-500">
+          <h3 className="text-xl font-bold text-gray-800">
+            #{verificationCode}
+          </h3>
+          <p className="text-sm text-gray-600 font-medium">{customerName}</p>
+          <p className="text-xs text-gray-400">
             {job.createdAt?._seconds
               ? new Date(job.createdAt._seconds * 1000).toLocaleTimeString()
               : "Just now"}
@@ -66,8 +71,8 @@ const JobCard = ({ job, onClick }) => {
 
       <div className="flex items-center gap-2 mb-3">
         <FileText size={16} className="text-blue-500" />
-        <span className="font-medium text-gray-700 truncate max-w-[200px]">
-          {fileName}
+        <span className="font-medium text-gray-700">
+          {fileCount} File{fileCount !== 1 ? "s" : ""}
         </span>
       </div>
 
@@ -359,10 +364,10 @@ function App() {
             <div className="bg-gray-50 border-b px-6 py-4 flex justify-between items-center">
               <div>
                 <h2 className="text-xl font-bold text-gray-800">
-                  #{selectedJob.jobCode}
+                  #{selectedJob.verificationCode || selectedJob.jobCode}
                 </h2>
                 <span className="text-sm text-gray-500">
-                  Customer: {selectedJob.customerPhone}
+                  Phone: {selectedJob.customerPhone}
                 </span>
               </div>
               <button
@@ -374,19 +379,66 @@ function App() {
             </div>
 
             <div className="p-6 space-y-4">
-              <div className="flex items-start gap-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
-                <FileText className="text-blue-600 mt-1" size={24} />
-                <div className="flex-1">
-                  <p className="font-semibold text-blue-900 break-all">
-                    {/* Updated File Name Logic */}
-                    {selectedJob.files?.[0]?.name ||
-                      selectedJob.fileName ||
-                      "Unknown File"}
-                  </p>
-                </div>
+              <div className="space-y-1 mb-3">
+                <p className="text-sm text-gray-500">Customer Name</p>
+                <p className="font-bold text-lg text-gray-800">
+                  {selectedJob.customerName || "Unknown Customer"}
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-gray-700 mb-2">
+                  Files:
+                </p>
+                {(selectedJob.files || []).map((file, index) => (
+                  <div
+                    key={index}
+                    className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg border border-blue-100"
+                  >
+                    <FileText
+                      className="text-blue-600 mt-1 flex-shrink-0"
+                      size={20}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-blue-900 truncate">
+                        {file.name || "Unknown File"}
+                      </p>
+                      <div className="flex gap-4 mt-1 text-xs text-gray-600">
+                        <span>{file.pages || 0} pages</span>
+                        <span className="font-semibold text-green-600">
+                          ₹{file.price || file.cost || file.totalCost || 0}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          const fileUrl =
+                            file.url || file.fileUrl || file.downloadUrl;
+                          if (!fileUrl) {
+                            alert("File URL not available");
+                            return;
+                          }
+                          const result = await window.electron.openFile({
+                            fileUrl: fileUrl,
+                          });
+                          if (!result.success) {
+                            alert(`Failed to open file: ${result.error}`);
+                          }
+                        } catch (error) {
+                          alert(`Error opening file: ${error.message}`);
+                        }
+                      }}
+                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-medium flex-shrink-0"
+                    >
+                      View Doc
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm pt-3 border-t">
                 <div className="space-y-1">
                   <p className="text-gray-500">Status</p>
                   <p className="font-bold text-gray-900 capitalize">
@@ -395,9 +447,8 @@ function App() {
                 </div>
                 <div className="space-y-1">
                   <p className="text-gray-500">Total Cost</p>
-                  <p className="font-bold text-green-600 text-lg">
-                    {/* Updated Cost Logic */}₹
-                    {selectedJob.totalCost || selectedJob.cost || 0}
+                  <p className="font-bold text-green-600 text-xl">
+                    ₹{selectedJob.totalCost || selectedJob.cost || 0}
                   </p>
                 </div>
               </div>

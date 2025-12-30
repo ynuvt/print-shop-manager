@@ -105,28 +105,32 @@ async function cleanupOldRecords() {
 
 // --- 24-Hour File Cleanup Logic ---
 function performFileCleanup() {
-  console.log("--- Executing File Cleanup (Deleting files > 24h old) ---");
+  console.log("--- Executing File Cleanup (Deleting folders > 24h old) ---");
   try {
     if (!fs.existsSync(TEMP_DOWNLOAD_DIR)) return;
 
-    const files = fs.readdirSync(TEMP_DOWNLOAD_DIR);
+    const items = fs.readdirSync(TEMP_DOWNLOAD_DIR);
     const now = Date.now();
     const oneDay = 24 * 60 * 60 * 1000;
 
     let deletedCount = 0;
 
-    files.forEach((file) => {
-      const filePath = path.join(TEMP_DOWNLOAD_DIR, file);
+    items.forEach((item) => {
+      const itemPath = path.join(TEMP_DOWNLOAD_DIR, item);
       try {
-        const stats = fs.statSync(filePath);
+        const stats = fs.statSync(itemPath);
         if (now - stats.mtimeMs > oneDay) {
-          fs.unlinkSync(filePath);
+          if (stats.isDirectory()) {
+            fs.removeSync(itemPath);
+          } else {
+            fs.unlinkSync(itemPath);
+          }
           deletedCount++;
         }
       } catch (err) {}
     });
 
-    console.log(`--- Cleanup Complete. Deleted ${deletedCount} old files. ---`);
+    console.log(`--- Cleanup Complete. Deleted ${deletedCount} old items. ---`);
   } catch (error) {
     console.error("--- File cleanup failed ---", error);
   }
@@ -248,50 +252,51 @@ ipcMain.handle("process-job", async (event, { job, printerName }) => {
   console.log("Full Job Object:", JSON.stringify(job, null, 2));
 
   const { id } = job;
+  const jobFolderPath = path.join(TEMP_DOWNLOAD_DIR, id);
 
-  // 1. DATA EXTRACTION LOGIC
-  // Your database has a 'files' array. We grab the first file.
-  let targetFile = {};
-  if (job.files && Array.isArray(job.files) && job.files.length > 0) {
-    targetFile = job.files[0];
-  } else {
-    // Fallback if structure is different
-    targetFile = job;
-  }
-
-  // Extract Name & URL
-  const rawFileName = targetFile.name || targetFile.fileName || "document.pdf";
-  const validFileName = String(rawFileName);
-  const validFileUrl =
-    targetFile.url || targetFile.fileUrl || targetFile.downloadUrl;
-
-  // Extract Print Options (your DB uses 'options', old code used 'printOptions')
+  // Extract Print Options
   const printOptions = job.options || job.printOptions || {};
-
-  const safeFileName = validFileName.replace(/[^a-z0-9.]/gi, "_");
-  const localPath = path.join(TEMP_DOWNLOAD_DIR, `${id}_${safeFileName}`);
-
-  console.log(`Determined Filename: ${validFileName}`);
-  console.log(`Determined File URL: ${validFileUrl ? "Found" : "MISSING"}`);
-  console.log(`Print Options:`, printOptions);
 
   try {
     await updateJobStatus(id, "downloading");
 
-    if (!validFileUrl) {
-      throw new Error(
-        `File URL is missing. Job structure: ${JSON.stringify(job)}`
-      );
+    // Create job-specific folder
+    fs.ensureDirSync(jobFolderPath);
+
+    // Process ALL files in the job
+    const files = job.files || [];
+    if (files.length === 0) {
+      throw new Error("No files found in job");
     }
 
-    await downloadFile(validFileUrl, localPath);
+    console.log(`--- Downloading ${files.length} file(s) ---`);
+
+    // Download all files to job folder
+    const downloadedFiles = [];
+    for (const file of files) {
+      const rawFileName = file.name || file.fileName || "document.pdf";
+      const validFileName = String(rawFileName);
+      const validFileUrl = file.url || file.fileUrl || file.downloadUrl;
+
+      if (!validFileUrl) {
+        throw new Error(`File URL is missing for: ${validFileName}`);
+      }
+
+      const safeFileName = validFileName.replace(/[^a-z0-9.]/gi, "_");
+      const localPath = path.join(jobFolderPath, safeFileName);
+
+      console.log(`Downloading: ${validFileName}`);
+      await downloadFile(validFileUrl, localPath);
+      downloadedFiles.push({ path: localPath, name: validFileName });
+    }
 
     await updateJobStatus(id, "printing");
 
-    console.log(`--- Printing on ${printerName} ---`);
+    console.log(
+      `--- Printing ${downloadedFiles.length} file(s) on ${printerName} ---`
+    );
 
     // 2. PRINTER OPTIONS MAPPING
-    // Handle 'one'/'two' from your database to standard printer flags
     let sideSetting = "simplex";
     if (printOptions.duplex === "two" || printOptions.duplex === "two-sided") {
       sideSetting = "duplex";
@@ -307,19 +312,23 @@ ipcMain.handle("process-job", async (event, { job, printerName }) => {
       }
     }
 
+    // Print all downloaded files
     if (printerName.includes("Microsoft Print to PDF")) {
       console.log("--- PDF Printer detected. Skipping driver dialog. ---");
       await new Promise((r) => setTimeout(r, 1500));
     } else {
-      const options = {
-        printer: printerName,
-        copies: parseInt(printOptions.copies) || 1,
-        pages: pagesSetting,
-        sides: sideSetting,
-        monochrome: printOptions.colorMode === "bw",
-        paperSize: printOptions.paperSize || "A4",
-      };
-      await ptp.print(localPath, options);
+      for (const file of downloadedFiles) {
+        const options = {
+          printer: printerName,
+          copies: parseInt(printOptions.copies) || 1,
+          pages: pagesSetting,
+          sides: sideSetting,
+          monochrome: printOptions.colorMode === "bw",
+          paperSize: printOptions.paperSize || "A4",
+        };
+        console.log(`Printing: ${file.name}`);
+        await ptp.print(file.path, options);
+      }
     }
 
     await updateJobStatus(id, "ready", {
@@ -354,6 +363,19 @@ ipcMain.handle("reject-job", async (event, { jobId, reason }) => {
     return true;
   } catch (e) {
     return false;
+  }
+});
+
+ipcMain.handle("open-file", async (event, { fileUrl }) => {
+  try {
+    if (!fileUrl) {
+      return { success: false, error: "File URL is missing" };
+    }
+
+    await shell.openExternal(fileUrl);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 });
 
