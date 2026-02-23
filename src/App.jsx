@@ -392,52 +392,105 @@ function App() {
                 <p className="text-sm font-semibold text-gray-700 mb-2">
                   Files:
                 </p>
-                {(selectedJob.files || []).map((file, index) => (
-                  <div
-                    key={index}
-                    className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg border border-blue-100"
-                  >
-                    <FileText
-                      className="text-blue-600 mt-1 flex-shrink-0"
-                      size={20}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-blue-900 truncate">
-                        {file.name || "Unknown File"}
-                      </p>
-                      <div className="flex gap-4 mt-1 text-xs text-gray-600">
-                        <span>{file.pages || 0} pages</span>
-                        <span className="font-semibold text-green-600">
-                          ₹{file.price || file.cost || file.totalCost || 0}
-                        </span>
+                {(selectedJob.files || []).map((file, index) => {
+                  // Get print options from job level or file level
+                  const options =
+                    file.options ||
+                    selectedJob.options ||
+                    selectedJob.printOptions ||
+                    {};
+
+                  return (
+                    <div
+                      key={index}
+                      className="p-3 bg-blue-50 rounded-lg border border-blue-100"
+                    >
+                      <div className="flex items-start gap-3 mb-2">
+                        <FileText
+                          className="text-blue-600 mt-1 flex-shrink-0"
+                          size={20}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-blue-900 truncate">
+                            {file.name || "Unknown File"}
+                          </p>
+                          <div className="flex gap-4 mt-1 text-xs text-gray-600">
+                            <span className="font-semibold">
+                              {file.pages || 0} pages
+                            </span>
+                            <span className="font-bold text-green-600">
+                              ₹{file.price || file.cost || file.totalCost || 0}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              const fileUrl =
+                                file.url || file.fileUrl || file.downloadUrl;
+                              if (!fileUrl) {
+                                alert("File URL not available");
+                                return;
+                              }
+                              const result = await window.electron.openFile({
+                                fileUrl: fileUrl,
+                              });
+                              if (!result.success) {
+                                alert(`Failed to open file: ${result.error}`);
+                              }
+                            } catch (error) {
+                              alert(`Error opening file: ${error.message}`);
+                            }
+                          }}
+                          className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-medium flex-shrink-0"
+                        >
+                          View Doc
+                        </button>
+                      </div>
+
+                      {/* Print Options */}
+                      <div className="ml-8 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600 bg-white/50 p-2 rounded">
+                        <div>
+                          <span className="text-gray-500">Copies:</span>{" "}
+                          <span className="font-medium">
+                            {options.copies || 1}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Color:</span>{" "}
+                          <span className="font-medium uppercase">
+                            {options.colorMode || "BW"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Sides:</span>{" "}
+                          <span className="font-medium">
+                            {options.duplex === "two"
+                              ? "Two-sided"
+                              : "One-sided"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Paper:</span>{" "}
+                          <span className="font-medium">
+                            {options.paperSize || "A4"}
+                          </span>
+                        </div>
+                        {options.pageRange && options.pageRange !== "all" && (
+                          <div className="col-span-2">
+                            <span className="text-gray-500">Pages:</span>{" "}
+                            <span className="font-medium">
+                              {options.pageRange === "custom"
+                                ? options.customRange
+                                : options.pageRange}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        try {
-                          const fileUrl =
-                            file.url || file.fileUrl || file.downloadUrl;
-                          if (!fileUrl) {
-                            alert("File URL not available");
-                            return;
-                          }
-                          const result = await window.electron.openFile({
-                            fileUrl: fileUrl,
-                          });
-                          if (!result.success) {
-                            alert(`Failed to open file: ${result.error}`);
-                          }
-                        } catch (error) {
-                          alert(`Error opening file: ${error.message}`);
-                        }
-                      }}
-                      className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-medium flex-shrink-0"
-                    >
-                      View Doc
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="grid grid-cols-2 gap-4 text-sm pt-3 border-t">
