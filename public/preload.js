@@ -2,12 +2,18 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electron", {
   // Listeners
-  onJobsUpdate: (callback) =>
-    ipcRenderer.on("jobs-update", (event, data) => callback(data)),
-  onAuthError: (callback) =>
-    ipcRenderer.on("auth-error", (event, msg) => callback(msg)),
-  onConnectionError: (callback) =>
-    ipcRenderer.on("connection-error", (event, msg) => callback(msg)),
+  onJobsUpdate: (callback) => {
+    ipcRenderer.removeAllListeners("jobs-update");
+    ipcRenderer.on("jobs-update", (event, data) => callback(data));
+  },
+  onAuthError: (callback) => {
+    ipcRenderer.removeAllListeners("auth-error");
+    ipcRenderer.on("auth-error", (event, msg) => callback(msg));
+  },
+  onConnectionError: (callback) => {
+    ipcRenderer.removeAllListeners("connection-error");
+    ipcRenderer.on("connection-error", (event, msg) => callback(msg));
+  },
 
   // Actions
   getPrinters: () => ipcRenderer.invoke("get-printers"),

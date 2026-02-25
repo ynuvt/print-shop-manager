@@ -182,6 +182,10 @@ app.on("ready", async () => {
 });
 
 app.on("window-all-closed", () => {
+  if (jobListener) {
+    jobListener(); // Unsubscribe Firestore listener
+    jobListener = null;
+  }
   if (process.platform !== "darwin") app.quit();
 });
 
@@ -207,8 +211,8 @@ function setupRealtimeListener() {
         const jobs = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
-          const createdAtMs = data.createdAt?._seconds
-            ? data.createdAt._seconds * 1000
+          const createdAtMs = data.createdAt?.seconds
+            ? data.createdAt.seconds * 1000
             : 0;
 
           if (createdAtMs > twelveHoursAgo) {
