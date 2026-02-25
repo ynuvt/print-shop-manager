@@ -388,7 +388,7 @@ function App() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto max-h-[60vh]">
               <div className="space-y-1 mb-3">
                 <p className="text-sm text-gray-500">Customer Name</p>
                 <p className="font-bold text-lg text-gray-800">
