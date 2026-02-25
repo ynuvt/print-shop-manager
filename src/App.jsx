@@ -98,6 +98,7 @@ function App() {
   const [selectedPrinter, setSelectedPrinter] = useState("");
   const [error, setError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
+  const [showRejectConfirm, setShowRejectConfirm] = useState(false);
 
   useEffect(() => {
     if (window.electron) {
@@ -178,12 +179,19 @@ function App() {
     setSelectedJob(null);
   };
 
-  const handleReject = async () => {
-    const reason = prompt("Enter reason for rejection:");
-    if (reason) {
-      await window.electron.rejectJob({ jobId: selectedJob.id, reason });
-      setSelectedJob(null);
-    }
+  const handleReject = () => {
+    setShowRejectConfirm(true);
+  };
+
+  const handleConfirmReject = async () => {
+    setShowRejectConfirm(false);
+    await window.electron.rejectJob({ jobId: selectedJob.id, reason: "Rejected by shop" });
+    setSelectedJob(null);
+    setCurrentTab("history");
+  };
+
+  const handleCancelReject = () => {
+    setShowRejectConfirm(false);
   };
 
   const stats = useMemo(() => {
@@ -510,15 +518,48 @@ function App() {
             </div>
 
             <div className="bg-gray-50 px-6 py-4 flex justify-between items-center gap-3">
-              <button
-                onClick={handleReject}
-                className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg"
-              >
-                Reject
-              </button>
+              {!['completed', 'rejected'].includes((selectedJob.status || '').toLowerCase()) && (
+                <button
+                  onClick={handleReject}
+                  className="px-4 py-2 text-red-600 hover:bg-red-50 font-medium rounded-lg"
+                >
+                  Reject
+                </button>
+              )}
 
               {/* Dynamic Action Buttons */}
               {renderModalActions()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Confirmation Modal */}
+      {showRejectConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-red-100 p-2 rounded-full">
+                <XCircle className="text-red-600" size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">Reject Print Job?</h3>
+            </div>
+            <p className="text-gray-600 text-sm">
+              Are you sure you want to reject this job? It will be moved to History.
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={handleCancelReject}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReject}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-colors"
+              >
+                Yes, Reject
+              </button>
             </div>
           </div>
         </div>
