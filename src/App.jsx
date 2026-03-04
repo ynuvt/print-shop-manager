@@ -99,6 +99,7 @@ function App() {
   const [error, setError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
+  const [showHandoverAllConfirm, setShowHandoverAllConfirm] = useState(false);
   const [autoPrint, setAutoPrint] = useState(false);
   const [autoPrintStatus, setAutoPrintStatus] = useState("");
   const [showAutoPrintConfirm, setShowAutoPrintConfirm] = useState(false);
@@ -288,8 +289,25 @@ function App() {
         (j) =>
           !["completed", "rejected"].includes((j.status || "").toLowerCase())
       ).length,
+      ready: jobs.filter(
+        (j) => (j.status || "").toLowerCase() === "ready"
+      ).length,
     };
   }, [jobs]);
+
+  const handleHandoverAll = async () => {
+    const readyJobs = jobs.filter(
+      (j) => (j.status || "").toLowerCase() === "ready"
+    );
+    for (const job of readyJobs) {
+      try {
+        await window.electron.markCompleted(job.id);
+      } catch (e) {
+        console.error("Handover failed for job", job.id, e);
+      }
+    }
+    setShowHandoverAllConfirm(false);
+  };
 
   // --- HELPER FOR BUTTON LOGIC ---
   const renderModalActions = () => {
@@ -368,7 +386,19 @@ function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 bg-gray-100 p-1 rounded-lg">
+        <div className="flex items-center gap-3">
+          {/* Handover All Button */}
+          {stats.ready > 0 && (
+            <button
+              onClick={() => setShowHandoverAllConfirm(true)}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2"
+            >
+              <CheckCircle size={16} />
+              Handover All ({stats.ready})
+            </button>
+          )}
+
+          <div className="flex items-center gap-3 bg-gray-100 p-1 rounded-lg">
           <button
             onClick={() => setCurrentTab("queue")}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
@@ -389,6 +419,7 @@ function App() {
           >
             <History size={16} /> History
           </button>
+          </div>
         </div>
       </header>
 
@@ -724,6 +755,37 @@ function App() {
                 className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold transition-colors"
               >
                 Yes, Enable
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Handover All Confirmation Modal */}
+      {showHandoverAllConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-green-100 p-2 rounded-full">
+                <CheckCircle className="text-green-600" size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">Handover All Ready Jobs?</h3>
+            </div>
+            <p className="text-gray-600 text-sm">
+              This will mark all {stats.ready} ready job(s) as handed over to the customer and move them to History.
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowHandoverAllConfirm(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleHandoverAll}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold transition-colors"
+              >
+                Yes, Handover
               </button>
             </div>
           </div>
