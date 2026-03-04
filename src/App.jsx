@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Printer,
   Search,
@@ -99,6 +99,14 @@ function App() {
   const [error, setError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [showRejectConfirm, setShowRejectConfirm] = useState(false);
+  const [autoPrint, setAutoPrint] = useState(false);
+  const [autoPrintStatus, setAutoPrintStatus] = useState("");
+  const [showAutoPrintConfirm, setShowAutoPrintConfirm] = useState(false);
+  const autoPrintRef = useRef(false);
+  const autoQueuedRef = useRef(new Set()); // job IDs ever queued — never re-picked until toggle resets
+  const isAutoRunning = useRef(false);          // single-runner guard
+  const jobsRef = useRef([]);                   // always-fresh jobs list
+  const selectedPrinterRef = useRef("");        // always-fresh printer
 
   useEffect(() => {
     if (window.electron) {
@@ -119,6 +127,85 @@ function App() {
       setError("Electron bridge failed. Check preload.js");
     }
   }, []);
+
+  // Keep refs in sync with latest state so the async loop never reads stale values
+  useEffect(() => { jobsRef.current = jobs; }, [jobs]);
+  useEffect(() => { selectedPrinterRef.current = selectedPrinter; }, [selectedPrinter]);
+
+  // Statuses that auto-print should act on (same as manual Approve/Retry)
+  const AUTO_PRINT_STATUSES = ["pending", "processing", "error", "downloading", "printing"];
+
+  // --- Auto-Print Logic ---
+  useEffect(() => {
+    if (!autoPrint || !selectedPrinter) return;
+
+    const pendingCount = jobs.filter(
+      (j) =>
+        AUTO_PRINT_STATUSES.includes((j.status || "").toLowerCase()) &&
+        !autoQueuedRef.current.has(j.id)
+    ).length;
+
+    console.log(`[Auto-Print] Effect fired. Actionable: ${pendingCount}, isRunning: ${isAutoRunning.current}`);
+
+    if (pendingCount === 0 || isAutoRunning.current) {
+      if (pendingCount === 0 && !isAutoRunning.current) {
+        setAutoPrintStatus("Watching for new jobs...");
+      }
+      return;
+    }
+
+    setAutoPrintStatus(`Found ${pendingCount} job(s) to print. Starting...`);
+
+    const run = async () => {
+      isAutoRunning.current = true;
+      try {
+        while (autoPrintRef.current && selectedPrinterRef.current) {
+          const pending = jobsRef.current.filter(
+            (j) =>
+              AUTO_PRINT_STATUSES.includes((j.status || "").toLowerCase()) &&
+              !autoQueuedRef.current.has(j.id)
+          );
+
+          if (pending.length === 0) {
+            console.log("[Auto-Print] No more actionable jobs. Loop exiting.");
+            setAutoPrintStatus("Watching for new jobs...");
+            break;
+          }
+
+          const job = pending[0];
+          const jobLabel = job.verificationCode || job.jobCode || job.id;
+          console.log(`[Auto-Print] Processing job: ${jobLabel}`);
+          setAutoPrintStatus(`Printing job #${jobLabel}...`);
+          autoQueuedRef.current.add(job.id);
+
+          try {
+            const result = await window.electron.processJob({
+              job,
+              printerName: selectedPrinterRef.current,
+            });
+            if (result && !result.success) {
+              console.error(`[Auto-Print] Job ${jobLabel} error:`, result.error);
+              setAutoPrintStatus(`Job #${jobLabel} failed: ${result.error}`);
+              autoQueuedRef.current.delete(job.id);
+            } else {
+              console.log(`[Auto-Print] Job ${jobLabel} sent to printer OK.`);
+            }
+          } catch (e) {
+            console.error(`[Auto-Print] Job ${jobLabel} threw:`, e?.message || e);
+            setAutoPrintStatus(`Job #${jobLabel} error: ${e?.message || "unknown"}`);
+            autoQueuedRef.current.delete(job.id);
+          }
+        }
+      } catch (e) {
+        console.error("[Auto-Print] Unexpected loop error:", e?.message || e);
+        setAutoPrintStatus(`Unexpected error: ${e?.message || "unknown"}`);
+      } finally {
+        isAutoRunning.current = false;
+      }
+    };
+
+    run();
+  }, [jobs, autoPrint, selectedPrinter]);
 
   useEffect(() => {
     let result = jobs;
@@ -315,7 +402,7 @@ function App() {
         )}
 
         {/* Toolbar */}
-        <div className="flex justify-between mb-6">
+        <div className="flex justify-between items-center mb-6">
           <div className="relative w-96">
             <Search
               className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
@@ -330,19 +417,61 @@ function App() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <Printer size={16} className="text-gray-400" />
-            <select
-              className="border rounded px-3 py-2 text-sm bg-white outline-none focus:border-blue-500"
-              value={selectedPrinter}
-              onChange={(e) => setSelectedPrinter(e.target.value)}
-            >
-              {printers.map((p, i) => (
-                <option key={i} value={p.deviceId || p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-4">
+            {/* Auto-Print Toggle */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (autoPrint) {
+                    // Turning OFF — immediately deactivate
+                    autoPrintRef.current = false;
+                    autoQueuedRef.current.clear();
+                    setAutoPrintStatus("");
+                    setAutoPrint(false);
+                  } else {
+                    // Turning ON — show confirmation first
+                    setShowAutoPrintConfirm(true);
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                  autoPrint ? "bg-green-500" : "bg-gray-300"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    autoPrint ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+              <span
+                className={`text-sm font-medium flex-shrink-0 ${
+                  autoPrint ? "text-green-600" : "text-gray-500"
+                }`}
+              >
+                {autoPrint ? "ON" : "Auto-Print"}
+              </span>
+              {autoPrint && autoPrintStatus && (
+                <span className="text-xs text-gray-400 italic">
+                  ({autoPrintStatus})
+                </span>
+              )}
+            </div>
+
+            {/* Printer Dropdown */}
+            <div className="flex items-center gap-2">
+              <Printer size={16} className="text-gray-400" />
+              <select
+                className="border rounded px-3 py-2 text-sm bg-white outline-none focus:border-blue-500"
+                value={selectedPrinter}
+                onChange={(e) => setSelectedPrinter(e.target.value)}
+              >
+                {printers.map((p, i) => (
+                  <option key={i} value={p.deviceId || p.name}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -559,6 +688,42 @@ function App() {
                 className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-colors"
               >
                 Yes, Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Print Confirmation Modal */}
+      {showAutoPrintConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-green-100 p-2 rounded-full">
+                <Printer className="text-green-600" size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">Enable Auto-Print?</h3>
+            </div>
+            <p className="text-gray-600 text-sm">
+              All pending jobs will be printed automatically. New jobs will also be printed as they arrive.
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setShowAutoPrintConfirm(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              >
+                No
+              </button>
+              <button
+                onClick={() => {
+                  setShowAutoPrintConfirm(false);
+                  autoPrintRef.current = true;
+                  autoQueuedRef.current.clear();
+                  setAutoPrint(true);
+                }}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold transition-colors"
+              >
+                Yes, Enable
               </button>
             </div>
           </div>
