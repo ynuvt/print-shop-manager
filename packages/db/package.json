@@ -13,16 +13,19 @@
   },
   "scripts": {
     "prisma:generate": "prisma generate",
-    "build": "tsc -b",
+    "build": "npx prisma migrate dev && npx tsc -b",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^6.19.2"
+  },
   "devDependencies": {
     "@types/node": "^25.4.0",
     "dotenv": "^17.2.3",
-    "prisma": "^6.16.3",
+    "prisma": "^6.19.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

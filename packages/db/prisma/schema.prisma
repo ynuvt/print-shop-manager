@@ -94,12 +94,12 @@ model file {
 model PrintJob {
   id               String   @id @default(uuid())
   userId           String
-  file             file[]         
+  files             file[]         
   totalCost        Float
   totalPages       Int
   estimatedTime    Int
   status           PrintJobStatus @default(PROCESSING)
-  verificationCode String
+  verificationCode Int       @default(autoincrement())
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
 }

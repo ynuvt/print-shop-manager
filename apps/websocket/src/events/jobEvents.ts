@@ -10,3 +10,4 @@ function jobEvents(socket: Socket, io: Server) {
     io.to(userId).emit("jobUpdated", userId);
   });
 }
+``;
