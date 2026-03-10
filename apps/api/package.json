@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -18,6 +19,9 @@
   },
   "dependencies": {
     "@printowl/db": "^1.0.0",
-    "@printowl/types": "^1.0.0"
+    "@printowl/types": "^1.0.0",
+    "@types/cors": "^2.8.19",
+    "cors": "^2.8.6",
+    "socket.io-client": "^4.8.3"
   }
 }

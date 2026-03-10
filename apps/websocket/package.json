@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@printowl/db": "^1.0.0",
-    "@printowl/types": "^1.0.0"
+    "@printowl/types": "^1.0.0",
+    "socket.io": "^4.8.3"
   }
 }

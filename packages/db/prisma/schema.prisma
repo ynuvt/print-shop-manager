@@ -13,3 +13,94 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// {
+//   userId: string,          // user.uid
+//   files: [                 // array of uploaded files
+//     {
+//       name: string,        // original file name
+//       pages: number,       // total pages in file
+//       url: string,         // Firebase Storage download URL
+//       options: {
+//         paperSize: string,       // "A4"
+//         colorMode: string,       // "bw" | "color"
+//         pageRange: string,       // "all" | "custom"
+//         customRange: string,     // e.g. "1-5,8,10-12"
+//         customRangeError: string,
+//         duplex: string,          // "one" | "both"
+//         copies: number,
+//       },
+//       cost: number,        // cost for this specific file
+//     }
+//   ],
+//   totalCost: number,       // sum of all files cost
+//   totalPages: number,      // sum of all files pages
+//   estimatedTime: number,   // Math.ceil(totalPages * 0.2) in minutes
+//   status: string,          // "processing" | "completed" | "rejected" | "failed"
+//   verificationCode: string, // 4-digit code e.g. "4821"
+//   createdAt: Timestamp,    // Firebase serverTimestamp()
+//   notified: boolean,       // false on creation, true after completion notify
+// }
+
+enum PaperSize {
+  A4
+  A3
+  Letter
+  Legal
+}
+
+enum ColorMode {
+  BW
+  COLOR
+}
+enum pageRange {
+  ALL
+  CUSTOM
+}
+enum duplex {
+  ONE
+  BOTH
+}
+
+enum PrintJobStatus {
+  PROCESSING
+  COMPLETED
+  REJECTED
+  FAILED
+}
+
+model printOption {
+  id       String   @id @default(uuid())
+  paperSize PaperSize  @default(A4)
+  colorMode ColorMode  @default(BW)
+  pageRange pageRange  @default(ALL)
+  customRange String?
+  duplex     duplex  @default(ONE)
+  copies    Int
+  file      file?
+}
+
+model file {
+  id       String   @id @default(uuid())
+  name     String
+  pages    Int
+  url      String
+  optionId String   @unique
+  option   printOption @relation(fields: [optionId], references: [id], map: "file_optionId_fkey")
+  printJobId String
+  printJob PrintJob    @relation(fields: [printJobId], references: [id], map: "file_printJobId_fkey")
+}
+
+model PrintJob {
+  id               String   @id @default(uuid())
+  userId           String
+  file             file[]         
+  totalCost        Float
+  totalPages       Int
+  estimatedTime    Int
+  status           PrintJobStatus @default(PROCESSING)
+  verificationCode String
+  createdAt        DateTime @default(now())
+  notified         Boolean  @default(false)
+}
+
