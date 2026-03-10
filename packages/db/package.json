@@ -1,0 +1,29 @@
+{
+  "name": "@printowl/db",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "prisma:generate": "prisma generate",
+    "build": "tsc -b",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "dotenv": "^17.2.3",
+    "prisma": "^6.16.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -13,6 +13,9 @@
     "noUncheckedIndexedAccess": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/tsbuildinfo",
     "strict": true,
     "target": "ES2022"
   }
