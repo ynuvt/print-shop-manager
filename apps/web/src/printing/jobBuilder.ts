@@ -6,6 +6,7 @@
  */
 
 import type { Job } from "@printowl/types";
+import { calculateEstimatedTime } from "@printowl/shared-utils";
 import type { UploadedPrintFile } from "./types";
 
 function generateVerificationCode(): string {
@@ -27,7 +28,7 @@ export function buildPrintJob({
 }: BuildPrintJobParams): Job {
   const totalPages = uploadedFiles.reduce((sum, f) => sum + f.pages, 0);
   const totalCost = uploadedFiles.reduce((sum, f) => sum + f.cost, 0);
-  const estimatedTime = Math.ceil(totalPages * 0.2); // 0.2 min per page
+  const estimatedTime = calculateEstimatedTime(totalPages);
 
   return {
     userId,

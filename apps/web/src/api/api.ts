@@ -3,6 +3,23 @@ import axios from "axios";
 // src/api/api.ts
 const BASE_URL = "http://localhost:4000/api/v1";
 
+export type PrintFileOption = {
+  paperSize: string;
+  colorMode: string;
+  pageRange: string;
+  customRange: string | null;
+  duplex: string;
+  copies: number;
+};
+
+export type UserPrintJobFile = {
+  id: string;
+  name: string;
+  pages: number;
+  url: string;
+  option: PrintFileOption | null;
+};
+
 export type UserPrintJob = {
   id: string;
   totalCost: number;
@@ -11,12 +28,7 @@ export type UserPrintJob = {
   status: string;
   verificationCode: string;
   createdAt: string;
-  files: Array<{
-    id: string;
-    name: string;
-    pages: number;
-    url: string;
-  }>;
+  files: UserPrintJobFile[];
 };
 
 // Helper to get token from localStorage

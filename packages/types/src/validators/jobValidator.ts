@@ -1,24 +1,8 @@
 import z from "zod";
+import { fileSchema } from "./fileValidator.js";
 
 const JobSchema = z.object({
-  userId: z.string(),
-  files: z.array(
-    z.object({
-      name: z.string(),
-      pages: z.number(),
-      url: z.string().url(),
-      options: z.object({
-        paperSize: z.string(),
-        colorMode: z.enum(["bw", "color"]),
-        pageRange: z.enum(["all", "custom"]),
-        customRange: z.string().optional(),
-        customRangeError: z.string().optional(),
-        duplex: z.enum(["one", "both"]),
-        copies: z.number(),
-      }),
-      cost: z.number(),
-    }),
-  ),
+  files: z.array(fileSchema),
   totalCost: z.number(),
   totalPages: z.number(),
   estimatedTime: z.number(),

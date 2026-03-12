@@ -3,17 +3,9 @@
  * Used by pdfPageCount, costCalculator, jobBuilder, and the UI layer.
  */
 
-export type PrintOptions = {
-  paperSize: "A4"; // only A4 available currently
-  colorMode: "bw" | "color";
-  pageRange: "all" | "custom";
-  customRange: string;
-  duplex: "one" | "both";
-  copies: number;
-};
-
+import type { PrintFileOption } from "@printowl/types";
 /** Constructs a fresh set of default print options. */
-export const defaultPrintOptions = (): PrintOptions => ({
+export const defaultPrintOptions = (): PrintFileOption => ({
   paperSize: "A4",
   colorMode: "bw",
   pageRange: "all",
@@ -27,7 +19,7 @@ export type PrintFileState = {
   file: File;
   name: string;
   detectedPages: number;
-  options: PrintOptions;
+  options: PrintFileOption ;
   /** Empty string = no error. Non-empty = validation message for the custom page range. */
   pageRangeError: string;
 };
@@ -38,6 +30,6 @@ export type UploadedPrintFile = {
   pages: number;
   url: string;
   key: string;
-  options: PrintOptions;
+  options: PrintFileOption;
   cost: number;
 };

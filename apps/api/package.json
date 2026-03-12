@@ -20,13 +20,16 @@
   },
   "dependencies": {
     "@printowl/db": "^1.0.0",
+    "@printowl/shared-utils": "^1.0.0",
     "@printowl/types": "^1.0.0",
     "@types/cors": "^2.8.19",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pdf-parse": "^1.1.5",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.3",
+    "pdf-parse": "^1.1.4",
     "socket.io-client": "^4.8.3"
   }
 }

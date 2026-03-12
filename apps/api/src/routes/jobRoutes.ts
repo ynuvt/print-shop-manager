@@ -1,9 +1,14 @@
 import { prisma } from "@printowl/db";
-import { JobSchema, JobUpdateSchema } from "@printowl/types";
+import { Job, JobSchema, JobUpdateSchema } from "@printowl/types";
 import express from "express";
 import socket from "../config/socket.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import type { ExtendedRequest } from "../middleware/authMiddleware.js";
+import {
+  analyzePrintJob,
+  PrintJobAnalysisError,
+} from "../utils/printJobAnalysis.js";
+import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 
 const app = express.Router();
 
@@ -32,41 +37,23 @@ function mapDuplex(duplex: "one" | "both") {
   return duplex === "both" ? ("BOTH" as const) : ("ONE" as const);
 }
 
-function buildPrintJobCreateData(job: {
-  userId: string;
-  files: Array<{
-    name: string;
-    pages: number;
-    url: string;
-    options: {
-      paperSize: string;
-      colorMode: "bw" | "color";
-      pageRange: "all" | "custom";
-      customRange?: string;
-      duplex: "one" | "both";
-      copies: number;
-    };
-    cost: number;
-  }>;
-  totalCost: number;
-  totalPages: number;
-  estimatedTime: number;
-  status: "processing" | "completed" | "rejected" | "failed";
-}) {
+async function buildPrintJobCreateData(job: Job, userId: string) {
+  const analyzedJob = await analyzePrintJob(job);
+
   return {
-    userId: job.userId,
-    totalCost: job.totalCost,
-    totalPages: job.totalPages,
-    estimatedTime: job.estimatedTime,
+    userId: userId,
+    totalCost: analyzedJob.totalCost,
+    totalPages: analyzedJob.totalPages,
+    estimatedTime: analyzedJob.estimatedTime,
     status: mapStatus(job.status),
     files: {
-      create: job.files.map((file) => ({
+      create: analyzedJob.files.map((file) => ({
         name: file.name,
         pages: file.pages,
         url: file.url,
         option: {
           create: {
-            paperSize: file.options.paperSize === "A4" ? "A4" : "A4",
+            paperSize: "A4" as const,
             colorMode: mapColorMode(file.options.colorMode),
             pageRange: mapPageRange(file.options.pageRange),
             customRange: file.options.customRange,
@@ -83,15 +70,14 @@ app.post(
   "/create",
   authMiddleware(["admin", "customer"]),
   async (req: ExtendedRequest, res) => {
-    console.log("Received job creation request:", req.body);
-    const schema = JobSchema.safeParse({ ...req.body, userId: req.user!.uid });
+    const schema = JobSchema.safeParse({ ...req.body });
     if (!schema.success) {
       return res.status(400).json({ error: schema.error });
     }
     const job = schema.data;
     try {
       const createdJob = await prisma.printJob.create({
-        data: buildPrintJobCreateData(job),
+        data: await buildPrintJobCreateData(job, req.user!.uid),
       });
       res.status(201).json({
         message: "Job created successfully!",
@@ -99,6 +85,9 @@ app.post(
       });
     } catch (error) {
       console.log(error);
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       res.status(500).json({ error: "Failed to create job." });
     } finally {
       socket.emit("job-created", "shop_id");
@@ -108,7 +97,7 @@ app.post(
 
 app.get("/all", authMiddleware(["admin"]), async (req, res) => {
   try {
-    const jobs = await prisma.$connect().printJob.findMany();
+    const jobs = await prisma.printJob.findMany();
     res.status(200).json(jobs);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch jobs." });
@@ -124,7 +113,7 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
   }
   try {
     const job = await prisma.printJob.update({
-      where: { id },
+      where: { id: schema.data.id },
       data: { status: mapStatus(status) },
     });
     res.status(200).json(job);
@@ -135,25 +124,29 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
-app.get("/user-jobs", authMiddleware(["customer", "admin"]), async (req, res) => {
-  console.log("Fetching jobs for user:", req.user!.uid);
-  try {
-    const jobs = await prisma.printJob.findMany({
-      where: { userId: req.user!.uid },
-      include: {
-        files: {
-          include: {
-            option: true,
+app.get(
+  "/user-jobs",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    console.log("Fetching jobs for user:", req.user!.uid);
+    try {
+      const jobs = await prisma.printJob.findMany({
+        where: { userId: req.user!.uid },
+        include: {
+          files: {
+            include: {
+              option: true,
+            },
           },
         },
-      },
-    });
-    res.status(200).json(jobs);
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: "Failed to fetch user jobs." });
-  }
-});
+      });
+      res.status(200).json(jobs);
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({ error: "Failed to fetch user jobs." });
+    }
+  },
+);
 
 app.get(
   "/:verificationCode",
@@ -166,7 +159,7 @@ app.get(
         .json({ error: "Verification code must be a number." });
     }
     try {
-      const job = await prisma.printJob.findUnique({
+      const job = await prisma.printJob.findFirst({
         where: {
           verificationCode: Number(verificationCode),
         },
@@ -184,6 +177,39 @@ app.get(
       res.status(200).json(job);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch job." });
+    }
+  },
+);
+
+app.delete(
+  "/delete/:id",
+  authMiddleware(["admin", "customer"]),
+  async (req: ExtendedRequest, res) => {
+    const { id } = req.params;
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    if (!id || typeof id !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+    let job;
+    try {
+      job = await prisma.printJob.update({
+        where: { id: id },
+        data: {
+          status:
+            req?.user.role === "admin"
+              ? PrintJobStatus.REJECTED
+              : PrintJobStatus.CANCELED,
+          deleted: true,
+        },
+      });
+      res.status(200).json({ message: "Job canceled successfully." });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to cancel job." });
+    } finally {
+      if (req.user.role == "admin")
+        socket.emit("job-status-updated", job?.userId);
     }
   },
 );

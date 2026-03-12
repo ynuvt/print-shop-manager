@@ -52,7 +52,9 @@ export function authMiddleware(allowedRoles: string[] = []) {
       if (allowedRoles.length && !allowedRoles.includes(decoded.role)) {
         return res.status(403).json({ message: "Access denied for this role" });
       }
-
+      // if (!req?.user) {
+      //   return res.status(401).json({ message: "Unauthorized" });
+      // }
       next();
     } catch (err) {
       return res.status(401).json({ message: "Invalid token" });

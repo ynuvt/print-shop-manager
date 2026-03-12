@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { createPrintJob, getUserPrintJobs, registerUser } from "../api/api";
-import type { UserPrintJob } from "../api/api";
+import { createPrintJob, registerUser } from "../api/api";
+import PrintJobsList from "../components/PrintJobsList";
 import {
   calculateFileCost,
   buildJobTotals,
@@ -16,6 +16,7 @@ import type {
   UploadedPrintFile,
 } from "../printing/types";
 import { uploadToR2 } from "../upload/r2Uploader";
+import { getSocket } from "../services/getSocket";
 
 // ─── Option toggle helper ────────────────────────────────────────────────────
 
@@ -207,35 +208,9 @@ export default function HomePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [userJobs, setUserJobs] = useState<UserPrintJob[]>([]);
-  const [jobsLoading, setJobsLoading] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const getCreatedAtMillis = (createdAt: string) =>
-    new Date(createdAt).getTime();
-
-  const normalizeStatus = (status: string) => status.toLowerCase();
-
-  const loadUserJobs = useCallback(async () => {
-    if (!userId) return;
-
-    setJobsLoading(true);
-    try {
-      const jobs = await getUserPrintJobs();
-      const sortedJobs = [...jobs].sort(
-        (a, b) =>
-          getCreatedAtMillis(b.createdAt) - getCreatedAtMillis(a.createdAt),
-      );
-      setUserJobs(sortedJobs);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load your print jobs.",
-      );
-    } finally {
-      setJobsLoading(false);
-    }
-  }, [userId]);
 
   // Auto-register on first visit to obtain a stable userId / token.
   useEffect(() => {
@@ -252,8 +227,13 @@ export default function HomePage() {
   }, [userId]);
 
   useEffect(() => {
-    void loadUserJobs();
-  }, [loadUserJobs]);
+    if (!userId) return;
+    getSocket().emit("join-room", userId);
+
+    return () => {
+      getSocket().emit("leave-room", userId);
+    };
+  }, [userId]);
 
   // File picker handler: detect PDF pages for every selected file.
   const onFilesSelected = useCallback(
@@ -287,7 +267,6 @@ export default function HomePage() {
         prev.map((f, i) => {
           if (i !== idx) return f;
           const merged = { ...f, options: { ...f.options, ...patch } };
-          // Re-validate the custom range whenever it or the range mode changes.
           if (
             patch.customRange !== undefined ||
             patch.pageRange !== undefined
@@ -346,7 +325,7 @@ export default function HomePage() {
 
       setVerificationCode(String(result.verificationCode));
       setPrintFiles([]);
-      await loadUserJobs();
+      setRefreshTrigger((t) => t + 1);
     } catch (err) {
       setError(
         err instanceof Error
@@ -367,13 +346,6 @@ export default function HomePage() {
   );
   const canSubmit =
     !!userId && printFiles.length > 0 && !hasErrors && !isSubmitting;
-
-  const nonCompletedJobs = userJobs.filter(
-    (job) => normalizeStatus(job.status) !== "completed",
-  );
-  const completedJobs = userJobs.filter(
-    (job) => normalizeStatus(job.status) === "completed",
-  );
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -401,101 +373,6 @@ export default function HomePage() {
             {error}
           </div>
         )}
-
-        <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-base font-semibold text-zinc-900">
-              Your Print Jobs
-            </h3>
-            <button
-              type="button"
-              onClick={() => void loadUserJobs()}
-              className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
-            >
-              Refresh
-            </button>
-          </div>
-
-          {jobsLoading ? (
-            <p className="text-sm text-zinc-500">Loading jobs...</p>
-          ) : userJobs.length === 0 ? (
-            <p className="text-sm text-zinc-500">No print jobs yet.</p>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Non-completed
-                </p>
-                {nonCompletedJobs.length === 0 ? (
-                  <p className="text-sm text-zinc-400">
-                    No pending/active jobs.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {nonCompletedJobs.map((job) => (
-                      <div
-                        key={job.id}
-                        className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-semibold text-zinc-900">
-                            #{job.verificationCode}
-                          </p>
-                          <p className="text-xs font-medium text-amber-700 uppercase">
-                            {normalizeStatus(job.status)}
-                          </p>
-                        </div>
-                        <p className="text-xs text-zinc-500">
-                          {job.files.length} file(s) · {job.totalPages} pages ·
-                          ₹{job.totalCost}
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          {new Date(job.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Completed
-                </p>
-                {completedJobs.length === 0 ? (
-                  <p className="text-sm text-zinc-400">
-                    No completed jobs yet.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {completedJobs.map((job) => (
-                      <div
-                        key={job.id}
-                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"
-                      >
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-semibold text-zinc-900">
-                            #{job.verificationCode}
-                          </p>
-                          <p className="text-xs font-medium text-emerald-700 uppercase">
-                            completed
-                          </p>
-                        </div>
-                        <p className="text-xs text-zinc-500">
-                          {job.files.length} file(s) · {job.totalPages} pages ·
-                          ₹{job.totalCost}
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          {new Date(job.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </section>
 
         {/* ── Success screen ── */}
         {verificationCode ? (
@@ -625,6 +502,9 @@ export default function HomePage() {
           className="sr-only"
           onChange={onFilesSelected}
         />
+
+        {/* ── Print Jobs (below upload section) ── */}
+        <PrintJobsList userId={userId} refreshTrigger={refreshTrigger} />
       </main>
     </div>
   );
