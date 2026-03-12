@@ -60,14 +60,19 @@ function FileCard({
   onToggle,
   onUpdate,
   onRemove,
+  globalColorMode,
 }: {
   pf: PrintFileState;
   expanded: boolean;
   onToggle: () => void;
   onUpdate: (patch: Partial<PrintOptions>) => void;
   onRemove: () => void;
+  globalColorMode: "bw" | "color";
 }) {
-  const cost = calculateFileCost(pf.detectedPages, pf.options);
+  const cost = calculateFileCost(pf.detectedPages, {
+    ...pf.options,
+    colorMode: globalColorMode,
+  });
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
@@ -102,20 +107,6 @@ function FileCard({
       {/* Expanded options */}
       {expanded && (
         <div className="space-y-4 border-t border-zinc-100 px-4 py-4">
-          <div>
-            <p className="mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wide">
-              Color Mode
-            </p>
-            <ToggleGroup
-              options={[
-                { label: "B&W  ₹2/sheet", value: "bw" },
-                { label: "Color  ₹7/sheet", value: "color" },
-              ]}
-              value={pf.options.colorMode}
-              onChange={(v) => onUpdate({ colorMode: v })}
-            />
-          </div>
-
           <div>
             <p className="mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wide">
               Print Sides
@@ -209,6 +200,7 @@ export default function HomePage() {
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [globalColorMode, setGlobalColorMode] = useState<"bw" | "color">("bw");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -315,8 +307,11 @@ export default function HomePage() {
           pages: pf.detectedPages,
           url,
           key,
-          options: pf.options,
-          cost: calculateFileCost(pf.detectedPages, pf.options),
+          options: { ...pf.options, colorMode: globalColorMode },
+          cost: calculateFileCost(pf.detectedPages, {
+            ...pf.options,
+            colorMode: globalColorMode,
+          }),
         });
       }
 
@@ -338,7 +333,12 @@ export default function HomePage() {
     }
   };
 
-  const totals = buildJobTotals(printFiles);
+  const totals = buildJobTotals(
+    printFiles.map((f) => ({
+      ...f,
+      options: { ...f.options, colorMode: globalColorMode },
+    })),
+  );
   const hasErrors = printFiles.some(
     (f) =>
       f.pageRangeError ||
@@ -412,8 +412,8 @@ export default function HomePage() {
               <span className="mt-2 text-base font-semibold">Upload PDF</span>
             </button>
             <p className="mt-6 max-w-xs text-sm text-zinc-500">
-              Select one or more PDF files. Options like color, duplex, and
-              copies can be set per file.
+              Select one or more PDF files. Duplex, copies, and page range can
+              be set per file.
             </p>
           </div>
         ) : (
@@ -432,6 +432,21 @@ export default function HomePage() {
               </button>
             </div>
 
+            {/* Global Color Mode */}
+            <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-600">
+                Color Mode (applies to all files)
+              </p>
+              <ToggleGroup
+                options={[
+                  { label: "B&W  ₹2/sheet", value: "bw" },
+                  { label: "Color  ₹7/sheet", value: "color" },
+                ]}
+                value={globalColorMode}
+                onChange={setGlobalColorMode}
+              />
+            </div>
+
             {/* File cards */}
             <div className="space-y-3">
               {printFiles.map((pf, idx) => (
@@ -444,6 +459,7 @@ export default function HomePage() {
                   }
                   onUpdate={(patch) => updateOptions(idx, patch)}
                   onRemove={() => removeFile(idx)}
+                  globalColorMode={globalColorMode}
                 />
               ))}
             </div>
