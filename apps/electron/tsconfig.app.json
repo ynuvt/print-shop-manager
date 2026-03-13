@@ -1,0 +1,12 @@
+{
+  "extends": "../../packages/typescript-config/react-library.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "tsBuildInfoFile": "./dist/tsconfig.app.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/electron/**/*", "node_modules", "dist", "dist-electron"]
+}

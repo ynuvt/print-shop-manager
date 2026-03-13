@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family: "SF Pro Display", "Segoe UI", sans-serif;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    min-height: 100vh;
+  }
+}

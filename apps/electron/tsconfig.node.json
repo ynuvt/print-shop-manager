@@ -1,0 +1,12 @@
+{
+  "extends": "../../packages/typescript-config/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": "./src/electron",
+    "outDir": "./dist-electron",
+    "tsBuildInfoFile": "./dist-electron/tsconfig.node.tsbuildinfo"
+  },
+  "include": ["src/electron/**/*.ts"],
+  "exclude": ["node_modules", "dist", "dist-electron"]
+}

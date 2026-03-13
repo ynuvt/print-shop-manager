@@ -13,5 +13,19 @@ router.get("/register", (req, res) => {
     token,
   });
 });
+const supportedAdminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
+const supportedAdminPassword = process.env.ADMIN_PASSWORD || "admin123";
 
+router.post("/admin-login", (req, res) => {
+  const { email, password } = req.body;
+  if (email === supportedAdminEmail && password === supportedAdminPassword) {
+    const token = generateUserToken("admin");
+    res.status(200).json({
+      message: "Admin login successful!",
+      token,
+    });
+  } else {
+    res.status(401).json({ error: "Invalid admin credentials." });
+  }
+});
 export default router;

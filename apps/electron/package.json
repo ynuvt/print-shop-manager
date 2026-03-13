@@ -1,23 +1,35 @@
 {
   "name": "electron-app",
+  "private": true,
   "version": "1.0.0",
-  "description": "",
-  "main": "dist/main.js",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "electron -r tsx/cjs src/main.ts",
-    "build": "tsc",
-    "start": "electron ."
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@types/node": "^25.5.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.node.json",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "dev:main": "tsc -p tsconfig.node.json --watch --preserveWatchOutput",
+    "dev:electron": "wait-on tcp:5174 dist-electron/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5174 electron dist-electron/main.js",
+    "start": "npm run build && electron dist-electron/main.js",
+    "check-types": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
-    "@types/electron": "^1.4.38",
-    "electron": "^35.0.0"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^37.4.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "wait-on": "^8.0.5"
   }
 }
