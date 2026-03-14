@@ -1,159 +1,136 @@
-# Turborepo starter
+# PrintOwl (Turborepo)
 
-This Turborepo starter is maintained by the Turborepo core team.
+PrintOwl is a multi‑package, multi‑app turborepo for managing student print jobs. It includes a React web UI, an Electron desktop app, a Socket.io notification service, and an Express API backed by PostgreSQL + Prisma and Cloudflare R2 storage.
 
-## Using this example
+---
 
-Run the following command:
+## 🚀 Quick Start (Turborepo Setup)
 
-```sh
-npx create-turbo@latest
-```
+> These steps assume you are on macOS (as per your environment info), have [Node.js](https://nodejs.org/) installed (recommended 18+), and are running from the repo root (`printowl`).
 
-## What's inside?
-
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+1) **Install dependencies**
 
 ```sh
-cd my-turborepo
-turbo build
+# from the repository root
+npm install
 ```
 
-Without global `turbo`, use your package manager:
+2) **Bootstrap the monorepo**
+
+Turborepo uses task pipelines; run dev mode to start everything together.
 
 ```sh
-cd my-turborepo
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
+npm run dev
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+3) **Run a single app**
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+- **API** (backend):
+  ```sh
+  npm run dev -- --filter=api
+  ```
 
-```sh
-turbo build --filter=docs
+- **Web** (student-facing UI):
+  ```sh
+  npm run dev -- --filter=web
+  ```
+
+- **Electron** (desktop app):
+  ```sh
+  npm run dev -- --filter=electron
+  ```
+
+- **WebSocket** (notification service):
+  ```sh
+  npm run dev -- --filter=websocket
+  ```
+
+> Tip: Use `-- --filter=<name>` so Turbo only runs the package you care about.
+
+---
+
+## 🧩 Repo Structure
+
+```
+/apps
+  /api        # Express backend (jobs, auth, R2 upload, socket notifications)
+  /electron   # Electron desktop UI (print operator app)
+  /web        # Web UI (student web experience)
+  /websocket  # Socket.io server used for realtime job updates
+/packages
+  /db         # Prisma client + database schema
+  /eslint-config
+  /shared-utils
+  /types
+/types
+/public
 ```
 
-Without global `turbo`:
+---
 
-```sh
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
+## 🏗 Architecture (How it works)
 
-### Develop
+### Key components
 
-To develop all apps and packages, run the following command:
+- **Student (React web)**: uploads a PDF, picks print options, and creates a print job.
+- **Backend (Express API)**: stores jobs in PostgreSQL, uploads files to Cloudflare R2, and updates status.
+- **WebSocket server (Socket.io)**: emits job status changes in real time to the student UI and print operator.
+- **Print Operator (Electron app)**: polls/receives new job events, marks jobs as processed, and updates status.
+- **Cloudflare R2**: hosts uploaded PDF files; backend generates a public URL for students to download.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+### Data flow (high level)
 
-```sh
-cd my-turborepo
-turbo dev
-```
+1. Student submits a print job via the web UI.
+2. The backend receives the file, stores metadata in Postgres, uploads the file to Cloudflare R2, and creates a `job` record.
+3. The backend emits an update on the WebSocket channel.
+4. The print operator app receives the update and can mark the job as printed (or rejected).
+5. The backend updates job status; the student UI receives the update via WebSocket.
 
-Without global `turbo`, use your package manager:
+---
 
-```sh
-cd my-turborepo
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
-```
+## 🧭 User Flow
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+1. **Pending** – student uploads a PDF and selects print options.
+2. **Processing** – backend uploads file to R2 and persists the job.
+3. **Completed** – print operator confirms the print job is done (or rejects it).
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+> When completed, the backend may clean up temporary files and updates the job status so the student sees the final state.
 
-```sh
-turbo dev --filter=web
-```
+---
 
-Without global `turbo`:
+## ⚙️ Environment Configuration (env vars)
 
-```sh
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+Each app/package that needs configuration uses `.env` files in its folder. The most important vars are:
 
-### Remote Caching
+### API (`apps/api/.env`)
+- `PORT` – port the backend listens on (default: 4000)
+- `DATABASE_URL` – Postgres connection string (used by Prisma)
+- `R2_BUCKET_NAME` – Cloudflare R2 bucket name
+- `R2_ACCOUNT_ID` – Cloudflare account ID
+- `R2_ACCESS_KEY_ID` – Cloudflare R2 access key
+- `R2_SECRET_ACCESS_KEY` – Cloudflare R2 secret key
+- `R2_PUBLIC_BUCKET_URL` – Public URL of your R2 bucket (e.g. `https://<bucket>.<account>.r2.cloudflarestorage.com`)
+- `socket_url` – URL of the Socket.io server (used by the web UI)
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD` – credentials for the print operator auth
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+> You can copy the example `.env.example` (if present) or create your own at `apps/api/.env`.
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+---
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
+## 🧪 Local Development Notes
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+- The API uses Prisma; run migrations when the schema changes:
+  ```sh
+  npx prisma migrate dev --schema=packages/db/prisma/schema.prisma
+  ```
 
-```sh
-cd my-turborepo
-turbo login
-```
+- Web + Electron apps use Vite.
 
-Without global `turbo`, use your package manager:
+---
 
-```sh
-cd my-turborepo
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
-```
+## 📚 Further Reading
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+- [Turborepo docs](https://turborepo.dev)
+- [Prisma docs](https://www.prisma.io/docs)
+- [Cloudflare R2 docs](https://developers.cloudflare.com/r2/)
+- [Socket.io docs](https://socket.io/docs/)
