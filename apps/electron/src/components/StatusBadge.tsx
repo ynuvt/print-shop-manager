@@ -1,6 +1,10 @@
 import type { JobStatus } from "../types";
 
 const CONFIG: Record<JobStatus, { label: string; className: string }> = {
+  PENDING: {
+    label: "Pending",
+    className: "text-yellow-700 bg-yellow-50 ring-yellow-200",
+  },
   PROCESSING: {
     label: "Processing",
     className: "text-blue-700 bg-blue-50 ring-blue-200",

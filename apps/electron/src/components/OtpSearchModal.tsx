@@ -1,9 +1,9 @@
+import { Job } from "@printowl/types";
 import { useState } from "react";
-import type { PrintJob } from "../types";
 
 interface OtpSearchModalProps {
-  onFound: (job: PrintJob) => void;
-  findJobByCode: (code: string) => Promise<PrintJob>;
+  onFound: (job: Job) => void;
+  findJobByCode: (code: string) => Promise<Job>;
   onClose: () => void;
 }
 

@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { createPrintJob, registerUser } from "../api/api";
+import type { PrintFileOption as PrintOptions } from "@printowl/types";
+import { createPrintJobFromFiles, registerUser } from "../api/api";
 import PrintJobsList from "../components/PrintJobsList";
 import {
   calculateFileCost,
   buildJobTotals,
   validateCustomPageRange,
 } from "../printing/costCalculator";
-import { buildPrintJob } from "../printing/jobBuilder";
 import { getPdfPageCount } from "../printing/pdfPageCount";
 import { defaultPrintOptions } from "../printing/types";
-import type {
-  PrintFileState,
-  PrintOptions,
-  UploadedPrintFile,
-} from "../printing/types";
-import { uploadToR2 } from "../upload/r2Uploader";
+import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
 
 // ─── Option toggle helper ────────────────────────────────────────────────────
@@ -67,7 +62,7 @@ function FileCard({
   onToggle: () => void;
   onUpdate: (patch: Partial<PrintOptions>) => void;
   onRemove: () => void;
-  globalColorMode: "bw" | "color";
+  globalColorMode: "BW" | "COLOR";
 }) {
   const cost = calculateFileCost(pf.detectedPages, {
     ...pf.options,
@@ -113,8 +108,8 @@ function FileCard({
             </p>
             <ToggleGroup
               options={[
-                { label: "One Side", value: "one" },
-                { label: "Both Sides", value: "both" },
+                { label: "One Side", value: "ONE" },
+                { label: "Both Sides", value: "BOTH" },
               ]}
               value={pf.options.duplex}
               onChange={(v) => onUpdate({ duplex: v })}
@@ -127,13 +122,13 @@ function FileCard({
             </p>
             <ToggleGroup
               options={[
-                { label: "All Pages", value: "all" },
-                { label: "Custom", value: "custom" },
+                { label: "All Pages", value: "ALL" },
+                { label: "Custom", value: "CUSTOM" },
               ]}
               value={pf.options.pageRange}
               onChange={(v) => onUpdate({ pageRange: v, customRange: "" })}
             />
-            {pf.options.pageRange === "custom" && (
+            {pf.options.pageRange === "CUSTOM" && (
               <div className="mt-2">
                 <input
                   type="text"
@@ -200,7 +195,7 @@ export default function HomePage() {
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [globalColorMode, setGlobalColorMode] = useState<"bw" | "color">("bw");
+  const [globalColorMode, setGlobalColorMode] = useState<"BW" | "COLOR">("BW");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -264,7 +259,7 @@ export default function HomePage() {
             patch.pageRange !== undefined
           ) {
             const rangeError =
-              merged.options.pageRange === "custom"
+              merged.options.pageRange === "CUSTOM"
                 ? (validateCustomPageRange(
                     merged.options.customRange,
                     merged.detectedPages,
@@ -293,30 +288,19 @@ export default function HomePage() {
     setUploadProgress(printFiles.map(() => 0));
 
     try {
-      const uploadedFiles: UploadedPrintFile[] = [];
+      const files = printFiles.map((pf) => pf.file);
+      const fileOptions = printFiles.map((pf) => ({
+        ...pf.options,
+        colorMode: globalColorMode,
+      }));
 
-      for (let i = 0; i < printFiles.length; i++) {
-        const pf = printFiles[i]!;
-
-        const { key, url } = await uploadToR2(pf.file, (pct) => {
-          setUploadProgress((prev) => prev.map((v, j) => (j === i ? pct : v)));
-        });
-
-        uploadedFiles.push({
-          name: pf.name,
-          pages: pf.detectedPages,
-          url,
-          key,
-          options: { ...pf.options, colorMode: globalColorMode },
-          cost: calculateFileCost(pf.detectedPages, {
-            ...pf.options,
-            colorMode: globalColorMode,
-          }),
-        });
-      }
-
-      const job = buildPrintJob({ userId, uploadedFiles });
-      const result = await createPrintJob(job);
+      const result = await createPrintJobFromFiles(
+        files,
+        fileOptions,
+        (pct) => {
+          setUploadProgress((prev) => prev.map(() => pct));
+        },
+      );
 
       setVerificationCode(String(result.verificationCode));
       setPrintFiles([]);
@@ -342,7 +326,7 @@ export default function HomePage() {
   const hasErrors = printFiles.some(
     (f) =>
       f.pageRangeError ||
-      (f.options.pageRange === "custom" && !f.options.customRange.trim()),
+      (f.options.pageRange === "CUSTOM" && !f.options.customRange.trim()),
   );
   const canSubmit =
     !!userId && printFiles.length > 0 && !hasErrors && !isSubmitting;
@@ -439,8 +423,8 @@ export default function HomePage() {
               </p>
               <ToggleGroup
                 options={[
-                  { label: "B&W  ₹2/sheet", value: "bw" },
-                  { label: "Color  ₹7/sheet", value: "color" },
+                  { label: "B&W  ₹2/sheet", value: "BW" },
+                  { label: "Color  ₹7/sheet", value: "COLOR" },
                 ]}
                 value={globalColorMode}
                 onChange={setGlobalColorMode}

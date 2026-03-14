@@ -8,7 +8,9 @@ import {
 import Header from "./components/Header";
 import JobCard from "./components/JobCard";
 import JobModal from "./components/JobModal";
-import type { JobStatus, PrintJob, PrintJobSummary } from "./types";
+import { fetchAllJobs, fetchJobByCode } from "./api/api";
+import { Job, JobStatus } from "@printowl/types";
+import { getSocket } from "./services/getSocket";
 
 type Tab = "queue" | "history";
 const API_BASE = "http://localhost:4000/api/v1";
@@ -47,25 +49,16 @@ async function adminLogin(email: string, password: string): Promise<string> {
   return data.token;
 }
 
-async function fetchAllJobs(): Promise<PrintJobSummary[]> {
-  const res = await fetch(`${API_BASE}/jobs/all`, { headers: buildHeaders() });
-  if (!res.ok) throw new Error(`Failed to load jobs (HTTP ${res.status}).`);
-  return res.json() as Promise<PrintJobSummary[]>;
-}
-
-async function fetchJobByCode(code: string): Promise<PrintJob> {
-  const res = await fetch(`${API_BASE}/jobs/${code}`, {
-    headers: buildHeaders(),
-  });
-  if (res.status === 404) throw new Error(`No job found for code ${code}.`);
-  if (!res.ok) throw new Error(`Failed to load job (HTTP ${res.status}).`);
-  return res.json() as Promise<PrintJob>;
-}
+// async function fetchAllJobs(): Promise<PrintJobSummary[]> {
+//   const res = await fetch(`${API_BASE}/jobs/all`, { headers: buildHeaders() });
+//   if (!res.ok) throw new Error(`Failed to load jobs (HTTP ${res.status}).`);
+//   return res.json() as Promise<PrintJobSummary[]>;
+// }
 
 async function updateJobStatus(
   id: string,
   userId: string,
-  status: "processing" | "completed" | "rejected" | "failed",
+  status: JobStatus,
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/update-status/${id}`, {
     method: "PUT",
@@ -157,8 +150,8 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
 }
 
 export default function App() {
-  const [jobs, setJobs] = useState<PrintJobSummary[]>([]);
-  const [selectedJob, setSelectedJob] = useState<PrintJob | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [tab, setTab] = useState<Tab>("queue");
   const [search, setSearch] = useState("");
@@ -189,10 +182,26 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) return;
+    getSocket().emit("join-room", "admin");
+
+    return () => {
+      getSocket().emit("leave-room", "admin");
+    };
+  }, []);
+
+  useEffect(() => {
+    getSocket().on("job-created", () => {
+      console.log("Received job-created event, refreshing jobs...");
+      refreshJobs();
+    });
+  }, []);
+
+  useEffect(() => {
     void refreshJobs();
   }, [refreshJobs]);
 
-  const handleSelectJob = useCallback(async (job: PrintJobSummary) => {
+  const handleSelectJob = useCallback(async (job: Job) => {
     setLoadError(null);
     try {
       const full = await fetchJobByCode(String(job.verificationCode));
@@ -226,7 +235,11 @@ export default function App() {
       }
 
       const tabMatches = jobs.filter((j) =>
-        tab === "queue" ? j.status === "PROCESSING" : j.status !== "PROCESSING",
+        tab === "queue"
+          ? j.status === "PENDING" || j.status === "PROCESSING"
+          : j.status === "COMPLETED" ||
+            j.status === "REJECTED" ||
+            j.status === "FAILED",
       );
 
       const matches = tabMatches.filter((j) =>
@@ -246,18 +259,7 @@ export default function App() {
 
   const handleStatusUpdate = useCallback(
     async (jobId: string, userId: string, newStatus: JobStatus) => {
-      const statusMap: Record<
-        JobStatus,
-        "processing" | "completed" | "rejected" | "failed"
-      > = {
-        PROCESSING: "processing",
-        COMPLETED: "completed",
-        REJECTED: "rejected",
-        FAILED: "failed",
-        CANCELED: "rejected",
-      };
-
-      await updateJobStatus(jobId, userId, statusMap[newStatus]);
+      await updateJobStatus(jobId, userId, newStatus);
 
       setJobs((prev) =>
         prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j)),
@@ -272,7 +274,11 @@ export default function App() {
 
   const filtered = useMemo(() => {
     return jobs.filter((j) =>
-      tab === "queue" ? j.status === "PROCESSING" : j.status !== "PROCESSING",
+      tab === "queue"
+        ? j.status === "PENDING" || j.status === "PROCESSING"
+        : j.status === "COMPLETED" ||
+          j.status === "REJECTED" ||
+          j.status === "FAILED",
     );
   }, [jobs, tab]);
 

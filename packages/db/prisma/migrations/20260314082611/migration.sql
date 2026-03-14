@@ -10,6 +10,9 @@ CREATE TYPE "pageRange" AS ENUM ('ALL', 'CUSTOM');
 -- CreateEnum
 CREATE TYPE "duplex" AS ENUM ('ONE', 'BOTH');
 
+-- CreateEnum
+CREATE TYPE "PrintJobStatus" AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'REJECTED', 'FAILED', 'CANCELED');
+
 -- CreateTable
 CREATE TABLE "printOption" (
     "id" TEXT NOT NULL,
@@ -42,8 +45,9 @@ CREATE TABLE "PrintJob" (
     "totalCost" DOUBLE PRECISION NOT NULL,
     "totalPages" INTEGER NOT NULL,
     "estimatedTime" INTEGER NOT NULL,
-    "status" TEXT NOT NULL,
-    "verificationCode" TEXT NOT NULL,
+    "deleted" BOOLEAN NOT NULL DEFAULT false,
+    "status" "PrintJobStatus" NOT NULL DEFAULT 'PENDING',
+    "verificationCode" SERIAL NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "notified" BOOLEAN NOT NULL DEFAULT false,
 

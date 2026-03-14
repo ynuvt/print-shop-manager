@@ -1,0 +1,330 @@
+{
+  "info": {
+    "name": "PrintOwl API",
+    "description": "Comprehensive collection for PrintOwl backend APIs.\n\nNotes:\n- Base URL defaults to http://localhost:4000\n- Customer token is generated via /api/v1/auth/register\n- Admin token is generated via /api/v1/auth/admin-login\n- File routes are included, but they are not mounted in src/routes/index.ts currently (expected 404 unless mounted).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "customerToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "adminEmail", "value": "admin@example.com" },
+    { "key": "adminPassword", "value": "admin123" },
+    { "key": "verificationCode", "value": "" },
+    { "key": "jobId", "value": "" },
+    { "key": "fileId", "value": "" },
+    { "key": "sampleFilePath", "value": "/absolute/path/to/sample.pdf" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /healthz",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/healthz",
+              "host": ["{{baseUrl}}"],
+              "path": ["healthz"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "GET /api/v1/auth/register (customer token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.token) {",
+                  "  pm.collectionVariables.set('customerToken', data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/admin-login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.token) {",
+                  "  pm.collectionVariables.set('adminToken', data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/admin-login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "admin-login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "POST /api/v1/jobs/create-with-files",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.verificationCode) {",
+                  "  pm.collectionVariables.set('verificationCode', String(data.verificationCode));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": "{{sampleFilePath}}"
+                },
+                {
+                  "key": "fileOptions",
+                  "type": "text",
+                  "value": "[{\"paperSize\":\"A4\",\"colorMode\":\"bw\",\"pageRange\":\"all\",\"customRange\":\"\",\"duplex\":\"one\",\"copies\":1}]"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/create-with-files",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "create-with-files"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/jobs/create (legacy JSON)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.verificationCode) {",
+                  "  pm.collectionVariables.set('verificationCode', String(data.verificationCode));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"files\": [\n    {\n      \"name\": \"demo.pdf\",\n      \"pages\": 1,\n      \"url\": \"https://example.com/demo.pdf\",\n      \"options\": {\n        \"paperSize\": \"A4\",\n        \"colorMode\": \"bw\",\n        \"pageRange\": \"all\",\n        \"customRange\": \"\",\n        \"duplex\": \"one\",\n        \"copies\": 1\n      },\n      \"cost\": 2\n    }\n  ],\n  \"totalCost\": 2,\n  \"totalPages\": 1,\n  \"estimatedTime\": 1,\n  \"status\": \"processing\",\n  \"verificationCode\": \"1234\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/create",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "create"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/jobs/all (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/all",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "all"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/jobs/user-jobs (customer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (Array.isArray(data) && data.length > 0) {",
+                  "  pm.collectionVariables.set('jobId', data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/user-jobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "user-jobs"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/jobs/:verificationCode",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{verificationCode}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{verificationCode}}"]
+            }
+          }
+        },
+        {
+          "name": "PUT /api/v1/jobs/update-status/:id (admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"completed\",\n  \"userId\": \"replace-with-user-id\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/update-status/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "update-status", "{{jobId}}"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/jobs/delete/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/delete/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "delete", "{{jobId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Files (Declared Routes)",
+      "item": [
+        {
+          "name": "POST /api/v1/files/:jobId",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"demo.pdf\",\n  \"pages\": 1,\n  \"url\": \"https://example.com/demo.pdf\",\n  \"options\": {\n    \"paperSize\": \"A4\",\n    \"colorMode\": \"bw\",\n    \"pageRange\": \"all\",\n    \"customRange\": \"\",\n    \"duplex\": \"one\",\n    \"copies\": 1\n  },\n  \"cost\": 2\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/files/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "files", "{{jobId}}"]
+            }
+          }
+        },
+        {
+          "name": "PUT /api/v1/files/printOptions/:fileId",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paperSize\": \"A4\",\n  \"colorMode\": \"color\",\n  \"pageRange\": \"custom\",\n  \"customRange\": \"1-2\",\n  \"duplex\": \"both\",\n  \"copies\": 2\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/files/printOptions/{{fileId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "files", "printOptions", "{{fileId}}"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/files",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{fileId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/files",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "files"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

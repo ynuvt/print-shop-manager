@@ -1,9 +1,9 @@
 export type PrintOptions = {
   paperSize: "A4";
-  colorMode: "bw" | "color";
-  pageRange: "all" | "custom";
+  colorMode: "BW" | "COLOR";
+  pageRange: "ALL" | "CUSTOM";
   customRange?: string | null;
-  duplex: "one" | "both";
+  duplex: "ONE" | "BOTH";
   copies: number;
 };
 
@@ -90,7 +90,7 @@ export function getSelectedPageCount(
   totalPages: number,
   options: PrintOptions,
 ): number {
-  if (options.pageRange === "custom") {
+  if (options.pageRange === "CUSTOM") {
     return parseCustomPageRange(options.customRange ?? "");
   }
 
@@ -103,7 +103,7 @@ export function calculateSheetCount(
 ): number {
   const selectedPages = getSelectedPageCount(totalPages, options);
 
-  return options.duplex === "both"
+  return options.duplex === "BOTH"
     ? Math.ceil(selectedPages / 2)
     : selectedPages;
 }
@@ -112,7 +112,7 @@ export function calculateFileCost(
   totalPages: number,
   options: PrintOptions,
 ): number {
-  const pricePerSheet = options.colorMode === "color" ? PRICE_COLOR : PRICE_BW;
+  const pricePerSheet = options.colorMode === "COLOR" ? PRICE_COLOR : PRICE_BW;
   const sheets = calculateSheetCount(totalPages, options);
 
   return sheets * pricePerSheet * options.copies;

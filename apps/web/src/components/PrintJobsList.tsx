@@ -72,7 +72,7 @@ function JobDetailModal({
   onClose: () => void;
 }) {
   const statusColor =
-    job.status.toLowerCase() === "completed"
+    job.status === "COMPLETED"
       ? "text-emerald-700 bg-emerald-50 border-emerald-200"
       : "text-amber-700 bg-amber-50 border-amber-200";
 
@@ -166,8 +166,6 @@ export default function PrintJobsList({
   const [loading, setLoading] = useState(false);
   const [selectedJob, setSelectedJob] = useState<UserPrintJob | null>(null);
 
-  const normalizeStatus = (status: string) => status.toLowerCase();
-
   const load = useCallback(
     async ({ notification = false }: { notification?: boolean }) => {
       if (!userId) return;
@@ -202,12 +200,8 @@ export default function PrintJobsList({
   //   };
   // }, []);
 
-  const nonCompleted = jobs.filter(
-    (j) => normalizeStatus(j.status) !== "completed",
-  );
-  const completed = jobs.filter(
-    (j) => normalizeStatus(j.status) === "completed",
-  );
+  const nonCompleted = jobs.filter((j) => j.status !== "COMPLETED");
+  const completed = jobs.filter((j) => j.status === "COMPLETED");
 
   return (
     <>
@@ -254,7 +248,7 @@ export default function PrintJobsList({
                             {formatPrice(job.totalCost)}
                           </p>
                           <p className="text-xs font-medium text-amber-700 uppercase">
-                            {normalizeStatus(job.status)}
+                            {job.status}
                           </p>
                         </div>
                       </div>

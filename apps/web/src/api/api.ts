@@ -1,9 +1,9 @@
-import type { Job } from "@printowl/types";
+import type { PrintFileOption } from "@printowl/types";
 import axios from "axios";
 // src/api/api.ts
 const BASE_URL = "http://localhost:4000/api/v1";
 
-export type PrintFileOption = {
+export type UserPrintFileOption = {
   paperSize: string;
   colorMode: string;
   pageRange: string;
@@ -17,7 +17,7 @@ export type UserPrintJobFile = {
   name: string;
   pages: number;
   url: string;
-  option: PrintFileOption | null;
+  option: UserPrintFileOption | null;
 };
 
 export type UserPrintJob = {
@@ -56,14 +56,27 @@ export async function getPrintStatus(verificationCode: string) {
   return res.data;
 }
 
-// Create a new print job
-export async function createPrintJob(
-  job: Job,
+export async function createPrintJobFromFiles(
+  files: File[],
+  fileOptions: PrintFileOption[],
+  onUploadProgress?: (percent: number) => void,
 ): Promise<{ verificationCode: number }> {
   const token = getToken();
-  const res = await axios.post(`${BASE_URL}/jobs/create`, job, {
+  const formData = new FormData();
+
+  files.forEach((file) => {
+    formData.append("files", file);
+  });
+  formData.append("fileOptions", JSON.stringify(fileOptions));
+
+  const res = await axios.post(`${BASE_URL}/jobs/create-with-files`, formData, {
     headers: {
       authorization: `Bearer ${token}`,
+    },
+    onUploadProgress: (evt) => {
+      if (!onUploadProgress) return;
+      if (!evt.total || evt.total <= 0) return;
+      onUploadProgress(Math.round((evt.loaded / evt.total) * 100));
     },
   });
 

@@ -63,6 +63,7 @@ enum duplex {
 }
 
 enum PrintJobStatus {
+  PENDING
   PROCESSING
   COMPLETED
   REJECTED
@@ -100,7 +101,7 @@ model PrintJob {
   totalPages       Int
   estimatedTime    Int
   deleted          Boolean  @default(false)
-  status           PrintJobStatus @default(PROCESSING)
+  status           PrintJobStatus @default(PENDING)
   verificationCode Int       @default(autoincrement())
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)

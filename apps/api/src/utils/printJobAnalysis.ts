@@ -51,7 +51,7 @@ export async function analyzeUploadedPrintFile(
     );
   }
 
-  if (file.options.pageRange === "custom") {
+  if (file.options.pageRange === "CUSTOM") {
     const rangeError = validateCustomPageRange(
       file.options.customRange ?? "",
       pages,

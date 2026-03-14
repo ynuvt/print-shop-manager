@@ -2,11 +2,11 @@ import z from "zod";
 
 const optionsSchema = z.object({
   paperSize: z.enum(["A4"]),
-  colorMode: z.enum(["bw", "color"]),
-  pageRange: z.enum(["all", "custom"]),
+  colorMode: z.enum(["BW", "COLOR"]),
+  pageRange: z.enum(["ALL", "CUSTOM"]),
   customRange: z.string().optional(),
   customRangeError: z.string().optional(),
-  duplex: z.enum(["one", "both"]),
+  duplex: z.enum(["ONE", "BOTH"]),
   copies: z.number(),
 });
 

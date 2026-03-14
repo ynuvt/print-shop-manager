@@ -9,7 +9,7 @@ function createWindow() {
     const window = new electron_1.BrowserWindow({
         width: 960,
         height: 640,
-        backgroundColor: "#0f172a",
+        backgroundColor: "#f3f4f6",
         webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,

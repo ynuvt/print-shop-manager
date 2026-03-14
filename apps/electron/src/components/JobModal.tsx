@@ -1,9 +1,9 @@
-import { useState } from "react";
-import type { JobStatus, PrintJob } from "../types";
+import { useEffect, useState } from "react";
 import StatusBadge from "./StatusBadge";
+import { File, Job, JobStatus } from "@printowl/types";
 
 interface JobModalProps {
-  job: PrintJob;
+  job: Job;
   onClose: () => void;
   onStatusUpdate: (
     jobId: string,
@@ -23,11 +23,16 @@ export default function JobModal({
   onClose,
   onStatusUpdate,
 }: JobModalProps) {
-  const [isPrinting, setIsPrinting] = useState(job.status === "PROCESSING");
+  const [currentStatus, setCurrentStatus] = useState<JobStatus>(job.status);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isActive = job.status === "PROCESSING";
+  useEffect(() => {
+    setCurrentStatus(job.status);
+  }, [job.status]);
+
+  const isPending = currentStatus === "PENDING";
+  const isProcessing = currentStatus === "PROCESSING";
 
   const created = new Date(job.createdAt).toLocaleString([], {
     month: "short",
@@ -55,7 +60,7 @@ export default function JobModal({
     setError(null);
     try {
       await onStatusUpdate(job.id, job.userId, "PROCESSING");
-      setIsPrinting(true);
+      setCurrentStatus("PROCESSING");
     } catch {
       setError("Failed to start printing. Please try again.");
     } finally {
@@ -94,8 +99,8 @@ export default function JobModal({
             <span className="font-mono text-2xl font-bold text-gray-900">
               #{job.verificationCode}
             </span>
-            <StatusBadge status={job.status} />
-            {isPrinting && isActive && (
+            <StatusBadge status={currentStatus} />
+            {isProcessing && (
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-300">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
@@ -155,7 +160,7 @@ export default function JobModal({
                 Est. Time
               </p>
               <p className="mt-1 text-lg font-bold text-gray-900">
-                {job.estimatedTime} min
+                {isPending ? "-" : `${job.estimatedTime} min`}
               </p>
             </div>
           </div>
@@ -166,7 +171,7 @@ export default function JobModal({
               Files ({job.files.length})
             </p>
             <ul className="flex flex-col gap-3">
-              {job.files.map((file) => (
+              {job.files.map((file: File) => (
                 <li
                   key={file.id}
                   className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
@@ -240,7 +245,7 @@ export default function JobModal({
         <div className="shrink-0 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-6 py-4">
           {error && <p className="mb-3 text-xs text-red-500">{error}</p>}
 
-          {isActive && !isPrinting && (
+          {isPending && (
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -261,7 +266,7 @@ export default function JobModal({
             </div>
           )}
 
-          {isActive && isPrinting && (
+          {isProcessing && (
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -281,7 +286,7 @@ export default function JobModal({
             </div>
           )}
 
-          {!isActive && (
+          {!isPending && !isProcessing && (
             <button
               type="button"
               onClick={onClose}

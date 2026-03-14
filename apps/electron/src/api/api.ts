@@ -87,7 +87,7 @@ export async function fetchJobByCode(code: string): Promise<PrintJob> {
 export async function updateJobStatus(
   id: string,
   userId: string,
-  status: "processing" | "completed" | "rejected" | "failed",
+  status: "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED",
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/update-status/${id}`, {
     method: "PUT",

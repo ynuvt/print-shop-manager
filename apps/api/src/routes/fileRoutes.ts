@@ -48,18 +48,23 @@ app.post(
     try {
       const file = await prisma.file.create({
         data: {
-          printJobId: jobId,
+          printJob: {
+            connect: {
+              id: jobId,
+            },
+          },
           name: fileData.name,
           pages: fileData.pages,
+          url: fileData.url,
           option: {
             create: {
               copies: fileData.options.copies,
               colorMode:
-                fileData.options.colorMode == "color"
+                fileData.options.colorMode == "COLOR"
                   ? ColorMode.COLOR
                   : ColorMode.BW,
               duplex:
-                fileData.options.duplex === "one" ? duplex.ONE : duplex.BOTH,
+                fileData.options.duplex === "ONE" ? duplex.ONE : duplex.BOTH,
               paperSize: fileData.options.paperSize,
             },
           },
@@ -107,10 +112,12 @@ app.put(
         data: {
           copies: optionsData.copies,
           colorMode:
-            optionsData.colorMode === "color" ? ColorMode.COLOR : ColorMode.BW,
-          duplex: optionsData.duplex === "one" ? duplex.ONE : duplex.BOTH,
+            optionsData.colorMode === "COLOR"
+              ? ColorMode.COLOR
+              : ColorMode.BW,
+          duplex: optionsData.duplex === "ONE" ? duplex.ONE : duplex.BOTH,
           paperSize: optionsData.paperSize,
-          pageRange: optionsData.pageRange === "custom" ? "CUSTOM" : "ALL",
+          pageRange: optionsData.pageRange,
           customRange: optionsData.customRange,
         },
       });
