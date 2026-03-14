@@ -8,14 +8,14 @@ PrintOwl is a multi‑package, multi‑app turborepo for managing student print 
 
 > These steps assume you are on macOS (as per your environment info), have [Node.js](https://nodejs.org/) installed (recommended 18+), and are running from the repo root (`printowl`).
 
-1) **Install dependencies**
+1. **Install dependencies**
 
 ```sh
 # from the repository root
 npm install
 ```
 
-2) **Bootstrap the monorepo**
+2. **Bootstrap the monorepo**
 
 Turborepo uses task pipelines; run dev mode to start everything together.
 
@@ -23,19 +23,22 @@ Turborepo uses task pipelines; run dev mode to start everything together.
 npm run dev
 ```
 
-3) **Run a single app**
+3. **Run a single app**
 
 - **API** (backend):
+
   ```sh
   npm run dev -- --filter=api
   ```
 
 - **Web** (student-facing UI):
+
   ```sh
   npm run dev -- --filter=web
   ```
 
 - **Electron** (desktop app):
+
   ```sh
   npm run dev -- --filter=electron
   ```
@@ -103,6 +106,7 @@ npm run dev
 Each app/package that needs configuration uses `.env` files in its folder. The most important vars are:
 
 ### API (`apps/api/.env`)
+
 - `PORT` – port the backend listens on (default: 4000)
 - `DATABASE_URL` – Postgres connection string (used by Prisma)
 - `R2_BUCKET_NAME` – Cloudflare R2 bucket name
@@ -120,6 +124,7 @@ Each app/package that needs configuration uses `.env` files in its folder. The m
 ## 🧪 Local Development Notes
 
 - The API uses Prisma; run migrations when the schema changes:
+
   ```sh
   npx prisma migrate dev --schema=packages/db/prisma/schema.prisma
   ```
