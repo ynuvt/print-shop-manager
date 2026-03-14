@@ -89,6 +89,10 @@ npm run dev
 4. The print operator app receives the update and can mark the job as printed (or rejected).
 5. The backend updates job status; the student UI receives the update via WebSocket.
 
+### Architecture diagram
+
+![PrintOwl architecture and user flow](public/Architecture%20and%20UserFlow.png)
+
 ---
 
 ## 🧭 User Flow
