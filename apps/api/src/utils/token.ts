@@ -21,5 +21,5 @@ export function generateUserToken(role: "admin" | "customer" = "customer") {
     role: role, // To allow for future roles like "admin", "customer", etc.
   };
 
-  return jwt.sign(payload, getJwtSecret());
+  return { token: jwt.sign(payload, getJwtSecret()), userId: payload.uid };
 }

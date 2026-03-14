@@ -5,8 +5,11 @@ export function jobEvents(socket: Socket, io: Server) {
     console.log(`Job created for shop ${shopId}`);
     io.to(shopId).emit("job-created", shopId);
   });
-  socket.on("job-status-updated", (userId: string) => {
-    console.log(`Job updated for shop ${userId}`);
-    io.to(userId).emit("jobUpdated", userId);
-  });
+  socket.on(
+    "job-status-updated",
+    (userId: string, jobId: string, msg: string) => {
+      console.log(`Job updated for shop ${userId}`);
+      io.to(userId).emit("job-status-updated", userId, jobId, msg);
+    },
+  );
 }

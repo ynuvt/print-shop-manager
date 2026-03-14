@@ -15,6 +15,7 @@
     "check-types": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "pdf-to-printer": "^5.7.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

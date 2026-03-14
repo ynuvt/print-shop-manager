@@ -1,10 +1,18 @@
 type Tab = "queue" | "history";
 
+interface PrinterInfo {
+  name: string;
+  isDefault: boolean;
+}
+
 interface HeaderProps {
   tab: Tab;
   onTabChange: (t: Tab) => void;
   totalJobs: number;
   processingCount: number;
+  printers: PrinterInfo[];
+  selectedPrinter: string;
+  onPrinterChange: (printer: string) => void;
 }
 
 export default function Header({
@@ -12,6 +20,9 @@ export default function Header({
   onTabChange,
   totalJobs,
   processingCount,
+  printers,
+  selectedPrinter,
+  onPrinterChange,
 }: HeaderProps) {
   return (
     <header className="flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white px-5 py-3 shadow-sm">
@@ -71,7 +82,7 @@ export default function Header({
         </button>
       </nav>
 
-      {/* Stats + action */}
+      {/* Stats + printer selector */}
       <div className="flex items-center gap-4">
         <div className="text-right">
           <p className="text-[10px] font-medium uppercase tracking-wider text-gray-400">
@@ -91,6 +102,30 @@ export default function Header({
           <p className="text-sm font-semibold tabular-nums text-blue-600">
             {processingCount}
           </p>
+        </div>
+
+        <div className="h-5 w-px bg-gray-200" />
+
+        <div className="flex items-center gap-2">
+          <label
+            htmlFor="header-printer"
+            className="text-[10px] font-medium uppercase tracking-wider text-gray-400"
+          >
+            Printer
+          </label>
+          <select
+            id="header-printer"
+            value={selectedPrinter}
+            onChange={(e) => onPrinterChange(e.target.value)}
+            className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Select printer</option>
+            {printers.map((printer) => (
+              <option key={printer.name} value={printer.name}>
+                {printer.name} {printer.isDefault ? "(Default)" : ""}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </header>

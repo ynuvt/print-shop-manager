@@ -1,5 +1,4 @@
-import { Job } from "@printowl/types";
-import type { JobStatus } from "../types";
+import type { PrintJob, JobStatus } from "../types";
 import StatusBadge from "./StatusBadge";
 
 const LEFT_ACCENT: Record<JobStatus, string> = {
@@ -12,7 +11,7 @@ const LEFT_ACCENT: Record<JobStatus, string> = {
 };
 
 interface JobCardProps {
-  job: Job;
+  job: PrintJob;
   selected: boolean;
   onSelect: () => void;
 }

@@ -111,7 +111,7 @@ export default function JobDetails({ job, loading }: JobDetailsProps) {
         <ul className="flex flex-col gap-2">
           {job.files.map((file) => (
             <li
-              key={file.id}
+              key={file.url}
               className="rounded-md border border-zinc-800 bg-zinc-950 p-3"
             >
               <p className="truncate text-xs font-medium text-zinc-200">

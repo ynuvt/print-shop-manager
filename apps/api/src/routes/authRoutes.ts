@@ -6,11 +6,12 @@ const router = express.Router();
 router.get("/register", (req, res) => {
   // In version 1, no real registration logic
   // Just generate a unique token
-  const token = generateUserToken();
+  const { token, userId } = generateUserToken();
 
   res.status(200).json({
     message: "Registration successful!",
     token,
+    userId,
   });
 });
 const supportedAdminEmail = process.env.ADMIN_EMAIL || "admin@example.com";

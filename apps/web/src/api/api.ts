@@ -37,7 +37,10 @@ function getToken() {
 }
 
 // POST /register - gets a unique token
-export async function registerUser(): Promise<{ token: string }> {
+export async function registerUser(): Promise<{
+  token: string;
+  userId: string;
+}> {
   const res = await axios.get(`${BASE_URL}/auth/register`);
   if (!res.data) throw new Error("Failed to register user");
   return res.data;
@@ -95,4 +98,13 @@ export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
 
   if (!res.data) throw new Error("Failed to fetch user print jobs");
   return res.data;
+}
+
+export async function getUserPrintJobById(id: string): Promise<UserPrintJob> {
+  const jobs = await getUserPrintJobs();
+  const job = jobs.find((j) => j.id === id);
+  if (!job) {
+    throw new Error("Print job not found");
+  }
+  return job;
 }

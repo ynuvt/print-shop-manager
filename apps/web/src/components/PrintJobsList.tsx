@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { getUserPrintJobs } from "../api/api";
+import { getUserPrintJobById, getUserPrintJobs } from "../api/api";
 import type { UserPrintJob, UserPrintJobFile } from "../api/api";
+import { getSocket } from "../services/getSocket";
+import PrintNotification from "./PrintNotification";
+import toast from "react-hot-toast";
 
 const currencyFormatter = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -65,12 +68,84 @@ function FileOptionCard({ file }: { file: UserPrintJobFile }) {
 // ─── Job detail modal ─────────────────────────────────────────────────────────
 
 function JobDetailModal({
-  job,
+  jobId,
   onClose,
 }: {
-  job: UserPrintJob;
+  jobId: string;
   onClose: () => void;
 }) {
+  const [job, setJob] = useState<UserPrintJob | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadJob = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const fetched = await getUserPrintJobById(jobId);
+      setJob(fetched);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load job details",
+      );
+      setJob(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
+
+  useEffect(() => {
+    void loadJob();
+  }, [loadJob]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const handler = (_userId: string, updatedJobId: string, msg: string) => {
+      if (updatedJobId === jobId) {
+        void loadJob(); // Refresh job details when we receive an update for this job.
+      }
+    };
+
+    socket.on("job-status-updated", handler);
+    return () => {
+      socket.off("job-status-updated", handler);
+    };
+  }, [jobId, loadJob]);
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center">
+        <div className="w-full max-w-lg rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">
+          <p className="text-sm font-medium text-zinc-600">
+            Loading job details…
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !job) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm sm:items-center">
+        <div className="w-full max-w-lg rounded-t-3xl bg-white p-6 shadow-2xl sm:rounded-3xl">
+          <div className="mb-4">
+            <p className="text-sm font-medium text-red-600">
+              {error ?? "Job not found."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const statusColor =
     job.status === "COMPLETED"
       ? "text-emerald-700 bg-emerald-50 border-emerald-200"
@@ -164,13 +239,18 @@ export default function PrintJobsList({
 }) {
   const [jobs, setJobs] = useState<UserPrintJob[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedJob, setSelectedJob] = useState<UserPrintJob | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const load = useCallback(
-    async ({ notification = false }: { notification?: boolean }) => {
+    async ({
+      notification = false,
+      msg,
+    }: {
+      notification?: boolean;
+      msg?: string;
+    }) => {
       if (!userId) return;
       setLoading(true);
-      if (notification) console.log("some particular job is updated");
       try {
         const fetched = await getUserPrintJobs();
         const sorted = [...fetched].sort(
@@ -178,6 +258,13 @@ export default function PrintJobsList({
             new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         );
         setJobs(sorted);
+        console.log(notification, msg);
+        if (notification && msg) {
+          console.log("Showing notification for job update:", msg);
+          toast.custom((t) => (
+            <PrintNotification toastData={t} message={msg} />
+          ));
+        }
       } finally {
         setLoading(false);
       }
@@ -189,16 +276,27 @@ export default function PrintJobsList({
     void load({ notification: false });
   }, [load, refreshTrigger]);
 
-  // useEffect(() => {
-  //   const socket = getSocket();
-  //   socket.on("job-status-updated", () => {
-  //     // If the updated job is currently selected, refresh details
-  //       void load({ notification: true });
-  //   });
-  //   return () => {
-  //     socket.off("job-status-updated");
-  //   };
-  // }, []);
+  useEffect(() => {
+    const socket = getSocket();
+
+    const handler = (_userId: string, updatedJobId: string, msg: string) => {
+      console.log("job status updated event received", { updatedJobId });
+
+      // Refresh list and show toast
+      void load({ notification: true, msg });
+
+      // If modal is already open for that job, it will refresh itself.
+      // If modal is not open, open it automatically so the user can see the update.
+      if (selectedJobId !== updatedJobId) {
+        setSelectedJobId(updatedJobId);
+      }
+    };
+
+    socket.on("job-status-updated", handler);
+    return () => {
+      socket.off("job-status-updated", handler);
+    };
+  }, [load, selectedJobId]);
 
   const nonCompleted = jobs.filter((j) => j.status !== "COMPLETED");
   const completed = jobs.filter((j) => j.status === "COMPLETED");
@@ -236,7 +334,7 @@ export default function PrintJobsList({
                   {nonCompleted.map((job) => (
                     <div
                       key={job.id}
-                      onClick={() => setSelectedJob(job)}
+                      onClick={() => setSelectedJobId(job.id)}
                       className="cursor-pointer rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 transition hover:bg-zinc-100 active:scale-[0.99]"
                     >
                       <div className="flex items-center justify-between">
@@ -275,7 +373,7 @@ export default function PrintJobsList({
                   {completed.map((job) => (
                     <div
                       key={job.id}
-                      onClick={() => setSelectedJob(job)}
+                      onClick={() => setSelectedJobId(job.id)}
                       className="cursor-pointer rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 transition hover:bg-emerald-100 active:scale-[0.99]"
                     >
                       <div className="flex items-center justify-between">
@@ -306,10 +404,10 @@ export default function PrintJobsList({
         )}
       </section>
 
-      {selectedJob && (
+      {selectedJobId && (
         <JobDetailModal
-          job={selectedJob}
-          onClose={() => setSelectedJob(null)}
+          jobId={selectedJobId}
+          onClose={() => setSelectedJobId(null)}
         />
       )}
     </>

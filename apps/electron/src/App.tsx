@@ -9,7 +9,7 @@ import Header from "./components/Header";
 import JobCard from "./components/JobCard";
 import JobModal from "./components/JobModal";
 import { fetchAllJobs, fetchJobByCode } from "./api/api";
-import { Job, JobStatus } from "@printowl/types";
+import { PrintJob, PrintJobSummary, JobStatus } from "./types";
 import { getSocket } from "./services/getSocket";
 
 type Tab = "queue" | "history";
@@ -150,8 +150,8 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
 }
 
 export default function App() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [jobs, setJobs] = useState<PrintJobSummary[]>([]);
+  const [selectedJob, setSelectedJob] = useState<PrintJob | null>(null);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [tab, setTab] = useState<Tab>("queue");
   const [search, setSearch] = useState("");
@@ -159,6 +159,11 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(() => getAuthToken());
+
+  const [printers, setPrinters] = useState<
+    { name: string; isDefault: boolean }[]
+  >([]);
+  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
 
   const refreshJobs = useCallback(async () => {
     if (!token) return;
@@ -188,20 +193,55 @@ export default function App() {
     return () => {
       getSocket().emit("leave-room", "admin");
     };
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     getSocket().on("job-created", () => {
       console.log("Received job-created event, refreshing jobs...");
       refreshJobs();
     });
-  }, []);
+  }, [refreshJobs]);
+
+  useEffect(() => {
+    const loadPrinters = async () => {
+      if (!window?.electronAPI?.listPrinters) {
+        setToast("Printer list not available in this environment.");
+        return;
+      }
+
+      try {
+        const printerList = await window.electronAPI.listPrinters();
+        setPrinters(printerList);
+
+        const savedPrinter = localStorage.getItem("printowl_selected_printer");
+        if (savedPrinter) {
+          setSelectedPrinter(savedPrinter);
+          return;
+        }
+
+        const defaultPrinter = printerList.find((p) => p.isDefault);
+        if (defaultPrinter) setSelectedPrinter(defaultPrinter.name);
+      } catch (err) {
+        console.error("Failed to load printers:", err);
+        setToast("Failed to load printers. Printing will be disabled.");
+      }
+    };
+
+    if (token) {
+      void loadPrinters();
+    }
+  }, [token]);
 
   useEffect(() => {
     void refreshJobs();
   }, [refreshJobs]);
 
-  const handleSelectJob = useCallback(async (job: Job) => {
+  const handlePrinterChange = useCallback((printer: string) => {
+    setSelectedPrinter(printer);
+    localStorage.setItem("printowl_selected_printer", printer);
+  }, []);
+
+  const handleSelectJob = useCallback(async (job: PrintJobSummary) => {
     setLoadError(null);
     try {
       const full = await fetchJobByCode(String(job.verificationCode));
@@ -310,6 +350,9 @@ export default function App() {
         onTabChange={setTab}
         totalJobs={jobs.length}
         processingCount={processingCount}
+        printers={printers}
+        selectedPrinter={selectedPrinter}
+        onPrinterChange={handlePrinterChange}
       />
 
       {loadError && (
@@ -361,6 +404,9 @@ export default function App() {
           job={selectedJob}
           onClose={handleModalClose}
           onStatusUpdate={handleStatusUpdate}
+          printers={printers}
+          selectedPrinter={selectedPrinter}
+          onPrinterChange={handlePrinterChange}
         />
       )}
 

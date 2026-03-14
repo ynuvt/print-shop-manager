@@ -321,8 +321,9 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
   if (!schema.success) {
     return res.status(400).json({ error: schema.error });
   }
+  let job;
   try {
-    const job = await prisma.printJob.update({
+    job = await prisma.printJob.update({
       where: { id: schema.data.id },
       data: { status: mapStatus(status) },
     });
@@ -330,7 +331,8 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: "Failed to update job status." });
   } finally {
-    socket.emit("job-status-updated", userId);
+    const msg = `Your print job with verification code ${job?.verificationCode} is now ${schema.data.status}.`;
+    socket.emit("job-status-updated", schema.data.userId, schema.data.id, msg);
   }
 });
 

@@ -11,10 +11,11 @@ const optionsSchema = z.object({
 });
 
 const fileSchema = z.object({
+  id: z.string().optional(),
   name: z.string(),
   pages: z.number(),
   url: z.string().url(),
-  options: optionsSchema,
+  option: optionsSchema,
   cost: z.number(),
 });
 export type File = z.infer<typeof fileSchema>;

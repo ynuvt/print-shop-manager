@@ -203,8 +203,8 @@ export default function HomePage() {
   useEffect(() => {
     if (userId) return;
     registerUser()
-      .then(({ token }) => {
-        localStorage.setItem("userId", token);
+      .then(({ token, userId }) => {
+        localStorage.setItem("userId", userId);
         localStorage.setItem("token", token);
         setUserId(token);
       })
