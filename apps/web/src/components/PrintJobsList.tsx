@@ -101,7 +101,7 @@ function JobDetailModal({
 
   useEffect(() => {
     const socket = getSocket();
-    const handler = (_userId: string, updatedJobId: string, msg: string) => {
+    const handler = (_userId: string, updatedJobId: string, _msg: string) => {
       if (updatedJobId === jobId) {
         void loadJob(); // Refresh job details when we receive an update for this job.
       }

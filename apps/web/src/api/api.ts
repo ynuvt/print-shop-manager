@@ -1,7 +1,8 @@
 import type { PrintFileOption } from "@printowl/types";
 import axios from "axios";
 // src/api/api.ts
-const BASE_URL = "http://localhost:4000/api/v1";
+const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "http://80.225.203.175";
+const BASE_URL = `${API_ORIGIN}/api/v1`;
 
 export type UserPrintFileOption = {
   paperSize: string;
