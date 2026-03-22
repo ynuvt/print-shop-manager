@@ -1,7 +1,8 @@
 import type { PrintFileOption } from "@printowl/types";
 import axios from "axios";
 // src/api/api.ts
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "http://localhost:4000";
+const API_ORIGIN =
+  import.meta.env.VITE_API_ORIGIN ?? "http://xopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
 
 export type UserPrintFileOption = {
