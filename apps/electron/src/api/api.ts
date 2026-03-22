@@ -3,6 +3,28 @@ import type { PrintJob, PrintJobSummary } from "../types";
 const API_BASE = "http://xopy.devlocstudio.in/api/v1";
 const TOKEN_KEY = "printowl_admin_token";
 
+type LoginResponse = {
+  token?: string | { token?: string };
+};
+
+function normalizeToken(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "token" in value &&
+    typeof (value as { token?: unknown }).token === "string"
+  ) {
+    const nested = (value as { token: string }).token;
+    return nested.trim() ? nested : null;
+  }
+
+  return null;
+}
+
 function readToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -44,13 +66,15 @@ export async function adminLogin(
     throw new Error(`Login failed (HTTP ${res.status}).`);
   }
 
-  const data = (await res.json()) as { token?: string };
-  if (!data.token) {
+  const data = (await res.json()) as LoginResponse;
+  const token = normalizeToken(data.token);
+
+  if (!token) {
     throw new Error("Token missing in login response.");
   }
 
-  localStorage.setItem(TOKEN_KEY, data.token);
-  return data.token;
+  localStorage.setItem(TOKEN_KEY, token);
+  return token;
 }
 
 export class NotFoundError extends Error {

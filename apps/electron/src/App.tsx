@@ -8,67 +8,25 @@ import {
 import Header from "./components/Header";
 import JobCard from "./components/JobCard";
 import JobModal from "./components/JobModal";
-import { fetchAllJobs, fetchJobByCode } from "./api/api";
+import {
+  adminLogin,
+  fetchAllJobs,
+  fetchJobByCode,
+  getAuthToken,
+  logout,
+  updateJobStatus,
+} from "./api/api";
 import { PrintJob, PrintJobSummary, JobStatus } from "./types";
 import { getSocket } from "./services/getSocket";
 
 type Tab = "queue" | "history";
 type QueueFilter = "ALL" | "PENDING" | "PROCESSING";
-const API_BASE = "http://xopy.devlocstudio.in/api/v1";
-//  "http://80.225.203.175/api/v1";
-const TOKEN_KEY = "printowl_admin_token";
-
-function getAuthToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-function clearAuthToken() {
-  localStorage.removeItem(TOKEN_KEY);
-}
-
-function buildHeaders(): HeadersInit {
-  const token = getAuthToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
-async function adminLogin(email: string, password: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/auth/admin-login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (!res.ok) throw new Error(`Login failed (HTTP ${res.status}).`);
-
-  const data = (await res.json()) as { token?: string };
-  if (!data.token) throw new Error("Token missing in login response.");
-
-  localStorage.setItem(TOKEN_KEY, data.token);
-  return data.token;
-}
 
 // async function fetchAllJobs(): Promise<PrintJobSummary[]> {
 //   const res = await fetch(`${API_BASE}/jobs/all`, { headers: buildHeaders() });
 //   if (!res.ok) throw new Error(`Failed to load jobs (HTTP ${res.status}).`);
 //   return res.json() as Promise<PrintJobSummary[]>;
 // }
-
-async function updateJobStatus(
-  id: string,
-  userId: string,
-  status: JobStatus,
-): Promise<void> {
-  const res = await fetch(`${API_BASE}/jobs/update-status/${id}`, {
-    method: "PUT",
-    headers: buildHeaders(),
-    body: JSON.stringify({ status, userId }),
-  });
-  if (!res.ok) throw new Error(`Failed to update status (HTTP ${res.status}).`);
-}
 
 function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
   const [email, setEmail] = useState("");
@@ -181,7 +139,7 @@ export default function App() {
         error instanceof Error ? error.message : "Failed to load jobs.";
       setLoadError(message);
       if (message.includes("HTTP 401") || message.includes("HTTP 403")) {
-        clearAuthToken();
+        logout();
         setToken(null);
       }
     } finally {
