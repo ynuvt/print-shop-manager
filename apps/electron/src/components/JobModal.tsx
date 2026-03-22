@@ -151,10 +151,15 @@ export default function JobModal({
           copies: 1,
         };
 
+        const customPages =
+          fileOption.pageRange === "CUSTOM"
+            ? fileOption.customRange?.trim()
+            : undefined;
+
         const options = {
           copies: fileOption.copies,
           duplex: fileOption.duplex === "BOTH" ? "Duplex" : "Simplex",
-          // Add other options as supported by pdf-to-printer
+          ...(customPages ? { pages: customPages } : {}),
         };
 
         await window.electronAPI.printPDF(filePath, selectedPrinter, options, {
