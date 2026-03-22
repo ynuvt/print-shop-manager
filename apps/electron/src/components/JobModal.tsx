@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import StatusBadge from "./StatusBadge";
 import type { PrintJob, JobStatus, File } from "../types";
+import type { PrintFileOption } from "@printowl/types";
 
 interface JobModalProps {
   job: PrintJob;
@@ -70,8 +71,20 @@ export default function JobModal({
     };
   }, []);
 
+  const printTypeLabel = useMemo(() => {
+    const modes = job.files
+      .map((f) => (f.option.colorMode || "BW").toUpperCase())
+      .filter((mode) => mode === "BW" || mode === "COLOR");
+
+    if (modes.length === 0) return "B/W";
+    if (modes.every((mode) => mode === "BW")) return "B/W";
+    if (modes.every((mode) => mode === "COLOR")) return "Color";
+    return "Mixed";
+  }, [job.files]);
+
   const isPending = currentStatus === "PENDING";
   const isProcessing = currentStatus === "PROCESSING";
+  const isCompleted = currentStatus === "COMPLETED";
 
   const created = new Date(job.createdAt).toLocaleString([], {
     month: "short",
@@ -96,12 +109,7 @@ export default function JobModal({
 
   async function handlePrint() {
     if (!selectedPrinter) {
-      setError("Please select a printer.");
-      return;
-    }
-
-    if (!window?.electronAPI?.downloadFiles || !window?.electronAPI?.printPDF) {
-      setError("Printing is not available in this environment.");
+      setError("Please select a printer first.");
       return;
     }
 
@@ -135,7 +143,7 @@ export default function JobModal({
           fileName: file.name,
         });
 
-        const fileOption = file.option ?? {
+        const fileOption: PrintFileOption = file.option ?? {
           paperSize: "A4",
           colorMode: "BW",
           pageRange: "ALL",
@@ -281,10 +289,10 @@ export default function JobModal({
             </div>
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-center">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-                Est. Time
+                Print Type
               </p>
               <p className="mt-1 text-lg font-bold text-gray-900">
-                {isPending ? "-" : `${job.estimatedTime} min`}
+                {printTypeLabel}
               </p>
             </div>
           </div>
@@ -341,13 +349,21 @@ export default function JobModal({
                   {/* Print options */}
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {(() => {
-                      const option = file.option ?? {
+                      const option: PrintFileOption = file.option ?? {
                         paperSize: "A4",
                         colorMode: "BW",
                         pageRange: "ALL",
                         duplex: "ONE",
                         copies: 1,
                       };
+                      const colorModeLabel =
+                        option.colorMode === "COLOR" ? "Color" : "B&W";
+                      const duplexLabel =
+                        option.duplex === "BOTH" ? "Duplex" : "Single-sided";
+                      const pageRangeLabel =
+                        option.pageRange === "CUSTOM"
+                          ? `Custom range${option.customRange ? ` (${option.customRange})` : ""}`
+                          : "All pages";
 
                       return (
                         <>
@@ -355,16 +371,13 @@ export default function JobModal({
                             {option.paperSize}
                           </span>
                           <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {OPTION_LABELS.colorMode[option.colorMode]}
+                            {colorModeLabel}
                           </span>
                           <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {OPTION_LABELS.duplex[option.duplex]}
+                            {duplexLabel}
                           </span>
                           <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {OPTION_LABELS.pageRange[option.pageRange]}
-                            {option.customRange
-                              ? ` (${option.customRange})`
-                              : ""}
+                            {pageRangeLabel}
                           </span>
                           <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
                             {option.copies}× copies
@@ -384,7 +397,7 @@ export default function JobModal({
           {error && <p className="mb-3 text-xs text-red-500">{error}</p>}
 
           {/* Printer Selection */}
-          {isPending && (
+          {(isPending || isCompleted) && (
             <div className="mb-4">
               <label
                 htmlFor="printer-select"
@@ -449,7 +462,28 @@ export default function JobModal({
             </div>
           )}
 
-          {!isPending && !isProcessing && (
+          {isCompleted && (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => void handlePrint()}
+                disabled={loading}
+                className="flex-1 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-500 active:bg-violet-700 disabled:opacity-50"
+              >
+                {loading ? "Updating..." : "Print Again"}
+              </button>
+            </div>
+          )}
+
+          {!isPending && !isProcessing && !isCompleted && (
             <button
               type="button"
               onClick={onClose}

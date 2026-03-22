@@ -1,6 +1,6 @@
 import type { PrintJob, PrintJobSummary } from "../types";
 
-const API_BASE = "http://localhost:4000/api/v1";
+const API_BASE = "http://xopy.devlocstudio.in/api/v1";
 const TOKEN_KEY = "printowl_admin_token";
 
 function readToken(): string | null {

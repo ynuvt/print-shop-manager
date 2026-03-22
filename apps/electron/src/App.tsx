@@ -13,7 +13,9 @@ import { PrintJob, PrintJobSummary, JobStatus } from "./types";
 import { getSocket } from "./services/getSocket";
 
 type Tab = "queue" | "history";
-const API_BASE = "http://localhost:4000/api/v1";
+type QueueFilter = "ALL" | "PENDING" | "PROCESSING";
+const API_BASE = "http://xopy.devlocstudio.in/api/v1";
+//  "http://80.225.203.175/api/v1";
 const TOKEN_KEY = "printowl_admin_token";
 
 function getAuthToken(): string | null {
@@ -154,6 +156,7 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState<PrintJob | null>(null);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [tab, setTab] = useState<Tab>("queue");
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("ALL");
   const [search, setSearch] = useState("");
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -276,7 +279,9 @@ export default function App() {
 
       const tabMatches = jobs.filter((j) =>
         tab === "queue"
-          ? j.status === "PENDING" || j.status === "PROCESSING"
+          ? queueFilter === "ALL"
+            ? j.status === "PENDING" || j.status === "PROCESSING"
+            : j.status === queueFilter
           : j.status === "COMPLETED" ||
             j.status === "REJECTED" ||
             j.status === "FAILED",
@@ -294,7 +299,7 @@ export default function App() {
       setLoadError(null);
       await handleSelectJob(matches[0]);
     },
-    [search, jobs, tab, handleSelectJob],
+    [search, jobs, tab, queueFilter, handleSelectJob],
   );
 
   const handleStatusUpdate = useCallback(
@@ -315,12 +320,14 @@ export default function App() {
   const filtered = useMemo(() => {
     return jobs.filter((j) =>
       tab === "queue"
-        ? j.status === "PENDING" || j.status === "PROCESSING"
+        ? queueFilter === "ALL"
+          ? j.status === "PENDING" || j.status === "PROCESSING"
+          : j.status === queueFilter
         : j.status === "COMPLETED" ||
           j.status === "REJECTED" ||
           j.status === "FAILED",
     );
-  }, [jobs, tab]);
+  }, [jobs, tab, queueFilter]);
 
   useEffect(() => {
     if (!toast) return;
@@ -373,6 +380,44 @@ export default function App() {
             placeholder="Search by code and press Enter..."
             className="w-full max-w-xs rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition"
           />
+
+          {tab === "queue" && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQueueFilter("ALL")}
+                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                  queueFilter === "ALL"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueueFilter("PENDING")}
+                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                  queueFilter === "PENDING"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                Pending
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueueFilter("PROCESSING")}
+                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                  queueFilter === "PROCESSING"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                Processing
+              </button>
+            </div>
+          )}
         </form>
 
         <div className="flex-1 overflow-y-auto p-4">

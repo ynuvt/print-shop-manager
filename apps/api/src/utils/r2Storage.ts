@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -78,4 +78,44 @@ export async function uploadBufferToR2(params: {
     key: params.key,
     url: getPublicUrlForKey(params.key),
   };
+}
+
+function normalizePublicBucketUrl() {
+  return (R2_PUBLIC_BUCKET_URL ?? "").replace(/\/$/, "");
+}
+
+export function getR2ObjectKeyFromUrl(url: string): string {
+  const publicBase = normalizePublicBucketUrl();
+
+  if (publicBase && url.startsWith(`${publicBase}/`)) {
+    return decodeURIComponent(url.slice(publicBase.length + 1));
+  }
+
+  try {
+    const parsed = new URL(url);
+    const keyFromPath = parsed.pathname.replace(/^\//, "");
+    if (!keyFromPath) {
+      throw new Error("missing object key");
+    }
+    return decodeURIComponent(keyFromPath);
+  } catch {
+    throw new Error("Could not derive R2 object key from file URL.");
+  }
+}
+
+export async function deleteObjectFromR2ByKey(key: string) {
+  const bucket = getBucketName();
+  const client = getR2Client();
+
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    }),
+  );
+}
+
+export async function deleteObjectFromR2ByUrl(url: string) {
+  const key = getR2ObjectKeyFromUrl(url);
+  await deleteObjectFromR2ByKey(key);
 }

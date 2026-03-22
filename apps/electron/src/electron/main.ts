@@ -25,7 +25,35 @@ function createWindow() {
     return;
   }
 
-  window.loadFile(path.join(__dirname, "../dist/index.html"));
+  // In production, load from the bundled HTML file with absolute path
+  try {
+    // Try loading from app's resources
+    const appPath = app.getAppPath();
+    const distPath = path.join(appPath, "dist", "index.html");
+
+    if (fs.existsSync(distPath)) {
+      window.loadFile(distPath);
+    } else {
+      // Fallback: check if we're in dev-like structure
+      const fallbackPath = path.join(__dirname, "..", "dist", "index.html");
+      if (fs.existsSync(fallbackPath)) {
+        window.loadFile(fallbackPath);
+      } else {
+        console.error(
+          `Could not find index.html at ${distPath} or ${fallbackPath}`,
+        );
+        // Last resort: load a blank page with error message
+        window.webContents.loadURL(
+          `data:text/html,<h1>Failed to load application</h1><p>Could not find required files.</p>`,
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Error loading app:", error);
+    window.webContents.loadURL(
+      `data:text/html,<h1>Error Loading Application</h1><p>${String(error)}</p>`,
+    );
+  }
 }
 
 app.whenReady().then(() => {
@@ -51,8 +79,7 @@ ipcMain.handle(
     const tempDir = os.tmpdir();
     const downloadedPaths: string[] = [];
 
-    for (let idx = 0; idx < files.length; idx++) {
-      const file = files[idx];
+    for (const [idx, file] of files.entries()) {
       const fileName = `printowl_${Date.now()}_${file.name}`;
       const filePath = path.join(tempDir, fileName);
 

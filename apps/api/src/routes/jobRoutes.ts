@@ -16,7 +16,12 @@ import {
   PrintJobAnalysisError,
 } from "../utils/printJobAnalysis.js";
 import { getPdfPageCountFromBuffer } from "../utils/pdfPageCount.js";
-import { buildR2ObjectKey, uploadBufferToR2 } from "../utils/r2Storage.js";
+import {
+  buildR2ObjectKey,
+  deleteObjectFromR2ByUrl,
+  uploadBufferToR2,
+} from "../utils/r2Storage.js";
+import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 
 const app = express.Router();
@@ -74,11 +79,11 @@ async function buildPrintJobCreateData(job: Job, userId: string) {
         option: {
           create: {
             paperSize: "A4" as const,
-            colorMode: mapColorMode(file.options.colorMode),
-            pageRange: mapPageRange(file.options.pageRange),
-            customRange: file.options.customRange,
-            duplex: mapDuplex(file.options.duplex),
-            copies: file.options.copies,
+            colorMode: mapColorMode(file.option.colorMode),
+            pageRange: mapPageRange(file.option.pageRange),
+            customRange: file.option.customRange,
+            duplex: mapDuplex(file.option.duplex),
+            copies: file.option.copies,
           },
         },
       })),
@@ -91,7 +96,7 @@ type UploadedFileForCreate = {
   url: string;
   pages: number;
   cost: number;
-  options: Job["files"][number]["options"];
+  option: Job["files"][number]["option"];
 };
 
 function buildPrintJobCreateDataFromProcessedFiles(
@@ -115,11 +120,11 @@ function buildPrintJobCreateDataFromProcessedFiles(
         option: {
           create: {
             paperSize: "A4" as const,
-            colorMode: mapColorMode(file.options.colorMode),
-            pageRange: mapPageRange(file.options.pageRange),
-            customRange: file.options.customRange,
-            duplex: mapDuplex(file.options.duplex),
-            copies: file.options.copies,
+            colorMode: mapColorMode(file.option.colorMode),
+            pageRange: mapPageRange(file.option.pageRange),
+            customRange: file.option.customRange,
+            duplex: mapDuplex(file.option.duplex),
+            copies: file.option.copies,
           },
         },
       })),
@@ -159,6 +164,22 @@ function parseFileOptionsFromBody(rawFileOptions: unknown) {
   });
 }
 
+function assertSingleColorModeInOptions(
+  options: Array<{ colorMode: "BW" | "COLOR" }>,
+) {
+  if (!options.length) return;
+
+  const firstMode = options[0]!.colorMode;
+  const hasMismatch = options.some((opt) => opt.colorMode !== firstMode);
+
+  if (hasMismatch) {
+    throw new PrintJobAnalysisError(
+      "All files in a job must use the same color mode (either all B/W or all Color).",
+      400,
+    );
+  }
+}
+
 app.post(
   "/create-with-files",
   authMiddleware(["admin", "customer"]),
@@ -175,8 +196,20 @@ app.post(
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    // Verify CAPTCHA token
+    const captchaToken = req.body.captchaToken;
+    if (captchaToken) {
+      const captchaVerification = await verifyTurnstileToken(captchaToken);
+      if (!captchaVerification.success) {
+        return res.status(400).json({
+          error: captchaVerification.error || "CAPTCHA verification failed",
+        });
+      }
+    }
+
     try {
       const fileOptions = parseFileOptionsFromBody(req.body.fileOptions);
+      assertSingleColorModeInOptions(fileOptions);
 
       if (fileOptions.length !== incomingFiles.length) {
         return res.status(400).json({
@@ -240,7 +273,7 @@ app.post(
           url,
           pages,
           cost,
-          options: {
+          option: {
             paperSize: options.paperSize,
             colorMode: options.colorMode,
             pageRange: options.pageRange,
@@ -284,6 +317,19 @@ app.post(
       return res.status(400).json({ error: schema.error });
     }
     const job = schema.data;
+    try {
+      assertSingleColorModeInOptions(
+        job.files.map((file) => ({ colorMode: file.option.colorMode })),
+      );
+    } catch (error) {
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      return res
+        .status(400)
+        .json({ error: "Invalid color mode configuration." });
+    }
+
     try {
       const createdJob = await prisma.printJob.create({
         data: await buildPrintJobCreateData(job, req.user!.uid),
@@ -406,22 +452,138 @@ app.delete(
     }
     let job;
     try {
+      const existingJob = await prisma.printJob.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          verificationCode: true,
+          files: {
+            select: {
+              id: true,
+              url: true,
+              optionId: true,
+            },
+          },
+        },
+      });
+
+      if (!existingJob) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      if (req.user.role !== "admin") {
+        if (existingJob.userId !== req.user.uid) {
+          return res
+            .status(403)
+            .json({ error: "You can only delete your own jobs." });
+        }
+
+        for (const file of existingJob.files) {
+          await deleteObjectFromR2ByUrl(file.url);
+        }
+
+        const optionIds = existingJob.files.map((file) => file.optionId);
+
+        await prisma.$transaction(async (tx) => {
+          await tx.file.deleteMany({
+            where: { printJobId: existingJob.id },
+          });
+
+          if (optionIds.length) {
+            await tx.printOption.deleteMany({
+              where: {
+                id: { in: optionIds },
+              },
+            });
+          }
+
+          await tx.printJob.delete({
+            where: { id: existingJob.id },
+          });
+        });
+
+        return res.status(200).json({ message: "Job deleted successfully." });
+      }
+
       job = await prisma.printJob.update({
         where: { id: id },
         data: {
-          status:
-            req?.user.role === "admin"
-              ? PrintJobStatus.REJECTED
-              : PrintJobStatus.CANCELED,
+          status: PrintJobStatus.REJECTED,
           deleted: true,
         },
       });
       res.status(200).json({ message: "Job canceled successfully." });
     } catch (error) {
-      res.status(500).json({ error: "Failed to cancel job." });
+      res.status(500).json({ error: "Failed to delete job." });
     } finally {
-      if (req.user.role == "admin")
-        socket.emit("job-status-updated", job?.userId);
+      if (job) {
+        const statusText = PrintJobStatus.REJECTED;
+        const msg = `Your print job with verification code ${job.verificationCode} is now ${statusText}.`;
+        socket.emit("job-status-updated", job.userId, job.id, msg);
+      }
+    }
+  },
+);
+
+app.put(
+  "/resubmit/:id",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    const { id } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!id || typeof id !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+
+    try {
+      const existingJob = await prisma.printJob.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          verificationCode: true,
+          deleted: true,
+        },
+      });
+
+      if (!existingJob) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      if (req.user.role !== "admin" && existingJob.userId !== req.user.uid) {
+        return res
+          .status(403)
+          .json({ error: "You can only resubmit your own jobs." });
+      }
+
+      if (existingJob.status !== PrintJobStatus.COMPLETED) {
+        return res.status(400).json({
+          error: "Only completed jobs can be submitted again.",
+        });
+      }
+
+      const updated = await prisma.printJob.update({
+        where: { id: existingJob.id },
+        data: {
+          status: PrintJobStatus.PENDING,
+          deleted: false,
+        },
+      });
+
+      const msg = `Your print job with verification code ${updated.verificationCode} is now ${PrintJobStatus.PENDING}.`;
+      socket.emit("job-status-updated", updated.userId, updated.id, msg);
+      socket.emit("job-created", "admin");
+
+      return res.status(200).json({ message: "Job submitted again." });
+    } catch (error) {
+      return res.status(500).json({ error: "Failed to resubmit job." });
     }
   },
 );

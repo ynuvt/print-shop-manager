@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
+import { FileText, Moon, SlidersHorizontal, Sun, Upload } from "lucide-react";
+import Turnstile from "react-turnstile";
 import { createPrintJobFromFiles, registerUser } from "../api/api";
 import PrintJobsList from "../components/PrintJobsList";
 import {
-  calculateFileCost,
   buildJobTotals,
+  calculateFileCost,
   validateCustomPageRange,
 } from "../printing/costCalculator";
 import { getPdfPageCount } from "../printing/pdfPageCount";
 import { defaultPrintOptions } from "../printing/types";
 import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
-
-// ─── Option toggle helper ────────────────────────────────────────────────────
+import type { ThemeMode } from "../App";
 
 function ToggleGroup<T extends string>({
   options,
@@ -26,19 +27,15 @@ function ToggleGroup<T extends string>({
 }) {
   return (
     <div
-      className="grid gap-2"
+      className="toggle-group"
       style={{ gridTemplateColumns: `repeat(${options.length}, 1fr)` }}
     >
       {options.map((opt) => (
         <button
           key={opt.value}
           type="button"
+          className={value === opt.value ? "toggle-item active" : "toggle-item"}
           onClick={() => onChange(opt.value)}
-          className={`rounded-lg py-2 text-sm font-medium transition ${
-            value === opt.value
-              ? "bg-indigo-600 text-white"
-              : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-          }`}
         >
           {opt.label}
         </button>
@@ -46,8 +43,6 @@ function ToggleGroup<T extends string>({
     </div>
   );
 }
-
-// ─── Per-file options card ───────────────────────────────────────────────────
 
 function FileCard({
   pf,
@@ -70,42 +65,37 @@ function FileCard({
   });
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
-      {/* Header row */}
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50"
-      >
-        <span className="text-xl">📄</span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-zinc-900">
-            {pf.name}
-          </p>
-          <p className="text-xs text-zinc-500">
-            {pf.detectedPages} pages · ₹{cost}
-          </p>
-        </div>
-        <span className="text-zinc-400">{expanded ? "▾" : "▸"}</span>
+    <article className="upload-file-card">
+      <div className="upload-file-head">
+        <button type="button" className="upload-file-title" onClick={onToggle}>
+          <div className="file-icon" aria-hidden="true">
+            <FileText size={18} />
+          </div>
+          <div>
+            <p>{pf.name}</p>
+            <span>
+              {pf.detectedPages} pages • Rs {cost}
+            </span>
+            <span className="file-edit-hint">
+              <SlidersHorizontal size={12} />
+              Tap file to edit details
+            </span>
+          </div>
+        </button>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="ml-1 rounded-full p-1 text-zinc-400 hover:bg-red-50 hover:text-red-500"
+          className="icon-btn"
+          onClick={onRemove}
+          aria-label="Remove file"
         >
-          ✕
+          x
         </button>
-      </button>
+      </div>
 
-      {/* Expanded options */}
       {expanded && (
-        <div className="space-y-4 border-t border-zinc-100 px-4 py-4">
+        <div className="upload-file-body">
           <div>
-            <p className="mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wide">
-              Print Sides
-            </p>
+            <p className="field-label">Print Sides</p>
             <ToggleGroup
               options={[
                 { label: "One Side", value: "ONE" },
@@ -117,9 +107,7 @@ function FileCard({
           </div>
 
           <div>
-            <p className="mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wide">
-              Page Range
-            </p>
+            <p className="field-label">Page Range</p>
             <ToggleGroup
               options={[
                 { label: "All Pages", value: "ALL" },
@@ -128,49 +116,40 @@ function FileCard({
               value={pf.options.pageRange}
               onChange={(v) => onUpdate({ pageRange: v, customRange: "" })}
             />
+
             {pf.options.pageRange === "CUSTOM" && (
-              <div className="mt-2">
+              <div className="field-spacing">
                 <input
                   type="text"
-                  placeholder={`e.g. 1-5, 8, 10-12  (total: ${pf.detectedPages} pages)`}
                   value={pf.options.customRange}
                   onChange={(e) => onUpdate({ customRange: e.target.value })}
-                  className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 ${
-                    pf.pageRangeError
-                      ? "border-red-400 focus:ring-red-300"
-                      : "border-zinc-300 focus:ring-indigo-300"
-                  }`}
+                  placeholder={`1-5, 8, 10-12 (total ${pf.detectedPages} pages)`}
+                  className={
+                    pf.pageRangeError ? "text-input invalid" : "text-input"
+                  }
                 />
                 {pf.pageRangeError && (
-                  <p className="mt-1 text-xs text-red-600">
-                    {pf.pageRangeError}
-                  </p>
+                  <p className="field-error">{pf.pageRangeError}</p>
                 )}
               </div>
             )}
           </div>
 
           <div>
-            <p className="mb-2 text-xs font-medium text-zinc-600 uppercase tracking-wide">
-              Copies
-            </p>
-            <div className="flex items-center gap-3">
+            <p className="field-label">Copies</p>
+            <div className="counter">
               <button
                 type="button"
                 onClick={() =>
                   onUpdate({ copies: Math.max(1, pf.options.copies - 1) })
                 }
-                className="h-9 w-9 rounded-lg bg-zinc-100 text-lg font-bold text-zinc-700 hover:bg-zinc-200"
               >
-                −
+                -
               </button>
-              <span className="w-8 text-center text-lg font-semibold text-zinc-900">
-                {pf.options.copies}
-              </span>
+              <span>{pf.options.copies}</span>
               <button
                 type="button"
                 onClick={() => onUpdate({ copies: pf.options.copies + 1 })}
-                className="h-9 w-9 rounded-lg bg-zinc-100 text-lg font-bold text-zinc-700 hover:bg-zinc-200"
               >
                 +
               </button>
@@ -178,13 +157,17 @@ function FileCard({
           </div>
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
-// ─── Main page ───────────────────────────────────────────────────────────────
-
-export default function HomePage() {
+export default function HomePage({
+  theme,
+  onToggleTheme,
+}: {
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+}) {
   const [userId, setUserId] = useState<string | null>(() =>
     localStorage.getItem("userId"),
   );
@@ -196,63 +179,78 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [globalColorMode, setGlobalColorMode] = useState<"BW" | "COLOR">("BW");
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-register on first visit to obtain a stable userId / token.
   useEffect(() => {
     if (userId) return;
+
     registerUser()
       .then(({ token, userId }) => {
         localStorage.setItem("userId", userId);
         localStorage.setItem("token", token);
-        setUserId(token);
+        setUserId(userId);
       })
-      .catch(() =>
-        setError("Failed to initialize session. Is the backend running?"),
-      );
+      .catch(() => {
+        setError("Failed to initialize session. Please verify API is running.");
+      });
   }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
-    getSocket().emit("join-room", userId);
 
+    getSocket().emit("join-room", userId);
     return () => {
       getSocket().emit("leave-room", userId);
     };
   }, [userId]);
 
-  // File picker handler: detect PDF pages for every selected file.
+  const processFiles = useCallback(async (files: File[]) => {
+    if (!files.length) return;
+
+    const newEntries: PrintFileState[] = await Promise.all(
+      files.map(async (file) => ({
+        file,
+        name: file.name,
+        detectedPages: await getPdfPageCount(file),
+        options: defaultPrintOptions(),
+        pageRangeError: "",
+      })),
+    );
+
+    setPrintFiles((prev) => [...prev, ...newEntries]);
+  }, []);
+
   const onFilesSelected = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files ?? []);
-      if (!files.length) return;
-
-      const newEntries: PrintFileState[] = await Promise.all(
-        files.map(async (file) => ({
-          file,
-          name: file.name,
-          detectedPages: await getPdfPageCount(file),
-          options: defaultPrintOptions(),
-          pageRangeError: "",
-        })),
-      );
-
-      setPrintFiles((prev) => [...prev, ...newEntries]);
+      await processFiles(files);
       if (fileInputRef.current) fileInputRef.current.value = "";
     },
-    [],
+    [processFiles],
   );
 
-  // Patch options for a specific file, re-running page range validation when relevant.
+  const onDrop = useCallback(
+    async (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      setIsDragActive(false);
+
+      const dropped = Array.from(event.dataTransfer.files).filter((file) =>
+        file.name.toLowerCase().endsWith(".pdf"),
+      );
+      await processFiles(dropped);
+    },
+    [processFiles],
+  );
+
   const updateOptions = useCallback(
-    (
-      idx: number,
-      patch: Partial<PrintOptions> & { customRangeError?: string },
-    ) => {
+    (idx: number, patch: Partial<PrintOptions>) => {
       setPrintFiles((prev) =>
         prev.map((f, i) => {
           if (i !== idx) return f;
+
           const merged = { ...f, options: { ...f.options, ...patch } };
           if (
             patch.customRange !== undefined ||
@@ -267,6 +265,7 @@ export default function HomePage() {
                 : "";
             return { ...merged, pageRangeError: rangeError };
           }
+
           return merged;
         }),
       );
@@ -279,9 +278,13 @@ export default function HomePage() {
     setExpandedIdx((prev) => (prev === idx ? null : prev));
   }, []);
 
-  // Submit: upload each file to R2, build the job, post to API.
   const onSubmit = async () => {
     if (!userId || !printFiles.length || isSubmitting) return;
+
+    if (!captchaToken) {
+      setError("Please complete the CAPTCHA verification");
+      return;
+    }
 
     setIsSubmitting(true);
     setError(null);
@@ -300,10 +303,13 @@ export default function HomePage() {
         (pct) => {
           setUploadProgress((prev) => prev.map(() => pct));
         },
+        captchaToken,
       );
 
       setVerificationCode(String(result.verificationCode));
       setPrintFiles([]);
+      setExpandedIdx(null);
+      setCaptchaToken(null);
       setRefreshTrigger((t) => t + 1);
     } catch (err) {
       setError(
@@ -311,6 +317,8 @@ export default function HomePage() {
           ? err.message
           : "Something went wrong. Please try again.",
       );
+      // Reset CAPTCHA token on error so user must complete challenge again
+      setCaptchaToken(null);
     } finally {
       setIsSubmitting(false);
       setUploadProgress([]);
@@ -323,187 +331,229 @@ export default function HomePage() {
       options: { ...f.options, colorMode: globalColorMode },
     })),
   );
+
   const hasErrors = printFiles.some(
     (f) =>
       f.pageRangeError ||
       (f.options.pageRange === "CUSTOM" && !f.options.customRange.trim()),
   );
-  const canSubmit =
-    !!userId && printFiles.length > 0 && !hasErrors && !isSubmitting;
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const canSubmit =
+    !!userId &&
+    printFiles.length > 0 &&
+    !hasErrors &&
+    !isSubmitting &&
+    !!captchaToken;
+  const successDigits = verificationCode ? verificationCode.split("") : [];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-zinc-900">
-      {/* Navbar */}
-      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-white font-bold text-lg">
-              P
-            </div>
-            <span className="font-semibold text-zinc-900">PrintOwl</span>
+    <div className="app-shell">
+      <header className="top-bar">
+        <div className="brand-row">
+          <img
+            src="/img/PrintLogoHourglass (1).webp"
+            alt="XOPY logo"
+            className="brand-mark"
+          />
+          <div>
+            <p className="brand-title">XOPY</p>
+            <span className="brand-subtitle">
+              {userId ? "Session active" : "Preparing session..."}
+            </span>
           </div>
-          <p className="text-xs text-zinc-500">
-            {userId ? "Session active" : "Initializing…"}
-          </p>
         </div>
+
+        <button
+          type="button"
+          className="theme-btn icon-theme-btn"
+          onClick={onToggleTheme}
+          aria-label={
+            theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+          }
+          title={theme === "dark" ? "Light mode" : "Dark mode"}
+        >
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
       </header>
 
-      <main className="mx-auto max-w-2xl px-6 py-10">
-        {/* ── Global error ── */}
-        {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+      <main className="main-wrap">
+        {error && <div className="banner-error">{error}</div>}
 
-        {/* ── Success screen ── */}
-        {verificationCode ? (
-          <div className="flex flex-col items-center py-16 text-center">
-            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-green-500 text-4xl text-white">
-              ✓
-            </div>
-            <h2 className="text-2xl font-bold text-zinc-900">
-              Print Job Submitted!
-            </h2>
-            <p className="mt-2 text-zinc-600">
-              Show this code at the counter to collect your prints.
-            </p>
-            <div className="mt-8 rounded-2xl border-2 border-indigo-600 bg-indigo-50 px-10 py-6">
-              <p className="text-sm text-zinc-600">Verification Code</p>
-              <p className="mt-1 font-mono text-5xl font-bold tracking-widest text-indigo-600">
-                {verificationCode}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setVerificationCode(null)}
-              className="mt-8 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              Print More
-            </button>
+        <section className="hero-panel">
+          <div className="print-mode-top">
+            <p className="field-label">Print Type</p>
+            <ToggleGroup
+              options={[
+                { label: "Color Print", value: "COLOR" },
+                { label: "B/W Print", value: "BW" },
+              ]}
+              value={globalColorMode}
+              onChange={setGlobalColorMode}
+            />
           </div>
-        ) : printFiles.length === 0 ? (
-          /* ── Landing / select ── */
-          <div className="flex flex-col items-center py-20 text-center">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex h-44 w-44 flex-col items-center justify-center rounded-full bg-indigo-600 text-white shadow-2xl shadow-indigo-300 transition hover:scale-105 hover:bg-indigo-700 active:scale-95"
-            >
-              <span className="text-5xl">📄</span>
-              <span className="mt-2 text-base font-semibold">Upload PDF</span>
-            </button>
-            <p className="mt-6 max-w-xs text-sm text-zinc-500">
-              Select one or more PDF files. Duplex, copies, and page range can
-              be set per file.
-            </p>
+
+          <div className="hero-header">
+            <h1>Upload Documents</h1>
+            <p>Color or B/W printing with per-file settings.</p>
           </div>
-        ) : (
-          /* ── Configure + submit ── */
-          <>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-zinc-900">
-                Configure Files
-              </h2>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+
+          {verificationCode ? (
+            <div className="success-card">
+              <p>Job submitted successfully</p>
+              <div
+                className="otp-digits"
+                aria-label={`Verification code ${verificationCode}`}
               >
-                + Add more
-              </button>
-            </div>
-
-            {/* Global Color Mode */}
-            <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-600">
-                Color Mode (applies to all files)
-              </p>
-              <ToggleGroup
-                options={[
-                  { label: "B&W  ₹2/sheet", value: "BW" },
-                  { label: "Color  ₹7/sheet", value: "COLOR" },
-                ]}
-                value={globalColorMode}
-                onChange={setGlobalColorMode}
-              />
-            </div>
-
-            {/* File cards */}
-            <div className="space-y-3">
-              {printFiles.map((pf, idx) => (
-                <FileCard
-                  key={`${pf.name}-${idx}`}
-                  pf={pf}
-                  expanded={expandedIdx === idx}
-                  onToggle={() =>
-                    setExpandedIdx((prev) => (prev === idx ? null : idx))
-                  }
-                  onUpdate={(patch) => updateOptions(idx, patch)}
-                  onRemove={() => removeFile(idx)}
-                  globalColorMode={globalColorMode}
-                />
-              ))}
-            </div>
-
-            {/* Upload progress bars (shown while submitting) */}
-            {isSubmitting && uploadProgress.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {uploadProgress.map((pct, i) => (
-                  <div key={i}>
-                    <p className="mb-1 text-xs text-zinc-500 truncate">
-                      Uploading {printFiles[i]?.name ?? "file"}… {pct}%
-                    </p>
-                    <div className="h-1.5 w-full rounded-full bg-zinc-200">
-                      <div
-                        className="h-1.5 rounded-full bg-indigo-600 transition-all duration-150"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
+                {successDigits.map((digit, idx) => (
+                  <div key={`${digit}-${idx}`} className="otp-digit">
+                    {digit}
                   </div>
                 ))}
               </div>
-            )}
-
-            {/* Cost summary */}
-            <div className="mt-6 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-700 px-6 py-5 text-white shadow-xl shadow-indigo-200">
-              <p className="text-sm text-indigo-200">Total Cost</p>
-              <p className="mt-1 text-5xl font-bold">₹{totals.totalCost}</p>
-              <p className="mt-2 text-sm text-indigo-200">
-                {printFiles.length} {printFiles.length === 1 ? "file" : "files"}{" "}
-                · {totals.totalPages} pages · ~{totals.estimatedTime} min
-              </p>
+              <span>Show this verification code at the counter.</span>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setVerificationCode(null)}
+              >
+                Create More Jobs
+              </button>
             </div>
+          ) : (
+            <>
+              <div
+                className={
+                  isDragActive ? "upload-dropzone active" : "upload-dropzone"
+                }
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragActive(true);
+                }}
+                onDragLeave={() => setIsDragActive(false)}
+                onDrop={onDrop}
+              >
+                <button
+                  type="button"
+                  className="upload-circle"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload
+                    size={34}
+                    strokeWidth={2.2}
+                    className="upload-circle-icon"
+                  />
+                  <span className="upload-circle-label">Upload PDF</span>
+                </button>
+                <p>Drag and drop or tap to browse.</p>
+              </div>
 
-            {/* Submit */}
-            <button
-              type="button"
-              onClick={onSubmit}
-              disabled={!canSubmit}
-              className={`mt-4 w-full rounded-xl py-4 text-base font-semibold transition ${
-                canSubmit
-                  ? "bg-green-500 text-white shadow-lg shadow-green-200 hover:bg-green-600"
-                  : "cursor-not-allowed bg-zinc-300 text-zinc-500"
-              }`}
-            >
-              {isSubmitting ? "Uploading & Submitting…" : "Confirm & Print"}
-            </button>
-          </>
-        )}
+              {printFiles.length > 0 && (
+                <>
+                  <div className="section-head">
+                    <h2>File Options</h2>
+                    <button
+                      type="button"
+                      className="ghost-link"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Add More
+                    </button>
+                  </div>
 
-        {/* Hidden file input */}
+                  <div className="upload-file-list">
+                    {printFiles.map((pf, idx) => (
+                      <FileCard
+                        key={`${pf.name}-${idx}`}
+                        pf={pf}
+                        expanded={expandedIdx === idx}
+                        onToggle={() =>
+                          setExpandedIdx((prev) => (prev === idx ? null : idx))
+                        }
+                        onUpdate={(patch) => updateOptions(idx, patch)}
+                        onRemove={() => removeFile(idx)}
+                        globalColorMode={globalColorMode}
+                      />
+                    ))}
+                  </div>
+
+                  {isSubmitting && uploadProgress.length > 0 && (
+                    <div className="progress-wrap">
+                      {uploadProgress.map((pct, i) => (
+                        <div key={i} className="progress-row">
+                          <p>
+                            Uploading {printFiles[i]?.name ?? "file"}... {pct}%
+                          </p>
+                          <div className="progress-track">
+                            <span style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="summary-card">
+                    <p>Total</p>
+                    <strong>Rs {totals.totalCost}</strong>
+                    <span>
+                      {printFiles.length} file(s) • {totals.totalPages} pages •{" "}
+                      {totals.estimatedTime} min
+                    </span>
+                  </div>
+
+                  <div
+                    className="cf-turnstile-wrapper"
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      marginBottom: "0.2rem",
+                      marginTop: "1.2rem",
+                    }}
+                  >
+                    <Turnstile
+                      sitekey={
+                        import.meta.env.VITE_TURNSTILE_SITE_KEY ||
+                        "0x4AAAAAACuh4ffhEY5SnUoU"
+                      }
+                      onSuccess={(token) => setCaptchaToken(token)}
+                      onError={() => {
+                        setCaptchaToken(null);
+                        setError(
+                          "CAPTCHA verification failed. Please try again.",
+                        );
+                      }}
+                      theme="light"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={onSubmit}
+                    disabled={!canSubmit}
+                    className={
+                      canSubmit
+                        ? "btn btn-primary submit-btn"
+                        : "btn btn-disabled submit-btn"
+                    }
+                  >
+                    {isSubmitting
+                      ? "Uploading and Submitting..."
+                      : "Confirm and Print"}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </section>
+
         <input
           ref={fileInputRef}
           type="file"
           accept=".pdf"
           multiple
-          className="sr-only"
+          className="hidden-input"
           onChange={onFilesSelected}
         />
 
-        {/* ── Print Jobs (below upload section) ── */}
         <PrintJobsList userId={userId} refreshTrigger={refreshTrigger} />
       </main>
     </div>

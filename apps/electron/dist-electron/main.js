@@ -26,7 +26,31 @@ function createWindow() {
         window.webContents.openDevTools({ mode: "detach" });
         return;
     }
-    window.loadFile(node_path_1.default.join(__dirname, "../dist/index.html"));
+    // In production, load from the bundled HTML file with absolute path
+    try {
+        // Try loading from app's resources
+        const appPath = electron_1.app.getAppPath();
+        const distPath = node_path_1.default.join(appPath, "dist", "index.html");
+        if (node_fs_1.default.existsSync(distPath)) {
+            window.loadFile(distPath);
+        }
+        else {
+            // Fallback: check if we're in dev-like structure
+            const fallbackPath = node_path_1.default.join(__dirname, "..", "dist", "index.html");
+            if (node_fs_1.default.existsSync(fallbackPath)) {
+                window.loadFile(fallbackPath);
+            }
+            else {
+                console.error(`Could not find index.html at ${distPath} or ${fallbackPath}`);
+                // Last resort: load a blank page with error message
+                window.webContents.loadURL(`data:text/html,<h1>Failed to load application</h1><p>Could not find required files.</p>`);
+            }
+        }
+    }
+    catch (error) {
+        console.error("Error loading app:", error);
+        window.webContents.loadURL(`data:text/html,<h1>Error Loading Application</h1><p>${String(error)}</p>`);
+    }
 }
 electron_1.app.whenReady().then(() => {
     createWindow();
@@ -45,8 +69,7 @@ electron_1.app.on("window-all-closed", () => {
 electron_1.ipcMain.handle("download-files", async (event, files) => {
     const tempDir = node_os_1.default.tmpdir();
     const downloadedPaths = [];
-    for (let idx = 0; idx < files.length; idx++) {
-        const file = files[idx];
+    for (const [idx, file] of files.entries()) {
         const fileName = `printowl_${Date.now()}_${file.name}`;
         const filePath = node_path_1.default.join(tempDir, fileName);
         try {

@@ -6,7 +6,7 @@ let socket: Socket | null = null;
 export function getSocket(): Socket {
   if (!socket) {
     // Create the socket connection only once
-    socket = io("http://localhost:3000", {
+    socket = io("http://xopy.devlocstudio.in:3000", {
       transports: ["websocket"], // use websocket transport
       autoConnect: true, // automatically connect
     });

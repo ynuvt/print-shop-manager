@@ -1,7 +1,7 @@
 import type { PrintFileOption } from "@printowl/types";
 import axios from "axios";
 // src/api/api.ts
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "http://80.225.203.175";
+const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "http://localhost:4000";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
 
 export type UserPrintFileOption = {
@@ -64,6 +64,7 @@ export async function createPrintJobFromFiles(
   files: File[],
   fileOptions: PrintFileOption[],
   onUploadProgress?: (percent: number) => void,
+  captchaToken?: string,
 ): Promise<{ verificationCode: number }> {
   const token = getToken();
   const formData = new FormData();
@@ -72,6 +73,9 @@ export async function createPrintJobFromFiles(
     formData.append("files", file);
   });
   formData.append("fileOptions", JSON.stringify(fileOptions));
+  if (captchaToken) {
+    formData.append("captchaToken", captchaToken);
+  }
 
   const res = await axios.post(`${BASE_URL}/jobs/create-with-files`, formData, {
     headers: {
@@ -108,4 +112,32 @@ export async function getUserPrintJobById(id: string): Promise<UserPrintJob> {
     throw new Error("Print job not found");
   }
   return job;
+}
+
+export async function deleteUserPrintJob(id: string): Promise<void> {
+  const token = getToken();
+
+  const res = await axios.delete(`${BASE_URL}/jobs/delete/${id}`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.data) throw new Error("Failed to delete print job");
+}
+
+export async function resubmitCompletedPrintJob(id: string): Promise<void> {
+  const token = getToken();
+
+  const res = await axios.put(
+    `${BASE_URL}/jobs/resubmit/${id}`,
+    {},
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to submit job again");
 }

@@ -14,6 +14,8 @@ export default function PrintNotification({
   const DURATION = 19000;
   const [progress, setProgress] = useState(100);
   const [visible, setVisible] = useState(false);
+  const isDark =
+    document.documentElement.getAttribute("data-theme") === "dark";
 
   useEffect(() => {
     const frameRate = 30;
@@ -42,39 +44,41 @@ export default function PrintNotification({
   return (
     <div
       style={{
-        fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif",
+        fontFamily: "'Plus Jakarta Sans', 'Segoe UI', sans-serif",
         transform: visible
           ? "translateY(0) scale(1)"
           : "translateY(12px) scale(0.96)",
         opacity: visible ? 1 : 0,
         transition:
           "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease",
-        width: 380,
-        borderRadius: 20,
+        width: "min(92vw, 380px)",
+        borderRadius: 14,
         overflow: "hidden",
-        boxShadow: "0 20px 50px rgba(0,0,0,0.14)",
-        background: "#ffffff",
-        border: "1px solid rgba(0,0,0,0.08)",
+        boxShadow: isDark
+          ? "0 16px 44px rgba(0,0,0,0.45)"
+          : "0 16px 44px rgba(15, 23, 42, 0.16)",
+        background: isDark ? "#11151d" : "#ffffff",
+        border: isDark
+          ? "1px solid rgba(151,163,182,0.2)"
+          : "1px solid rgba(15,23,42,0.12)",
         position: "relative",
       }}
     >
-      {/* Subtle top glow */}
-
-      <div style={{ padding: "16px 18px 0" }}>
-        {/* Header row */}
+      <div style={{ padding: "14px 14px 0" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-          {/* Icon */}
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              background: "linear-gradient(135deg, #4f46e5, #9333ea)",
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: isDark
+                ? "linear-gradient(140deg, #2f9bff, #1a7af8)"
+                : "linear-gradient(140deg, #2f9bff, #1a7af8)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
-              boxShadow: "0 10px 25px rgba(79,70,229,0.25)",
+              boxShadow: "0 8px 20px rgba(26,122,248,0.35)",
             }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -88,16 +92,14 @@ export default function PrintNotification({
             </svg>
           </div>
 
-          {/* Text */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
                 margin: 0,
-                fontSize: 13,
+                fontSize: 14,
                 fontWeight: 600,
-                color: "#111827",
-                lineHeight: 1.4,
-                letterSpacing: "-0.01em",
+                color: isDark ? "#eaf0f8" : "#111827",
+                lineHeight: 1.35,
               }}
             >
               {message}
@@ -105,30 +107,30 @@ export default function PrintNotification({
             <p
               style={{
                 margin: "3px 0 0",
-                fontSize: 11.5,
-                color: "#6b7280",
-                letterSpacing: "0.01em",
+                fontSize: 12,
+                color: isDark ? "#97a3b6" : "#6b7280",
               }}
             >
               Dismisses automatically
             </p>
           </div>
 
-          {/* Dismiss button */}
           <button
             onClick={handleDismiss}
             style={{
               flexShrink: 0,
-              background: "#4f46e5",
-              border: "none",
+              background: isDark ? "#1b2432" : "#eef3fb",
+              border: isDark
+                ? "1px solid rgba(151,163,182,0.28)"
+                : "1px solid rgba(15,23,42,0.12)",
               borderRadius: 10,
-              width: 40,
-              height: 40,
+              width: 36,
+              height: 36,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
-              color: "#ffffff",
+              color: isDark ? "#eaf0f8" : "#253347",
               transition: "transform 0.15s",
             }}
             onMouseEnter={(e) => {
@@ -141,11 +143,11 @@ export default function PrintNotification({
             }}
             aria-label="Dismiss notification"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
               <path
                 d="M18 6L6 18M6 6l12 12"
                 stroke="currentColor"
-                strokeWidth="2.5"
+                strokeWidth="2.2"
                 strokeLinecap="round"
               />
             </svg>
@@ -153,13 +155,14 @@ export default function PrintNotification({
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div style={{ padding: "14px 18px 16px" }}>
+      <div style={{ padding: "12px 14px 14px" }}>
         <div
           style={{
             height: 4,
             borderRadius: 99,
-            background: "rgba(15,23,42,0.08)",
+            background: isDark
+              ? "rgba(151,163,182,0.24)"
+              : "rgba(15,23,42,0.08)",
             overflow: "hidden",
           }}
         >
@@ -168,7 +171,7 @@ export default function PrintNotification({
               height: "100%",
               width: `${progress}%`,
               borderRadius: 99,
-              background: "linear-gradient(90deg, #4f46e5, #9333ea)",
+              background: "linear-gradient(90deg, #1a7af8, #2f9bff)",
               transition: "width 0.05s linear",
             }}
           />

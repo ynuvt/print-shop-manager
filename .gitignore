@@ -36,3 +36,8 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Build artifacts and release files
+apps/electron/release/
+apps/electron/release.zip
+*.exe

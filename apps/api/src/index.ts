@@ -1,13 +1,34 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import v1Routes from "./routes/index.js";
 const app = express();
+
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json());
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please try again later." },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    message: "Too many authentication requests. Please retry in a few minutes.",
+  },
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +38,9 @@ const webIndexPath = path.join(webDistPath, "index.html");
 app.get("/healthz", (req, res) => {
   res.json({ message: "The backend is healthy!" });
 });
+
+app.use("/api/v1/auth", authLimiter);
+app.use("/api/v1", apiLimiter);
 app.use("/api/v1", v1Routes);
 
 if (fs.existsSync(webDistPath)) {
