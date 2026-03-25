@@ -107,13 +107,40 @@ electron_1.ipcMain.handle("list-printers", async () => {
 });
 electron_1.ipcMain.handle("print-pdf", async (event, filePath, printer, options, meta) => {
     try {
+        const requestedSide = typeof options?.side === "string" ? options.side.toLowerCase() : null;
+        const requestedDuplex = typeof options?.duplex === "string"
+            ? options.duplex.toLowerCase()
+            : null;
+        const requestedOrientation = typeof options?.orientation === "string"
+            ? options.orientation.toLowerCase()
+            : null;
+        const requestedScale = typeof options?.scale === "string" ? options.scale.toLowerCase() : null;
+        const side = requestedSide === "duplexlong" ||
+            requestedSide === "duplexshort" ||
+            requestedSide === "simplex"
+            ? requestedSide
+            : requestedDuplex === "duplex"
+                ? "duplexlong"
+                : "simplex";
+        const normalizedOptions = {
+            ...options,
+            copies: Math.max(1, Number(options?.copies) || 1),
+            paperSize: "A4",
+            side,
+            orientation: requestedOrientation === "landscape" ? "landscape" : "portrait",
+            scale: requestedScale === "noscale"
+                ? "noscale"
+                : requestedScale === "shrink"
+                    ? "shrink"
+                    : "fit",
+        };
         event.sender.send("print-progress", {
             fileIndex: meta?.fileIndex ?? 0,
             totalFiles: meta?.totalFiles ?? 1,
             percent: 0,
             fileName: node_path_1.default.basename(filePath),
         });
-        await (0, pdf_to_printer_1.print)(filePath, { printer, ...options });
+        await (0, pdf_to_printer_1.print)(filePath, { printer, ...normalizedOptions });
         event.sender.send("print-progress", {
             fileIndex: meta?.fileIndex ?? 0,
             totalFiles: meta?.totalFiles ?? 1,

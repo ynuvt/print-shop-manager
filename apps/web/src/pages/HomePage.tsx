@@ -107,6 +107,31 @@ function FileCard({
           </div>
 
           <div>
+            <p className="field-label">Orientation</p>
+            <ToggleGroup
+              options={[
+                { label: "Vertical", value: "PORTRAIT" },
+                { label: "Horizontal", value: "LANDSCAPE" },
+              ]}
+              value={pf.options.orientation}
+              onChange={(v) => onUpdate({ orientation: v })}
+            />
+          </div>
+
+          <div>
+            <p className="field-label">Scale</p>
+            <ToggleGroup
+              options={[
+                { label: "Fit to paper", value: "FIT" },
+                { label: "Shrink", value: "SHRINK" },
+                { label: "Original size", value: "NOSCALE" },
+              ]}
+              value={pf.options.scaleMode}
+              onChange={(v) => onUpdate({ scaleMode: v })}
+            />
+          </div>
+
+          <div>
             <p className="field-label">Page Range</p>
             <ToggleGroup
               options={[

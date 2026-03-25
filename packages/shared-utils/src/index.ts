@@ -1,6 +1,8 @@
 export type PrintOptions = {
   paperSize: "A4";
   colorMode: "BW" | "COLOR";
+  orientation: "PORTRAIT" | "LANDSCAPE";
+  scaleMode: "FIT" | "SHRINK" | "NOSCALE";
   pageRange: "ALL" | "CUSTOM";
   customRange?: string | null;
   duplex: "ONE" | "BOTH";

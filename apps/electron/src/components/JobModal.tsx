@@ -9,7 +9,7 @@ interface JobModalProps {
   onStatusUpdate: (
     jobId: string,
     userId: string,
-    newStatus: JobStatus,
+    newStatus: "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED",
   ) => Promise<void>;
   printers: { name: string; isDefault: boolean }[];
   selectedPrinter: string;
@@ -20,6 +20,12 @@ const OPTION_LABELS = {
   colorMode: { BW: "B&W", COLOR: "Color" },
   duplex: { ONE: "Single-sided", BOTH: "Duplex" },
   pageRange: { ALL: "All pages", CUSTOM: "Custom range" },
+  orientation: { PORTRAIT: "Vertical", LANDSCAPE: "Horizontal" },
+  scaleMode: {
+    FIT: "Fit to paper",
+    SHRINK: "Shrink",
+    NOSCALE: "Original size",
+  },
 };
 
 export default function JobModal({
@@ -95,6 +101,11 @@ export default function JobModal({
   });
 
   async function handleReject() {
+    const confirmed = window.confirm(
+      `Are you sure you want to reject job #${job.verificationCode}?`,
+    );
+    if (!confirmed) return;
+
     setLoading(true);
     setError(null);
     try {
@@ -134,7 +145,7 @@ export default function JobModal({
       for (let i = 0; i < paths.length; i++) {
         const filePath = paths[i];
         const file = job.files[i];
-        if (!file) continue;
+        if (!filePath || !file) continue;
 
         setPrintProgress({
           fileIndex: i,
@@ -146,6 +157,8 @@ export default function JobModal({
         const fileOption: PrintFileOption = file.option ?? {
           paperSize: "A4",
           colorMode: "BW",
+          orientation: "PORTRAIT",
+          scaleMode: "FIT",
           pageRange: "ALL",
           duplex: "ONE",
           copies: 1,
@@ -156,9 +169,24 @@ export default function JobModal({
             ? fileOption.customRange?.trim()
             : undefined;
 
+        const isDuplex = fileOption.duplex === "BOTH";
+
         const options = {
-          copies: fileOption.copies,
-          duplex: fileOption.duplex === "BOTH" ? "Duplex" : "Simplex",
+          // Ensure printer receives normalized values for all configurable settings.
+          copies: Math.max(1, Number(fileOption.copies) || 1),
+          paperSize: "A4",
+          // pdf-to-printer uses `side`; keep `duplex` too for adapter compatibility.
+          side: isDuplex ? "duplexlong" : "simplex",
+          duplex: isDuplex ? "Duplex" : "Simplex",
+          monochrome: fileOption.colorMode !== "COLOR",
+          orientation:
+            fileOption.orientation === "LANDSCAPE" ? "landscape" : "portrait",
+          scale:
+            fileOption.scaleMode === "NOSCALE"
+              ? "noscale"
+              : fileOption.scaleMode === "SHRINK"
+                ? "shrink"
+                : "fit",
           ...(customPages ? { pages: customPages } : {}),
         };
 
@@ -357,6 +385,8 @@ export default function JobModal({
                       const option: PrintFileOption = file.option ?? {
                         paperSize: "A4",
                         colorMode: "BW",
+                        orientation: "PORTRAIT",
+                        scaleMode: "FIT",
                         pageRange: "ALL",
                         duplex: "ONE",
                         copies: 1,
@@ -365,6 +395,16 @@ export default function JobModal({
                         option.colorMode === "COLOR" ? "Color" : "B&W";
                       const duplexLabel =
                         option.duplex === "BOTH" ? "Duplex" : "Single-sided";
+                      const orientationLabel =
+                        option.orientation === "LANDSCAPE"
+                          ? OPTION_LABELS.orientation.LANDSCAPE
+                          : OPTION_LABELS.orientation.PORTRAIT;
+                      const scaleLabel =
+                        option.scaleMode === "NOSCALE"
+                          ? OPTION_LABELS.scaleMode.NOSCALE
+                          : option.scaleMode === "SHRINK"
+                            ? OPTION_LABELS.scaleMode.SHRINK
+                            : OPTION_LABELS.scaleMode.FIT;
                       const pageRangeLabel =
                         option.pageRange === "CUSTOM"
                           ? `Custom range${option.customRange ? ` (${option.customRange})` : ""}`
@@ -380,6 +420,12 @@ export default function JobModal({
                           </span>
                           <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
                             {duplexLabel}
+                          </span>
+                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
+                            {orientationLabel}
+                          </span>
+                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
+                            {scaleLabel}
                           </span>
                           <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
                             {pageRangeLabel}
@@ -402,7 +448,7 @@ export default function JobModal({
           {error && <p className="mb-3 text-xs text-red-500">{error}</p>}
 
           {/* Printer Selection */}
-          {(isPending || isCompleted) && (
+          {(isPending || isProcessing || isCompleted) && (
             <div className="mb-4">
               <label
                 htmlFor="printer-select"
@@ -451,15 +497,16 @@ export default function JobModal({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => void handleReject()}
+                onClick={() => void handlePrint()}
                 disabled={loading}
-                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+                className="flex-1 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-500 active:bg-violet-700 disabled:opacity-50"
               >
-                Cancel Job
+                {loading ? "Updating..." : "Print Again"}
               </button>
               <button
                 type="button"
                 onClick={() => void handleHandover()}
+                disabled={loading}
                 className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50"
               >
                 {loading ? "Updating..." : "Handover Done"}

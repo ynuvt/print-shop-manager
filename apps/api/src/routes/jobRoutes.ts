@@ -62,6 +62,14 @@ function mapDuplex(duplex: "ONE" | "BOTH") {
   return duplex;
 }
 
+function mapOrientation(orientation: "PORTRAIT" | "LANDSCAPE") {
+  return orientation;
+}
+
+function mapScaleMode(scaleMode: "FIT" | "SHRINK" | "NOSCALE") {
+  return scaleMode;
+}
+
 async function buildPrintJobCreateData(job: Job, userId: string) {
   const analyzedJob = await analyzePrintJob(job);
 
@@ -80,6 +88,8 @@ async function buildPrintJobCreateData(job: Job, userId: string) {
           create: {
             paperSize: "A4" as const,
             colorMode: mapColorMode(file.option.colorMode),
+            orientation: mapOrientation(file.option.orientation),
+            scaleMode: mapScaleMode(file.option.scaleMode),
             pageRange: mapPageRange(file.option.pageRange),
             customRange: file.option.customRange,
             duplex: mapDuplex(file.option.duplex),
@@ -121,6 +131,8 @@ function buildPrintJobCreateDataFromProcessedFiles(
           create: {
             paperSize: "A4" as const,
             colorMode: mapColorMode(file.option.colorMode),
+            orientation: mapOrientation(file.option.orientation),
+            scaleMode: mapScaleMode(file.option.scaleMode),
             pageRange: mapPageRange(file.option.pageRange),
             customRange: file.option.customRange,
             duplex: mapDuplex(file.option.duplex),
@@ -255,6 +267,8 @@ app.post(
         const cost = calculateFileCost(pages, {
           paperSize: options.paperSize,
           colorMode: options.colorMode,
+          orientation: options.orientation,
+          scaleMode: options.scaleMode,
           pageRange: options.pageRange,
           customRange: options.customRange,
           duplex: options.duplex,
@@ -276,6 +290,8 @@ app.post(
           option: {
             paperSize: options.paperSize,
             colorMode: options.colorMode,
+            orientation: options.orientation,
+            scaleMode: options.scaleMode,
             pageRange: options.pageRange,
             customRange: options.customRange,
             duplex: options.duplex,

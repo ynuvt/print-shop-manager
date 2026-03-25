@@ -5,21 +5,12 @@ const API_ORIGIN =
   import.meta.env.VITE_API_ORIGIN ?? "http://xopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
 
-export type UserPrintFileOption = {
-  paperSize: string;
-  colorMode: string;
-  pageRange: string;
-  customRange: string | null;
-  duplex: string;
-  copies: number;
-};
-
 export type UserPrintJobFile = {
   id: string;
   name: string;
   pages: number;
   url: string;
-  option: UserPrintFileOption | null;
+  option: PrintFileOption | null;
 };
 
 export type UserPrintJob = {

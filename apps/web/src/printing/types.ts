@@ -8,6 +8,8 @@ import type { PrintFileOption } from "@printowl/types";
 export const defaultPrintOptions = (): PrintFileOption => ({
   paperSize: "A4",
   colorMode: "BW",
+  orientation: "PORTRAIT",
+  scaleMode: "FIT",
   pageRange: "ALL",
   customRange: "",
   duplex: "ONE",

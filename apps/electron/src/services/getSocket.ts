@@ -2,11 +2,14 @@
 import { io, Socket } from "socket.io-client";
 
 let socket: Socket | null = null;
+const SOCKET_BASE = (
+  import.meta.env.VITE_SOCKET_BASE_URL ?? "http://xopy.devlocstudio.in:3000"
+).replace(/\/$/, "");
 
 export function getSocket(): Socket {
   if (!socket) {
     // Create the socket connection only once
-    socket = io("http://xopy.devlocstudio.in:3000", {
+    socket = io(SOCKET_BASE, {
       transports: ["websocket"], // use websocket transport
       autoConnect: true, // automatically connect
     });

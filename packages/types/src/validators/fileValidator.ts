@@ -3,6 +3,8 @@ import z from "zod";
 const optionsSchema = z.object({
   paperSize: z.enum(["A4"]),
   colorMode: z.enum(["BW", "COLOR"]),
+  orientation: z.enum(["PORTRAIT", "LANDSCAPE"]),
+  scaleMode: z.enum(["FIT", "SHRINK", "NOSCALE"]),
   pageRange: z.enum(["ALL", "CUSTOM"]),
   customRange: z.string().optional(),
   customRangeError: z.string().optional(),

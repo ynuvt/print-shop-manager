@@ -62,6 +62,17 @@ enum duplex {
   BOTH
 }
 
+enum orientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+enum scaleMode {
+  FIT
+  SHRINK
+  NOSCALE
+}
+
 enum PrintJobStatus {
   PENDING
   PROCESSING
@@ -75,6 +86,8 @@ model printOption {
   id       String   @id @default(uuid())
   paperSize PaperSize  @default(A4)
   colorMode ColorMode  @default(BW)
+  orientation orientation @default(PORTRAIT)
+  scaleMode scaleMode @default(FIT)
   pageRange pageRange  @default(ALL)
   customRange String?
   duplex     duplex  @default(ONE)

@@ -21,6 +21,14 @@ import { getSocket } from "./services/getSocket";
 
 type Tab = "queue" | "history";
 type QueueFilter = "ALL" | "PENDING" | "PROCESSING";
+type HistoryFilter = "ALL" | "COMPLETED" | "REJECTED";
+type UpdatableJobStatus = "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED";
+
+function sortJobsNewestFirst(items: PrintJobSummary[]): PrintJobSummary[] {
+  return [...items].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
 
 // async function fetchAllJobs(): Promise<PrintJobSummary[]> {
 //   const res = await fetch(`${API_BASE}/jobs/all`, { headers: buildHeaders() });
@@ -115,6 +123,7 @@ export default function App() {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [tab, setTab] = useState<Tab>("queue");
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("ALL");
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("ALL");
   const [search, setSearch] = useState("");
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -123,7 +132,7 @@ export default function App() {
 
   const [printers, setPrinters] = useState<
     { name: string; isDefault: boolean }[]
-  >([]);
+  >([{ name: "Default Printer", isDefault: true }]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
 
   const refreshJobs = useCallback(async () => {
@@ -133,7 +142,7 @@ export default function App() {
     setLoadError(null);
     try {
       const data = await fetchAllJobs();
-      setJobs(data);
+      setJobs(sortJobsNewestFirst(data));
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to load jobs.";
@@ -188,9 +197,9 @@ export default function App() {
       }
     };
 
-    if (token) {
-      void loadPrinters();
-    }
+    // if (token) {
+    //   void loadPrinters();
+    // }
   }, [token]);
 
   useEffect(() => {
@@ -240,9 +249,11 @@ export default function App() {
           ? queueFilter === "ALL"
             ? j.status === "PENDING" || j.status === "PROCESSING"
             : j.status === queueFilter
-          : j.status === "COMPLETED" ||
-            j.status === "REJECTED" ||
-            j.status === "FAILED",
+          : historyFilter === "ALL"
+            ? j.status === "COMPLETED" ||
+              j.status === "REJECTED" ||
+              j.status === "FAILED"
+            : j.status === historyFilter,
       );
 
       const matches = tabMatches.filter((j) =>
@@ -257,15 +268,17 @@ export default function App() {
       setLoadError(null);
       await handleSelectJob(matches[0]);
     },
-    [search, jobs, tab, queueFilter, handleSelectJob],
+    [search, jobs, tab, queueFilter, historyFilter, handleSelectJob],
   );
 
   const handleStatusUpdate = useCallback(
-    async (jobId: string, userId: string, newStatus: JobStatus) => {
+    async (jobId: string, userId: string, newStatus: UpdatableJobStatus) => {
       await updateJobStatus(jobId, userId, newStatus);
 
       setJobs((prev) =>
-        prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j)),
+        sortJobsNewestFirst(
+          prev.map((j) => (j.id === jobId ? { ...j, status: newStatus } : j)),
+        ),
       );
 
       if (selectedJob?.id === jobId) {
@@ -281,11 +294,13 @@ export default function App() {
         ? queueFilter === "ALL"
           ? j.status === "PENDING" || j.status === "PROCESSING"
           : j.status === queueFilter
-        : j.status === "COMPLETED" ||
-          j.status === "REJECTED" ||
-          j.status === "FAILED",
+        : historyFilter === "ALL"
+          ? j.status === "COMPLETED" ||
+            j.status === "REJECTED" ||
+            j.status === "FAILED"
+          : j.status === historyFilter,
     );
-  }, [jobs, tab, queueFilter]);
+  }, [jobs, tab, queueFilter, historyFilter]);
 
   useEffect(() => {
     if (!toast) return;
@@ -373,6 +388,44 @@ export default function App() {
                 }`}
               >
                 Processing
+              </button>
+            </div>
+          )}
+
+          {tab === "history" && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHistoryFilter("ALL")}
+                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                  historyFilter === "ALL"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryFilter("COMPLETED")}
+                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                  historyFilter === "COMPLETED"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                Completed
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryFilter("REJECTED")}
+                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
+                  historyFilter === "REJECTED"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
+                }`}
+              >
+                Rejected
               </button>
             </div>
           )}

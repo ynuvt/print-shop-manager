@@ -8,6 +8,8 @@ import { fileSchema } from "@printowl/types";
 import {
   ColorMode,
   duplex,
+  orientation as orientationEnum,
+  scaleMode as scaleModeEnum,
 } from "../../../../packages/db/dist/generated/prisma/client.js";
 import { optionsSchema } from "@printowl/types/dist/validators/fileValidator.js";
 
@@ -99,6 +101,16 @@ app.post(
                 fileData.option.colorMode == "COLOR"
                   ? ColorMode.COLOR
                   : ColorMode.BW,
+              orientation:
+                fileData.option.orientation === "LANDSCAPE"
+                  ? orientationEnum.LANDSCAPE
+                  : orientationEnum.PORTRAIT,
+              scaleMode:
+                fileData.option.scaleMode === "NOSCALE"
+                  ? scaleModeEnum.NOSCALE
+                  : fileData.option.scaleMode === "SHRINK"
+                    ? scaleModeEnum.SHRINK
+                    : scaleModeEnum.FIT,
               duplex:
                 fileData.option.duplex === "ONE" ? duplex.ONE : duplex.BOTH,
               paperSize: fileData.option.paperSize,
@@ -172,6 +184,16 @@ app.put(
             optionsData.colorMode === "COLOR"
               ? ColorMode.COLOR
               : ColorMode.BW,
+          orientation:
+            optionsData.orientation === "LANDSCAPE"
+              ? orientationEnum.LANDSCAPE
+              : orientationEnum.PORTRAIT,
+          scaleMode:
+            optionsData.scaleMode === "NOSCALE"
+              ? scaleModeEnum.NOSCALE
+              : optionsData.scaleMode === "SHRINK"
+                ? scaleModeEnum.SHRINK
+                : scaleModeEnum.FIT,
           duplex: optionsData.duplex === "ONE" ? duplex.ONE : duplex.BOTH,
           paperSize: optionsData.paperSize,
           pageRange: optionsData.pageRange,
