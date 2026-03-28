@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
-import { FileText, Moon, SlidersHorizontal, Sun, Upload } from "lucide-react";
+import {
+  FileText,
+  Moon,
+  SlidersHorizontal,
+  Sun,
+  Upload,
+  X,
+} from "lucide-react";
 import Turnstile from "react-turnstile";
 import { createPrintJobFromFiles, registerUser } from "../api/api";
 import PrintJobsList from "../components/PrintJobsList";
@@ -26,10 +33,7 @@ function ToggleGroup<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div
-      className="toggle-group"
-      style={{ gridTemplateColumns: `repeat(${options.length}, 1fr)` }}
-    >
+    <div className="toggle-group" role="radiogroup">
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -84,11 +88,11 @@ function FileCard({
         </button>
         <button
           type="button"
-          className="icon-btn"
+          className="icon-btn remove-file-btn"
           onClick={onRemove}
           aria-label="Remove file"
         >
-          x
+          <X size={16} strokeWidth={2.4} aria-hidden="true" />
         </button>
       </div>
 
@@ -415,6 +419,13 @@ export default function HomePage({
               value={globalColorMode}
               onChange={setGlobalColorMode}
             />
+            <p className="color-mode-note">
+              Note: All files in this job will be printed as
+              {" "}
+              {globalColorMode === "COLOR" ? "Color" : "B/W"}
+              {" "}
+              based on this top selection.
+            </p>
           </div>
 
           <div className="hero-header">

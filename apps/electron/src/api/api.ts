@@ -1,7 +1,7 @@
 import type { PrintJob, PrintJobSummary } from "../types";
 
 const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ?? "http://xopy.devlocstudio.in/api/v1"
+  import.meta.env.VITE_API_BASE_URL ?? "https://xopy.devlocstudio.in/api/v1"
 ).replace(/\/$/, "");
 const TOKEN_KEY = "printowl_admin_token";
 

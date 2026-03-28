@@ -2,7 +2,7 @@ import type { PrintFileOption } from "@printowl/types";
 import axios from "axios";
 // src/api/api.ts
 const API_ORIGIN =
-  import.meta.env.VITE_API_ORIGIN ?? "http://xopy.devlocstudio.in";
+  import.meta.env.VITE_API_ORIGIN ?? "https://xopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
 
 export type UserPrintJobFile = {

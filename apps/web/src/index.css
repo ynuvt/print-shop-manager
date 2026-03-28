@@ -148,8 +148,17 @@ body {
   margin-bottom: 8px;
 }
 
+.color-mode-note {
+  margin: 8px 4px 0;
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .toggle-group {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
   padding: 6px;
   border: 1px solid var(--border);
@@ -163,11 +172,15 @@ body {
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 11px;
+  line-height: 1.2;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--text-muted);
-  background: transparent;
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
   cursor: pointer;
   min-width: 0;
 }
@@ -432,6 +445,24 @@ body {
 .counter span {
   width: 28px;
   text-align: center;
+}
+
+.remove-file-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--text) 88%, var(--error));
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.remove-file-btn:hover {
+  border-color: color-mix(in srgb, var(--error) 34%, var(--border));
+  color: var(--error);
 }
 
 .progress-wrap {
@@ -1062,11 +1093,22 @@ body {
   .toggle-group {
     padding: 4px;
     gap: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .toggle-item {
     font-size: 10px;
     padding: 8px 6px;
+  }
+
+  .upload-file-head {
+    align-items: flex-start;
+  }
+
+  .remove-file-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
   }
 
   .hero-header h1 {
@@ -1105,6 +1147,17 @@ body {
     gap: 6px;
   }
 
+
+@media (max-width: 380px) {
+  .upload-file-body .toggle-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .upload-file-body .toggle-item {
+    font-size: 11px;
+    padding: 9px 10px;
+  }
+}
   .jobs-tab {
     font-size: 10px;
     padding: 7px 9px;
