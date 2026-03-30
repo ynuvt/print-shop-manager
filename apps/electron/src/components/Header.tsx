@@ -47,9 +47,9 @@ export default function Header({
         </div>
         <div className="leading-tight">
           <p className="text-sm font-semibold text-gray-900">
-            Cloud Print Manager
+            Xopy Print Manager
           </p>
-          <p className="text-[11px] text-gray-400">PrintOwl Desktop</p>
+          <p className="text-[11px] text-gray-400">Xopy Desktop</p>
         </div>
       </div>
 

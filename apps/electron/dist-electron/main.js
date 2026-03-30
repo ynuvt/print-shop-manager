@@ -10,10 +10,12 @@ const node_os_1 = __importDefault(require("node:os"));
 const node_https_1 = __importDefault(require("node:https"));
 const pdf_to_printer_1 = require("pdf-to-printer");
 function createWindow() {
+    const iconPath = node_path_1.default.join(__dirname, "..", "resources", "icon.png");
     const window = new electron_1.BrowserWindow({
         width: 960,
         height: 640,
         backgroundColor: "#f3f4f6",
+        icon: iconPath,
         webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,

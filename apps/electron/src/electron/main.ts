@@ -6,10 +6,12 @@ import https from "node:https";
 import { getPrinters, print } from "pdf-to-printer";
 
 function createWindow() {
+  const iconPath = path.join(__dirname, "..", "resources", "icon.png");
   const window = new BrowserWindow({
     width: 960,
     height: 640,
     backgroundColor: "#f3f4f6",
+    icon: iconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
