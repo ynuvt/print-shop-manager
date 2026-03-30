@@ -23,6 +23,9 @@ import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
 import type { ThemeMode } from "../App";
 
+const MAX_UPLOAD_MB = 50;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
 function ToggleGroup<T extends string>({
   options,
   value,
@@ -238,6 +241,17 @@ export default function HomePage({
 
   const processFiles = useCallback(async (files: File[]) => {
     if (!files.length) return;
+
+    const oversizedFiles = files.filter((file) => file.size > MAX_UPLOAD_BYTES);
+    if (oversizedFiles.length > 0) {
+      const names = oversizedFiles.map((file) => file.name).join(", ");
+      setError(
+        `File too large (max ${MAX_UPLOAD_MB} MB each): ${names}.`,
+      );
+      return;
+    }
+
+    setError(null);
 
     const newEntries: PrintFileState[] = await Promise.all(
       files.map(async (file) => ({

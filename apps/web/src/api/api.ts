@@ -69,16 +69,36 @@ export async function createPrintJobFromFiles(
     formData.append("captchaToken", captchaToken);
   }
 
-  const res = await axios.post(`${BASE_URL}/jobs/create-with-files`, formData, {
-    headers: {
-      authorization: `Bearer ${token}`,
-    },
-    onUploadProgress: (evt) => {
-      if (!onUploadProgress) return;
-      if (!evt.total || evt.total <= 0) return;
-      onUploadProgress(Math.round((evt.loaded / evt.total) * 100));
-    },
-  });
+  let res;
+  try {
+    res = await axios.post(`${BASE_URL}/jobs/create-with-files`, formData, {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      onUploadProgress: (evt) => {
+        if (!onUploadProgress) return;
+        if (!evt.total || evt.total <= 0) return;
+        onUploadProgress(Math.round((evt.loaded / evt.total) * 100));
+      },
+    });
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const serverError = error.response?.data?.error;
+
+      if (status === 413) {
+        throw new Error(
+          "Upload too large. Max file size is 50 MB. If this file is under 50 MB, increase reverse-proxy/CDN body size limit to at least 55 MB.",
+        );
+      }
+
+      if (typeof serverError === "string" && serverError.trim()) {
+        throw new Error(serverError);
+      }
+    }
+
+    throw error;
+  }
 
   if (!res.data) throw new Error("Failed to create print job");
   return res.data;

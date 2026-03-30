@@ -120,6 +120,15 @@ Each app/package that needs configuration uses `.env` files in its folder. The m
 - `R2_PUBLIC_BUCKET_URL` – Public URL of your R2 bucket (e.g. `https://<bucket>.<account>.r2.cloudflarestorage.com`)
 - `socket_url` – URL of the Socket.io server (used by the web UI)
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD` – credentials for the print operator auth
+- `MAX_UPLOAD_MB` – per-file upload limit for `/api/v1/jobs/create-with-files` (default: `50`)
+
+> Uploads pass through any reverse proxy/CDN before the API. Make sure your proxy body limit is greater than `MAX_UPLOAD_MB` (recommended: at least `55M`).
+>
+> Example for Nginx:
+>
+> ```nginx
+> client_max_body_size 55M;
+> ```
 
 > You can copy the example `.env.example` (if present) or create your own at `apps/api/.env`.
 

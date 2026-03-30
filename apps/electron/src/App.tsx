@@ -132,7 +132,7 @@ export default function App() {
 
   const [printers, setPrinters] = useState<
     { name: string; isDefault: boolean }[]
-  >([{ name: "Default Printer", isDefault: true }]);
+  >([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
 
   const refreshJobs = useCallback(async () => {
@@ -197,9 +197,9 @@ export default function App() {
       }
     };
 
-    // if (token) {
-    //   void loadPrinters();
-    // }
+    if (token) {
+      void loadPrinters();
+    }
   }, [token]);
 
   useEffect(() => {

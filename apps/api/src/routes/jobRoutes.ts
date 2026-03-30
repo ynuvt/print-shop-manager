@@ -25,13 +25,43 @@ import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 
 const app = express.Router();
+const CREATE_WITH_FILES_MAX_UPLOAD_MB = 50;
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     files: 20,
-    fileSize: Number(process.env.MAX_UPLOAD_MB ?? 50) * 1024 * 1024,
+    fileSize: CREATE_WITH_FILES_MAX_UPLOAD_MB * 1024 * 1024,
   },
 });
+
+const uploadFilesMiddleware: express.RequestHandler = (req, res, next) => {
+  upload.array("files")(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    if (error instanceof multer.MulterError) {
+      if (error.code === "LIMIT_FILE_SIZE") {
+        res.status(413).json({
+          error: `File too large. Max file size is ${CREATE_WITH_FILES_MAX_UPLOAD_MB} MB.`,
+        });
+        return;
+      }
+
+      if (error.code === "LIMIT_FILE_COUNT") {
+        res.status(400).json({ error: "Too many files. Maximum is 20 files." });
+        return;
+      }
+
+      res.status(400).json({ error: error.message });
+      return;
+    }
+
+    next(error);
+  });
+};
 
 function mapStatus(
   status: "PROCESSING" | "PENDING" | "COMPLETED" | "REJECTED" | "FAILED",
@@ -195,7 +225,7 @@ function assertSingleColorModeInOptions(
 app.post(
   "/create-with-files",
   authMiddleware(["admin", "customer"]),
-  upload.array("files"),
+  uploadFilesMiddleware,
   async (req: ExtendedRequest, res) => {
     const incomingFiles = (req.files ?? []) as Express.Multer.File[];
     if (!incomingFiles.length) {
