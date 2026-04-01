@@ -7,6 +7,7 @@ const JobStatusEnum = [
   "COMPLETED",
   "REJECTED",
   "FAILED",
+  "CANCELED",
 ] as const;
 export type JobStatus = (typeof JobStatusEnum)[number];
 

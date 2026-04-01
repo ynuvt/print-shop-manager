@@ -25,10 +25,10 @@ export default function Header({
   onPrinterChange,
 }: HeaderProps) {
   return (
-    <header className="flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white px-5 py-3 shadow-sm">
+    <header className="top-bar">
       {/* Brand */}
-      <div className="flex items-center gap-2.5">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-600 text-white">
+      <div className="brand-row">
+        <div className="brand-mark">
           <svg
             width="14"
             height="14"
@@ -45,38 +45,25 @@ export default function Header({
             <path d="M6 14H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" />
           </svg>
         </div>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold text-gray-900">
-            Xopy Print Manager
-          </p>
-          <p className="text-[11px] text-gray-400">Xopy Desktop</p>
+        <div>
+          <p className="brand-title">Zopy Print Manager</p>
+          <span className="brand-subtitle">Zopy Desktop</span>
         </div>
       </div>
 
       {/* Tabs */}
-      <nav
-        className="flex rounded-lg bg-gray-100 p-0.5 ring-1 ring-gray-200"
-        aria-label="Queue views"
-      >
+      <nav className="tab-group" aria-label="Queue views">
         <button
           type="button"
           onClick={() => onTabChange("queue")}
-          className={`rounded-md px-4 py-1.5 text-xs font-semibold transition-colors ${
-            tab === "queue"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
+          className={`tab-item ${tab === "queue" ? "active" : ""}`}
         >
           Active Queue
         </button>
         <button
           type="button"
           onClick={() => onTabChange("history")}
-          className={`rounded-md px-4 py-1.5 text-xs font-semibold transition-colors ${
-            tab === "history"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
+          className={`tab-item ${tab === "history" ? "active" : ""}`}
         >
           History
         </button>
@@ -84,32 +71,30 @@ export default function Header({
 
       {/* Stats + printer selector */}
       <div className="flex items-center gap-4">
-        <div className="text-right">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-gray-400">
-            Total
-          </p>
-          <p className="text-sm font-semibold tabular-nums text-gray-900">
-            {totalJobs}
-          </p>
+        <div className="stat-block">
+          <p className="stat-label">Total</p>
+          <p className="stat-value tabular-nums">{totalJobs}</p>
         </div>
 
-        <div className="h-5 w-px bg-gray-200" />
+        <div className="stat-divider" />
 
-        <div className="text-right">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-gray-400">
-            Processing
-          </p>
-          <p className="text-sm font-semibold tabular-nums text-blue-600">
+        <div className="stat-block">
+          <p className="stat-label">Processing</p>
+          <p
+            className="stat-value tabular-nums"
+            style={{ color: "var(--brand)" }}
+          >
             {processingCount}
           </p>
         </div>
 
-        <div className="h-5 w-px bg-gray-200" />
+        <div className="stat-divider" />
 
         <div className="flex items-center gap-2">
           <label
             htmlFor="header-printer"
-            className="text-[10px] font-medium uppercase tracking-wider text-gray-400"
+            className="stat-label"
+            style={{ margin: 0 }}
           >
             Printer
           </label>
@@ -117,7 +102,7 @@ export default function Header({
             id="header-printer"
             value={selectedPrinter}
             onChange={(e) => onPrinterChange(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs text-gray-900 focus:ring-2 focus:ring-blue-500"
+            className="select-input"
           >
             <option value="">Select printer</option>
             {printers.map((printer) => (

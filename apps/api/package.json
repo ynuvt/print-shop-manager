@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.940.0",
+    "@aws-sdk/s3-request-presigner": "^3.940.0",
     "@printowl/db": "^1.0.0",
     "@printowl/shared-utils": "^1.0.0",
     "@printowl/types": "^1.0.0",

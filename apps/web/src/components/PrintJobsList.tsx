@@ -52,7 +52,13 @@ function formatOption(label: string, value: string) {
   );
 }
 
-function FileOptionCard({ file }: { file: UserPrintJobFile }) {
+function FileOptionCard({
+  file,
+  canViewFile,
+}: {
+  file: UserPrintJobFile;
+  canViewFile: boolean;
+}) {
   const opt = file.option;
   const colorLabel =
     opt?.colorMode === "COLOR" ? "Color (Rs 7/sheet)" : "B&W (Rs 2/sheet)";
@@ -71,9 +77,11 @@ function FileOptionCard({ file }: { file: UserPrintJobFile }) {
           </span>
           <p>{file.name}</p>
         </div>
-        <a href={file.url} target="_blank" rel="noopener noreferrer">
-          View File
-        </a>
+        {canViewFile && (
+          <a href={file.url} target="_blank" rel="noopener noreferrer">
+            View File
+          </a>
+        )}
       </div>
       <p className="job-file-pages">{file.pages} pages</p>
       {opt && (
@@ -168,6 +176,7 @@ function JobDetailModal({
   const otpDigits = String(job.verificationCode).split("");
   const canDelete = ACTIVE_STATUSES.includes(job.status);
   const canResubmit = COMPLETED_STATUSES.includes(job.status);
+  const canViewFiles = !["REJECTED", "CANCELED"].includes(job.status);
 
   const handleRefreshStatus = async () => {
     await loadJob();
@@ -298,7 +307,11 @@ function JobDetailModal({
 
         <div className="modal-files-list">
           {job.files.map((file) => (
-            <FileOptionCard key={file.id} file={file} />
+            <FileOptionCard
+              key={file.id}
+              file={file}
+              canViewFile={canViewFiles}
+            />
           ))}
         </div>
       </div>

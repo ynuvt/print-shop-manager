@@ -134,6 +134,7 @@ export default function App() {
     { name: string; isDefault: boolean }[]
   >([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
+  const [selectedColorPrinter, setSelectedColorPrinter] = useState<string>("");
 
   const refreshJobs = useCallback(async () => {
     if (!token) return;
@@ -181,7 +182,15 @@ export default function App() {
 
       try {
         const printerList = await window.electronAPI.listPrinters();
+        console.log("=== PRINTER LIST LOADED ===");
+        console.log(JSON.stringify(printerList, null, 2));
+        console.log("=== END PRINTER LIST ===");
         setPrinters(printerList);
+
+        // Set color printer (COLOUR A/4 is our color printer)
+        const colorPrinterName = "COLOUR   A/4";
+        setSelectedColorPrinter(colorPrinterName);
+        console.log("Color printer set to:", colorPrinterName);
 
         const savedPrinter = localStorage.getItem("printowl_selected_printer");
         if (savedPrinter) {
@@ -209,6 +218,12 @@ export default function App() {
   const handlePrinterChange = useCallback((printer: string) => {
     setSelectedPrinter(printer);
     localStorage.setItem("printowl_selected_printer", printer);
+  }, []);
+
+  const handleColorPrinterChange = useCallback((printer: string) => {
+    console.log("Setting color printer to:", printer);
+    setSelectedColorPrinter(printer);
+    localStorage.setItem("printowl_color_printer", printer);
   }, []);
 
   const handleSelectJob = useCallback(async (job: PrintJobSummary) => {
@@ -463,6 +478,8 @@ export default function App() {
           printers={printers}
           selectedPrinter={selectedPrinter}
           onPrinterChange={handlePrinterChange}
+          selectedColorPrinter={selectedColorPrinter}
+          onColorPrinterChange={handleColorPrinterChange}
         />
       )}
 

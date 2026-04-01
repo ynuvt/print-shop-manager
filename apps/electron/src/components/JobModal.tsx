@@ -14,6 +14,8 @@ interface JobModalProps {
   printers: { name: string; isDefault: boolean }[];
   selectedPrinter: string;
   onPrinterChange: (printer: string) => void;
+  selectedColorPrinter: string;
+  onColorPrinterChange: (printer: string) => void;
 }
 
 const OPTION_LABELS = {
@@ -35,6 +37,8 @@ export default function JobModal({
   printers,
   selectedPrinter,
   onPrinterChange,
+  selectedColorPrinter,
+  onColorPrinterChange,
 }: JobModalProps) {
   const [currentStatus, setCurrentStatus] = useState<JobStatus>(job.status);
   const [loading, setLoading] = useState(false);
@@ -52,6 +56,9 @@ export default function JobModal({
     percent: number;
     fileName?: string;
   } | null>(null);
+  // Local printer selection for THIS job only (doesn't affect global state)
+  const [localPrinterSelection, setLocalPrinterSelection] =
+    useState<string>(selectedPrinter);
 
   useEffect(() => {
     setCurrentStatus(job.status);
@@ -60,7 +67,24 @@ export default function JobModal({
     setDownloadProgress(null);
     setPrintProgress(null);
     setError(null);
-  }, [job.status]);
+
+    // Auto-select color printer LOCALLY for COLOR jobs only (doesn't affect global state)
+    const hasColorFiles = job.files.some(
+      (f) => (f.option.colorMode || "BW").toUpperCase() === "COLOR",
+    );
+
+    if (hasColorFiles && selectedColorPrinter) {
+      console.log(
+        "Color job detected, auto-selecting color printer (LOCAL):",
+        selectedColorPrinter,
+      );
+      setLocalPrinterSelection(selectedColorPrinter);
+    } else {
+      // For B&W jobs, use the global printer selection
+      console.log("B&W job detected, using global printer:", selectedPrinter);
+      setLocalPrinterSelection(selectedPrinter);
+    }
+  }, [job.id, job.files, selectedColorPrinter, selectedPrinter]);
 
   useEffect(() => {
     const offDownload = window.electronAPI?.onDownloadProgress?.((payload) => {
@@ -119,7 +143,7 @@ export default function JobModal({
   }
 
   async function handlePrint() {
-    if (!selectedPrinter) {
+    if (!localPrinterSelection) {
       setError("Please select a printer first.");
       return;
     }
@@ -190,10 +214,15 @@ export default function JobModal({
           ...(customPages ? { pages: customPages } : {}),
         };
 
-        await window.electronAPI.printPDF(filePath, selectedPrinter, options, {
-          fileIndex: i,
-          totalFiles: paths.length,
-        });
+        await window.electronAPI.printPDF(
+          filePath,
+          localPrinterSelection,
+          options,
+          {
+            fileIndex: i,
+            totalFiles: paths.length,
+          },
+        );
       }
     } catch (err) {
       setError("Failed to start printing. Please try again.");
@@ -450,22 +479,31 @@ export default function JobModal({
           {/* Printer Selection */}
           {(isPending || isProcessing || isCompleted) && (
             <div className="mb-4">
-              <label
-                htmlFor="printer-select"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Select Printer
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label
+                  htmlFor="printer-select"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Select Printer
+                </label>
+                {printTypeLabel === "Color" && (
+                  <span className="text-xs text-green-600 font-medium">
+                    ✓ Color printer auto-selected
+                  </span>
+                )}
+              </div>
               <select
                 id="printer-select"
-                value={selectedPrinter}
-                onChange={(e) => onPrinterChange(e.target.value)}
+                value={localPrinterSelection}
+                onChange={(e) => setLocalPrinterSelection(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Choose a printer...</option>
                 {printers.map((printer) => (
                   <option key={printer.name} value={printer.name}>
-                    {printer.name} {printer.isDefault ? "(Default)" : ""}
+                    {printer.name}
+                    {printer.isDefault ? " (Default)" : ""}
+                    {printer.name === selectedColorPrinter ? " 🎨 Color" : ""}
                   </option>
                 ))}
               </select>

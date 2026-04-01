@@ -18,6 +18,7 @@ import {
 import { getPdfPageCountFromBuffer } from "../utils/pdfPageCount.js";
 import {
   buildR2ObjectKey,
+  createPresignedUploadUrl,
   deleteObjectFromR2ByUrl,
   uploadBufferToR2,
 } from "../utils/r2Storage.js";
@@ -26,6 +27,9 @@ import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/en
 
 const app = express.Router();
 const CREATE_WITH_FILES_MAX_UPLOAD_MB = 50;
+const CREATE_WITH_URLS_MAX_TOTAL_MB = 20;
+const CREATE_WITH_URLS_MAX_TOTAL_BYTES =
+  CREATE_WITH_URLS_MAX_TOTAL_MB * 1024 * 1024;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -64,7 +68,13 @@ const uploadFilesMiddleware: express.RequestHandler = (req, res, next) => {
 };
 
 function mapStatus(
-  status: "PROCESSING" | "PENDING" | "COMPLETED" | "REJECTED" | "FAILED",
+  status:
+    | "PROCESSING"
+    | "PENDING"
+    | "COMPLETED"
+    | "REJECTED"
+    | "FAILED"
+    | "CANCELED",
 ) {
   switch (status) {
     case "PENDING":
@@ -77,6 +87,8 @@ function mapStatus(
       return PrintJobStatus.REJECTED;
     case "FAILED":
       return PrintJobStatus.FAILED;
+    case "CANCELED":
+      return PrintJobStatus.CANCELED;
   }
 }
 
@@ -206,6 +218,104 @@ function parseFileOptionsFromBody(rawFileOptions: unknown) {
   });
 }
 
+type PresignRequestFile = {
+  name: string;
+  contentType: string;
+};
+
+function parsePresignFilesFromBody(rawFiles: unknown): PresignRequestFile[] {
+  if (!Array.isArray(rawFiles)) {
+    throw new PrintJobAnalysisError("files must be an array.", 400);
+  }
+
+  return rawFiles.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new PrintJobAnalysisError(
+        `Invalid file payload at index ${index + 1}.`,
+        400,
+      );
+    }
+
+    const name =
+      typeof (item as { name?: unknown }).name === "string"
+        ? (item as { name: string }).name.trim()
+        : "";
+
+    if (!name) {
+      throw new PrintJobAnalysisError(
+        `Missing file name for file ${index + 1}.`,
+        400,
+      );
+    }
+
+    const contentType =
+      typeof (item as { contentType?: unknown }).contentType === "string" &&
+      (item as { contentType: string }).contentType.trim()
+        ? (item as { contentType: string }).contentType.trim()
+        : "application/pdf";
+
+    return { name, contentType };
+  });
+}
+
+type UrlFileForCreate = {
+  name: string;
+  url: string;
+  options: ReturnType<typeof optionsSchema.parse>;
+};
+
+function parseUrlFilesFromBody(rawFiles: unknown): UrlFileForCreate[] {
+  if (!Array.isArray(rawFiles)) {
+    throw new PrintJobAnalysisError("files must be an array.", 400);
+  }
+
+  return rawFiles.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new PrintJobAnalysisError(
+        `Invalid file payload at index ${index + 1}.`,
+        400,
+      );
+    }
+
+    const name =
+      typeof (item as { name?: unknown }).name === "string"
+        ? (item as { name: string }).name.trim()
+        : "";
+    const url =
+      typeof (item as { url?: unknown }).url === "string"
+        ? (item as { url: string }).url.trim()
+        : "";
+
+    if (!name || !url) {
+      throw new PrintJobAnalysisError(
+        `Missing name or url for file ${index + 1}.`,
+        400,
+      );
+    }
+
+    try {
+      new URL(url);
+    } catch {
+      throw new PrintJobAnalysisError(
+        `Invalid url for file ${index + 1}.`,
+        400,
+      );
+    }
+
+    const optionsResult = optionsSchema.safeParse(
+      (item as { options?: unknown }).options,
+    );
+    if (!optionsResult.success) {
+      throw new PrintJobAnalysisError(
+        `Invalid print options for file ${index + 1}.`,
+        400,
+      );
+    }
+
+    return { name, url, options: optionsResult.data };
+  });
+}
+
 function assertSingleColorModeInOptions(
   options: Array<{ colorMode: "BW" | "COLOR" }>,
 ) {
@@ -222,18 +332,198 @@ function assertSingleColorModeInOptions(
   }
 }
 
+/*
+ * Legacy upload flow (direct file upload to backend):
+ * Disabled in favor of presigned client uploads + create-with-urls.
+ */
+// app.post(
+//   "/create-with-files",
+//   authMiddleware(["admin", "customer"]),
+//   uploadFilesMiddleware,
+//   async (req: ExtendedRequest, res) => {
+//     const incomingFiles = (req.files ?? []) as Express.Multer.File[];
+//     if (!incomingFiles.length) {
+//       return res
+//         .status(400)
+//         .json({ error: "At least one PDF file is required." });
+//     }
+//
+//     if (!req.user?.uid) {
+//       return res.status(401).json({ error: "Unauthorized" });
+//     }
+//
+//     // Verify CAPTCHA token
+//     const captchaToken = req.body.captchaToken;
+//     if (captchaToken) {
+//       const captchaVerification = await verifyTurnstileToken(captchaToken);
+//       if (!captchaVerification.success) {
+//         return res.status(400).json({
+//           error: captchaVerification.error || "CAPTCHA verification failed",
+//         });
+//       }
+//     }
+//
+//     try {
+//       const fileOptions = parseFileOptionsFromBody(req.body.fileOptions);
+//       assertSingleColorModeInOptions(fileOptions);
+//
+//       if (fileOptions.length !== incomingFiles.length) {
+//         return res.status(400).json({
+//           error:
+//             "files and fileOptions length mismatch. Provide one options object per file.",
+//         });
+//       }
+//
+//       const uploadedFiles: UploadedFileForCreate[] = [];
+//
+//       for (let index = 0; index < incomingFiles.length; index++) {
+//         const file = incomingFiles[index]!;
+//         const options = fileOptions[index]!;
+//
+//         if (file.mimetype !== "application/pdf") {
+//           return res.status(400).json({
+//             error: `${file.originalname} is not a PDF. Only PDF files are allowed.`,
+//           });
+//         }
+//
+//         let pages: number;
+//         try {
+//           pages = await getPdfPageCountFromBuffer(file.buffer);
+//         } catch {
+//           return res.status(400).json({
+//             error: `Unable to inspect ${file.originalname}. Only valid PDF files can be submitted.`,
+//           });
+//         }
+//
+//         if (options.pageRange === "CUSTOM") {
+//           const rangeError = validateCustomPageRange(
+//             options.customRange ?? "",
+//             pages,
+//           );
+//
+//           if (rangeError) {
+//             return res.status(400).json({
+//               error: `${file.originalname}: ${rangeError}`,
+//             });
+//           }
+//         }
+//
+//         const cost = calculateFileCost(pages, {
+//           paperSize: options.paperSize,
+//           colorMode: options.colorMode,
+//           orientation: options.orientation,
+//           scaleMode: options.scaleMode,
+//           pageRange: options.pageRange,
+//           customRange: options.customRange,
+//           duplex: options.duplex,
+//           copies: options.copies,
+//         });
+//
+//         const key = buildR2ObjectKey(req.user.uid, file.originalname);
+//         const { url } = await uploadBufferToR2({
+//           key,
+//           buffer: file.buffer,
+//           contentType: file.mimetype || "application/pdf",
+//         });
+//
+//         uploadedFiles.push({
+//           name: file.originalname,
+//           url,
+//           pages,
+//           cost,
+//           option: {
+//             paperSize: options.paperSize,
+//             colorMode: options.colorMode,
+//             orientation: options.orientation,
+//             scaleMode: options.scaleMode,
+//             pageRange: options.pageRange,
+//             customRange: options.customRange,
+//             duplex: options.duplex,
+//             copies: options.copies,
+//           },
+//         });
+//       }
+//
+//       const createdJob = await prisma.printJob.create({
+//         data: buildPrintJobCreateDataFromProcessedFiles(
+//           uploadedFiles,
+//           req.user.uid,
+//         ),
+//       });
+//
+//       return res.status(201).json({
+//         message: "Job created successfully!",
+//         verificationCode: createdJob.verificationCode,
+//       });
+//     } catch (error) {
+//       if (error instanceof PrintJobAnalysisError) {
+//         return res.status(error.statusCode).json({ error: error.message });
+//       }
+//
+//       return res.status(500).json({ error: "Failed to create job." });
+//     } finally {
+//       console.log("Emitting job-created event to admin room");
+//       socket.emit("job-created", "admin");
+//     }
+//   },
+// );
+
 app.post(
-  "/create-with-files",
+  "/presign-uploads",
   authMiddleware(["admin", "customer"]),
-  uploadFilesMiddleware,
   async (req: ExtendedRequest, res) => {
-    const incomingFiles = (req.files ?? []) as Express.Multer.File[];
-    if (!incomingFiles.length) {
-      return res
-        .status(400)
-        .json({ error: "At least one PDF file is required." });
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
+    try {
+      const files = parsePresignFilesFromBody(req.body.files);
+
+      if (!files.length) {
+        return res
+          .status(400)
+          .json({ error: "At least one PDF file is required." });
+      }
+
+      const uploads = await Promise.all(
+        files.map(async (file) => {
+          if (file.contentType !== "application/pdf") {
+            throw new PrintJobAnalysisError(
+              `${file.name} is not a PDF. Only PDF files are allowed.`,
+              400,
+            );
+          }
+
+          const key = buildR2ObjectKey(req.user!.uid, file.name);
+          const presigned = await createPresignedUploadUrl({
+            key,
+            contentType: file.contentType,
+          });
+
+          return {
+            name: file.name,
+            key: presigned.key,
+            uploadUrl: presigned.uploadUrl,
+            publicUrl: presigned.publicUrl,
+          };
+        }),
+      );
+
+      return res.status(200).json({ uploads });
+    } catch (error) {
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+
+      return res.status(500).json({ error: "Failed to prepare uploads." });
+    }
+  },
+);
+
+app.post(
+  "/create-with-urls",
+  authMiddleware(["admin", "customer"]),
+  async (req: ExtendedRequest, res) => {
     if (!req.user?.uid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
@@ -249,83 +539,90 @@ app.post(
       }
     }
 
-    try {
-      const fileOptions = parseFileOptionsFromBody(req.body.fileOptions);
-      assertSingleColorModeInOptions(fileOptions);
+    let incomingFiles: UrlFileForCreate[] = [];
 
-      if (fileOptions.length !== incomingFiles.length) {
-        return res.status(400).json({
-          error:
-            "files and fileOptions length mismatch. Provide one options object per file.",
-        });
+    try {
+      incomingFiles = parseUrlFilesFromBody(req.body.files);
+
+      if (!incomingFiles.length) {
+        return res
+          .status(400)
+          .json({ error: "At least one PDF file is required." });
       }
 
+      assertSingleColorModeInOptions(
+        incomingFiles.map((file) => ({ colorMode: file.options.colorMode })),
+      );
+
       const uploadedFiles: UploadedFileForCreate[] = [];
+      let totalBytes = 0;
 
-      for (let index = 0; index < incomingFiles.length; index++) {
-        const file = incomingFiles[index]!;
-        const options = fileOptions[index]!;
+      for (const file of incomingFiles) {
+        const response = await fetch(file.url);
+        if (!response.ok) {
+          throw new PrintJobAnalysisError(
+            `Unable to fetch ${file.name} from storage. Please re-upload and try again.`,
+            502,
+          );
+        }
 
-        if (file.mimetype !== "application/pdf") {
-          return res.status(400).json({
-            error: `${file.originalname} is not a PDF. Only PDF files are allowed.`,
-          });
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        totalBytes += buffer.byteLength;
+
+        if (totalBytes > CREATE_WITH_URLS_MAX_TOTAL_BYTES) {
+          throw new PrintJobAnalysisError(
+            `Total upload too large. Max combined size is ${CREATE_WITH_URLS_MAX_TOTAL_MB} MB.`,
+            413,
+          );
         }
 
         let pages: number;
         try {
-          pages = await getPdfPageCountFromBuffer(file.buffer);
+          pages = await getPdfPageCountFromBuffer(buffer);
         } catch {
-          return res.status(400).json({
-            error: `Unable to inspect ${file.originalname}. Only valid PDF files can be submitted.`,
-          });
+          throw new PrintJobAnalysisError(
+            `Unable to inspect ${file.name}. Only valid PDF files can be submitted.`,
+            400,
+          );
         }
 
-        if (options.pageRange === "CUSTOM") {
+        if (file.options.pageRange === "CUSTOM") {
           const rangeError = validateCustomPageRange(
-            options.customRange ?? "",
+            file.options.customRange ?? "",
             pages,
           );
 
           if (rangeError) {
-            return res.status(400).json({
-              error: `${file.originalname}: ${rangeError}`,
-            });
+            throw new PrintJobAnalysisError(`${file.name}: ${rangeError}`, 400);
           }
         }
 
         const cost = calculateFileCost(pages, {
-          paperSize: options.paperSize,
-          colorMode: options.colorMode,
-          orientation: options.orientation,
-          scaleMode: options.scaleMode,
-          pageRange: options.pageRange,
-          customRange: options.customRange,
-          duplex: options.duplex,
-          copies: options.copies,
-        });
-
-        const key = buildR2ObjectKey(req.user.uid, file.originalname);
-        const { url } = await uploadBufferToR2({
-          key,
-          buffer: file.buffer,
-          contentType: file.mimetype || "application/pdf",
+          paperSize: file.options.paperSize,
+          colorMode: file.options.colorMode,
+          orientation: file.options.orientation,
+          scaleMode: file.options.scaleMode,
+          pageRange: file.options.pageRange,
+          customRange: file.options.customRange,
+          duplex: file.options.duplex,
+          copies: file.options.copies,
         });
 
         uploadedFiles.push({
-          name: file.originalname,
-          url,
+          name: file.name,
+          url: file.url,
           pages,
           cost,
           option: {
-            paperSize: options.paperSize,
-            colorMode: options.colorMode,
-            orientation: options.orientation,
-            scaleMode: options.scaleMode,
-            pageRange: options.pageRange,
-            customRange: options.customRange,
-            duplex: options.duplex,
-            copies: options.copies,
+            paperSize: file.options.paperSize,
+            colorMode: file.options.colorMode,
+            orientation: file.options.orientation,
+            scaleMode: file.options.scaleMode,
+            pageRange: file.options.pageRange,
+            customRange: file.options.customRange,
+            duplex: file.options.duplex,
+            copies: file.options.copies,
           },
         });
       }
@@ -342,6 +639,10 @@ app.post(
         verificationCode: createdJob.verificationCode,
       });
     } catch (error) {
+      await Promise.allSettled(
+        incomingFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
+      );
+
       if (error instanceof PrintJobAnalysisError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
@@ -354,47 +655,47 @@ app.post(
   },
 );
 
-app.post(
-  "/create",
-  authMiddleware(["admin", "customer"]),
-  async (req: ExtendedRequest, res) => {
-    const schema = JobSchema.safeParse({ ...req.body });
-    if (!schema.success) {
-      return res.status(400).json({ error: schema.error });
-    }
-    const job = schema.data;
-    try {
-      assertSingleColorModeInOptions(
-        job.files.map((file) => ({ colorMode: file.option.colorMode })),
-      );
-    } catch (error) {
-      if (error instanceof PrintJobAnalysisError) {
-        return res.status(error.statusCode).json({ error: error.message });
-      }
-      return res
-        .status(400)
-        .json({ error: "Invalid color mode configuration." });
-    }
+// app.post(
+//   "/create",
+//   authMiddleware(["admin", "customer"]),
+//   async (req: ExtendedRequest, res) => {
+//     const schema = JobSchema.safeParse({ ...req.body });
+//     if (!schema.success) {
+//       return res.status(400).json({ error: schema.error });
+//     }
+//     const job = schema.data;
+//     try {
+//       assertSingleColorModeInOptions(
+//         job.files.map((file) => ({ colorMode: file.option.colorMode })),
+//       );
+//     } catch (error) {
+//       if (error instanceof PrintJobAnalysisError) {
+//         return res.status(error.statusCode).json({ error: error.message });
+//       }
+//       return res
+//         .status(400)
+//         .json({ error: "Invalid color mode configuration." });
+//     }
 
-    try {
-      const createdJob = await prisma.printJob.create({
-        data: await buildPrintJobCreateData(job, req.user!.uid),
-      });
-      res.status(201).json({
-        message: "Job created successfully!",
-        verificationCode: createdJob.verificationCode,
-      });
-    } catch (error) {
-      console.log(error);
-      if (error instanceof PrintJobAnalysisError) {
-        return res.status(error.statusCode).json({ error: error.message });
-      }
-      res.status(500).json({ error: "Failed to create job." });
-    } finally {
-      socket.emit("job-created", "admin");
-    }
-  },
-);
+//     try {
+//       const createdJob = await prisma.printJob.create({
+//         data: await buildPrintJobCreateData(job, req.user!.uid),
+//       });
+//       res.status(201).json({
+//         message: "Job created successfully!",
+//         verificationCode: createdJob.verificationCode,
+//       });
+//     } catch (error) {
+//       console.log(error);
+//       if (error instanceof PrintJobAnalysisError) {
+//         return res.status(error.statusCode).json({ error: error.message });
+//       }
+//       res.status(500).json({ error: "Failed to create job." });
+//     } finally {
+//       socket.emit("job-created", "admin");
+//     }
+//   },
+// );
 
 app.get("/all", authMiddleware(["admin"]), async (req, res) => {
   try {
@@ -418,7 +719,19 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
     job = await prisma.printJob.update({
       where: { id: schema.data.id },
       data: { status: mapStatus(status) },
+      include: {
+        files: {
+          select: { url: true },
+        },
+      },
     });
+
+    if (status === "REJECTED" || status === "CANCELED") {
+      await Promise.allSettled(
+        job.files.map((file) => deleteObjectFromR2ByUrl(file.url)),
+      );
+    }
+
     res.status(200).json(job);
   } catch (error) {
     res.status(500).json({ error: "Failed to update job status." });
@@ -551,6 +864,10 @@ app.delete(
         });
 
         return res.status(200).json({ message: "Job deleted successfully." });
+      }
+
+      for (const file of existingJob.files) {
+        await deleteObjectFromR2ByUrl(file.url);
       }
 
       job = await prisma.printJob.update({

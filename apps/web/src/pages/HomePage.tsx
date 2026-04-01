@@ -10,7 +10,12 @@ import {
   X,
 } from "lucide-react";
 import Turnstile from "react-turnstile";
-import { createPrintJobFromFiles, registerUser } from "../api/api";
+import {
+  createPrintJobFromUrls,
+  registerUser,
+  requestPresignedUploads,
+  uploadFileToR2,
+} from "../api/api";
 import PrintJobsList from "../components/PrintJobsList";
 import {
   buildJobTotals,
@@ -23,8 +28,8 @@ import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
 import type { ThemeMode } from "../App";
 
-const MAX_UPLOAD_MB = 50;
-const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+const MAX_JOB_UPLOAD_MB = 20;
+const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
 
 function ToggleGroup<T extends string>({
   options,
@@ -213,6 +218,16 @@ export default function HomePage({
   const [globalColorMode, setGlobalColorMode] = useState<"BW" | "COLOR">("BW");
   const [isDragActive, setIsDragActive] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [uploadStage, setUploadStage] = useState<"uploading" | "creating">(
+    "uploading",
+  );
+  const totalBytes = printFiles.reduce((sum, file) => sum + file.file.size, 0);
+  const overallProgress = uploadProgress.length
+    ? Math.round(
+        uploadProgress.reduce((sum, value) => sum + value, 0) /
+          uploadProgress.length,
+      )
+    : 0;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -239,32 +254,49 @@ export default function HomePage({
     };
   }, [userId]);
 
-  const processFiles = useCallback(async (files: File[]) => {
-    if (!files.length) return;
+  useEffect(() => {
+    if (!isSubmitting) return;
 
-    const oversizedFiles = files.filter((file) => file.size > MAX_UPLOAD_BYTES);
-    if (oversizedFiles.length > 0) {
-      const names = oversizedFiles.map((file) => file.name).join(", ");
-      setError(
-        `File too large (max ${MAX_UPLOAD_MB} MB each): ${names}.`,
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isSubmitting]);
+
+  const processFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return;
+
+      const incomingBytes = files.reduce((sum, file) => sum + file.size, 0);
+
+      if (totalBytes + incomingBytes > MAX_JOB_UPLOAD_BYTES) {
+        setError(
+          `Total upload too large (max ${MAX_JOB_UPLOAD_MB} MB per job). Remove some files to continue.`,
+        );
+        return;
+      }
+
+      setError(null);
+
+      const newEntries: PrintFileState[] = await Promise.all(
+        files.map(async (file) => ({
+          file,
+          name: file.name,
+          detectedPages: await getPdfPageCount(file),
+          options: defaultPrintOptions(),
+          pageRangeError: "",
+        })),
       );
-      return;
-    }
 
-    setError(null);
-
-    const newEntries: PrintFileState[] = await Promise.all(
-      files.map(async (file) => ({
-        file,
-        name: file.name,
-        detectedPages: await getPdfPageCount(file),
-        options: defaultPrintOptions(),
-        pageRangeError: "",
-      })),
-    );
-
-    setPrintFiles((prev) => [...prev, ...newEntries]);
-  }, []);
+      setPrintFiles((prev) => [...prev, ...newEntries]);
+    },
+    [totalBytes],
+  );
 
   const onFilesSelected = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -329,6 +361,14 @@ export default function HomePage({
       return;
     }
 
+    if (totalBytes > MAX_JOB_UPLOAD_BYTES) {
+      setError(
+        `Total upload too large (max ${MAX_JOB_UPLOAD_MB} MB per job). Remove some files to continue.`,
+      );
+      return;
+    }
+
+    setUploadStage("uploading");
     setIsSubmitting(true);
     setError(null);
     setUploadProgress(printFiles.map(() => 0));
@@ -340,14 +380,30 @@ export default function HomePage({
         colorMode: globalColorMode,
       }));
 
-      const result = await createPrintJobFromFiles(
-        files,
-        fileOptions,
-        (pct) => {
-          setUploadProgress((prev) => prev.map(() => pct));
-        },
-        captchaToken,
-      );
+      const uploads = await requestPresignedUploads(files);
+      if (uploads.length !== files.length) {
+        throw new Error("Failed to prepare uploads for all files.");
+      }
+
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index]!;
+        const upload = uploads[index]!;
+        await uploadFileToR2(upload.uploadUrl, file);
+        setUploadProgress((prev) =>
+          prev.map((value, i) => (i === index ? 100 : value)),
+        );
+      }
+
+      setUploadStage("creating");
+      setUploadProgress((prev) => prev.map(() => 100));
+
+      const urlFiles = files.map((file, index) => ({
+        name: file.name,
+        url: uploads[index]!.publicUrl,
+        options: fileOptions[index]!,
+      }));
+
+      const result = await createPrintJobFromUrls(urlFiles, captchaToken);
 
       setVerificationCode(String(result.verificationCode));
       setPrintFiles([]);
@@ -386,20 +442,51 @@ export default function HomePage({
     printFiles.length > 0 &&
     !hasErrors &&
     !isSubmitting &&
-    !!captchaToken;
+    !!captchaToken &&
+    totalBytes <= MAX_JOB_UPLOAD_BYTES;
   const successDigits = verificationCode ? verificationCode.split("") : [];
 
   return (
     <div className="app-shell">
+      {isSubmitting && (
+        <div className="upload-overlay" role="status" aria-live="polite">
+          <div className="upload-card">
+            <div className="upload-spinner" aria-hidden="true" />
+            <p className="upload-title">
+              {uploadStage === "creating" ? "Creating job" : "Uploading files"}
+            </p>
+            <p className="upload-subtitle">
+              {uploadStage === "creating"
+                ? "Finalizing your print job and verifying files."
+                : `Uploading ${printFiles.length} file(s) to storage.`}
+            </p>
+            <div className="upload-progress-track" aria-hidden="true">
+              <span
+                className="upload-progress-fill"
+                style={{
+                  width: `${
+                    uploadStage === "creating" ? 100 : overallProgress
+                  }%`,
+                }}
+              />
+            </div>
+            <p className="upload-progress">
+              {uploadStage === "creating"
+                ? "Almost done..."
+                : `${overallProgress}% complete`}
+            </p>
+          </div>
+        </div>
+      )}
       <header className="top-bar">
         <div className="brand-row">
           <img
             src="/img/PrintLogoHourglass (1).webp"
-            alt="XOPY logo"
+            alt="ZOPY logo"
             className="brand-mark"
           />
           <div>
-            <p className="brand-title">XOPY</p>
+            <p className="brand-title">ZOPY</p>
             <span className="brand-subtitle">
               {userId ? "Session active" : "Preparing session..."}
             </span>
@@ -434,11 +521,9 @@ export default function HomePage({
               onChange={setGlobalColorMode}
             />
             <p className="color-mode-note">
-              Note: All files in this job will be printed as
-              {" "}
-              {globalColorMode === "COLOR" ? "Color" : "B/W"}
-              {" "}
-              based on this top selection.
+              Note: All files in this job will be printed as{" "}
+              {globalColorMode === "COLOR" ? "Color" : "B/W"} based on this top
+              selection.
             </p>
           </div>
 

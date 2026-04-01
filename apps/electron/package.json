@@ -39,8 +39,8 @@
   },
   "build": {
     "appId": "com.printowl.desktop",
-    "productName": "Xopy",
-    "artifactName": "Xopy Setup ${version}.${ext}",
+    "productName": "Zopy",
+    "artifactName": "Zopy Setup ${version}.${ext}",
     "electronVersion": "37.4.0",
     "directories": {
       "output": "release"

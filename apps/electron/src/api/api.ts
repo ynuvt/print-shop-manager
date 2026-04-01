@@ -1,7 +1,7 @@
 import type { PrintJob, PrintJobSummary } from "../types";
 
 const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ?? "https://xopy.devlocstudio.in/api/v1"
+  import.meta.env.VITE_API_BASE_URL ?? "https://zopy.devlocstudio.in/api/v1"
 ).replace(/\/$/, "");
 const TOKEN_KEY = "printowl_admin_token";
 
@@ -113,7 +113,7 @@ export async function fetchJobByCode(code: string): Promise<PrintJob> {
 export async function updateJobStatus(
   id: string,
   userId: string,
-  status: "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED",
+  status: "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED" | "CANCELED",
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/update-status/${id}`, {
     method: "PUT",

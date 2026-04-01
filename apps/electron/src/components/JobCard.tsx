@@ -30,20 +30,24 @@ export default function JobCard({ job, selected, onSelect }: JobCardProps) {
       aria-selected={selected}
       onClick={onSelect}
       onKeyDown={(e) => e.key === "Enter" && onSelect()}
-      className={`
-        cursor-pointer select-none list-none rounded-lg border border-l-4 p-3.5
-        transition-colors outline-none
-        focus-visible:ring-2 focus-visible:ring-blue-500/50
-        ${accentClass}
-        ${
-          selected
-            ? "border-gray-300 bg-blue-50 ring-1 ring-blue-400/40 shadow-sm"
-            : "border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow"
-        }
-      `}
+      className={[
+        "job-card",
+        "cursor-pointer",
+        "select-none",
+        "list-none",
+        "border",
+        "border-l-4",
+        "p-3.5",
+        "transition-colors",
+        "outline-none",
+        "focus-visible:ring-2",
+        "focus-visible:ring-blue-500/50",
+        accentClass,
+        selected ? "selected" : "",
+      ].join(" ")}
     >
       <div className="mb-2.5 flex items-start justify-between gap-2">
-        <p className="font-mono text-sm font-bold text-gray-900 leading-none">
+        <p className="font-mono text-sm font-bold text-[var(--text)] leading-none">
           #{job.verificationCode}
         </p>
         <StatusBadge status={job.status} />
@@ -51,10 +55,12 @@ export default function JobCard({ job, selected, onSelect }: JobCardProps) {
 
       <div className="flex items-end justify-between gap-2">
         <div className="space-y-0.5">
-          <p className="text-xs text-gray-500">{job.totalPages} pages</p>
-          <p className="text-[10px] text-gray-400">{time}</p>
+          <p className="text-xs text-[var(--text-muted)]">
+            {job.totalPages} pages
+          </p>
+          <p className="text-[10px] text-[var(--text-muted)]">{time}</p>
         </div>
-        <p className="font-mono text-sm font-semibold text-gray-900">
+        <p className="font-mono text-sm font-semibold text-[var(--text)]">
           ₹{job.totalCost.toFixed(2)}
         </p>
       </div>
