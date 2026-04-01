@@ -28,7 +28,7 @@ import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
 import type { ThemeMode } from "../App";
 
-const MAX_JOB_UPLOAD_MB = 20;
+const MAX_JOB_UPLOAD_MB = 50;
 const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
 
 function ToggleGroup<T extends string>({

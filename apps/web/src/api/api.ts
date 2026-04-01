@@ -4,7 +4,7 @@ import axios from "axios";
 const API_ORIGIN =
   import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
-const MAX_JOB_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_JOB_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export type UserPrintJobFile = {
   id: string;
@@ -122,7 +122,7 @@ export async function requestPresignedUploads(
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   if (totalBytes > MAX_JOB_UPLOAD_BYTES) {
     throw new Error(
-      "Total upload too large (max 20 MB per job). Remove some files to continue.",
+      "Total upload too large (max 50 MB per job). Remove some files to continue.",
     );
   }
 
