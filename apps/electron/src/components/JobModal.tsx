@@ -25,7 +25,6 @@ const OPTION_LABELS = {
   orientation: { PORTRAIT: "Vertical", LANDSCAPE: "Horizontal" },
   scaleMode: {
     FIT: "Fit to paper",
-    SHRINK: "Shrink",
     NOSCALE: "Original size",
   },
 };

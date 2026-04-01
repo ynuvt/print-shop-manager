@@ -135,7 +135,6 @@ function FileCard({
             <ToggleGroup
               options={[
                 { label: "Fit to paper", value: "FIT" },
-                { label: "Shrink", value: "SHRINK" },
                 { label: "Original size", value: "NOSCALE" },
               ]}
               value={pf.options.scaleMode}
