@@ -119,11 +119,11 @@ function FileCard({
             <span>
               {pf.detectedPages} pages • Rs {cost}
             </span>
-            <span className="file-edit-hint">
-              <SlidersHorizontal size={12} />
-              Tap file to edit details
-            </span>
           </div>
+          <span className="file-edit-hint">
+            <SlidersHorizontal size={12} />
+            Tap file to edit details
+          </span>
         </button>
         <button
           type="button"
@@ -376,6 +376,13 @@ export default function HomePage({
       if (expandedIdx === null) {
         setExpandedIdx(0);
       }
+
+      requestAnimationFrame(() => {
+        const target = fileOptionsRef.current;
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      });
     }
 
     if (expandedIdx !== null && expandedIdx >= printFiles.length) {
