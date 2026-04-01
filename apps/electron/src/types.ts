@@ -28,6 +28,10 @@ declare global {
       downloadFiles: (
         files: { url: string; name: string }[],
       ) => Promise<string[]>;
+      downloadFile: (
+        file: { url: string; name: string },
+        meta?: { fileIndex?: number; totalFiles?: number },
+      ) => Promise<string>;
       deleteFiles: (paths: string[]) => Promise<void>;
       listPrinters: () => Promise<PrinterInfo[]>;
       printPDF: (

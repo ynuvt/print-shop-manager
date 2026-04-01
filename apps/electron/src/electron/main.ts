@@ -105,6 +105,30 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle(
+  "download-file",
+  async (
+    event,
+    file: { url: string; name: string },
+    meta?: { fileIndex?: number; totalFiles?: number },
+  ) => {
+    const tempDir = os.tmpdir();
+    const fileName = `printowl_${Date.now()}_${file.name}`;
+    const filePath = path.join(tempDir, fileName);
+
+    await downloadFile(
+      event,
+      file.url,
+      filePath,
+      meta?.fileIndex ?? 0,
+      meta?.totalFiles ?? 1,
+      file.name,
+    );
+
+    return filePath;
+  },
+);
+
 ipcMain.handle("delete-files", async (event, paths: string[]) => {
   for (const filePath of paths) {
     try {

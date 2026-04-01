@@ -259,7 +259,7 @@ function JobDetailModal({
             ))}
           </div>
           <span className="otp-helper">
-            Show this at the counter to collect your prints.
+            Show this to the shopkeeper and collect your prints.
           </span>
         </div>
 

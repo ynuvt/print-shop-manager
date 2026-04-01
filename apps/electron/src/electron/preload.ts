@@ -3,6 +3,10 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("electronAPI", {
   downloadFiles: (files: { url: string; name: string }[]) =>
     ipcRenderer.invoke("download-files", files),
+  downloadFile: (
+    file: { url: string; name: string },
+    meta?: { fileIndex?: number; totalFiles?: number },
+  ) => ipcRenderer.invoke("download-file", file, meta),
   deleteFiles: (paths: string[]) => ipcRenderer.invoke("delete-files", paths),
   listPrinters: () => ipcRenderer.invoke("list-printers"),
   printPDF: (

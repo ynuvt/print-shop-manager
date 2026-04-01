@@ -90,6 +90,12 @@ body {
   box-shadow: none;
 }
 
+.brand-mark-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text);
+}
+
 .brand-title {
   margin: 0;
   font-family: "Sora", "Plus Jakarta Sans", sans-serif;
@@ -142,6 +148,7 @@ body {
 
 .print-mode-top {
   margin-bottom: 14px;
+  margin-top: 12px;
 }
 
 .print-mode-top .field-label {
@@ -264,6 +271,35 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-top: 16px;
+}
+
+.section-foot {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.add-more-btn {
+  height: 48px;
+  min-width: 220px;
+  padding: 0 28px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--brand) 70%, var(--border));
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+  color: var(--text);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.add-more-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--border));
+  background: color-mix(in srgb, var(--brand) 18%, var(--panel));
 }
 
 .section-head h2 {
@@ -513,6 +549,29 @@ body {
   text-align: center;
 }
 
+.success-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 12px;
+  padding: 14px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.feedback-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+
 .summary-card p,
 .success-card p,
 .otp-card p {
@@ -541,6 +600,16 @@ body {
   color: var(--text-muted);
 }
 
+.highlight-text {
+  color: var(--text);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--brand) 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--border));
+  padding: 6px 10px;
+  border-radius: 8px;
+  display: inline-block;
+}
+
 .success-card .btn {
   margin-top: 12px;
   max-width: 100%;
@@ -548,6 +617,22 @@ body {
   font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.feedback-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 360px;
+}
+
+.feedback-btn {
+  border-color: color-mix(in srgb, var(--brand) 55%, var(--border));
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn {
@@ -833,6 +918,127 @@ body {
   padding: 10px;
 }
 
+.walkthrough-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: auto;
+}
+
+.walkthrough-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 10, 18, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.walkthrough-target {
+  position: relative;
+  z-index: 90;
+  pointer-events: auto;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent),
+    0 0 20px color-mix(in srgb, var(--brand) 55%, transparent);
+}
+
+.walkthrough-callout {
+  position: fixed;
+  z-index: 90;
+  transform: translateX(-50%);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  width: min(360px, 86vw);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.walkthrough-callout--center {
+  justify-content: center;
+  text-align: center;
+}
+
+.walkthrough-callout span {
+  flex: 1;
+}
+
+.walkthrough-callout-btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.steps-modal {
+  width: min(560px, 94vw);
+  padding: 18px;
+}
+
+.steps-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.steps-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: grid;
+  gap: 10px;
+}
+
+.steps-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--panel-muted) 85%, transparent);
+}
+
+.steps-item p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.steps-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--brand) 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  flex-shrink: 0;
+}
+
+.steps-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.steps-actions .btn {
+  width: 100%;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .upload-overlay {
   position: fixed;
   inset: 0;
@@ -1102,6 +1308,10 @@ body {
 }
 
 @media (max-width: 480px) {
+  body {
+    font-size: 15px;
+  }
+
   .modal-card {
     padding: 12px;
   }
@@ -1170,8 +1380,8 @@ body {
   }
 
   .toggle-item {
-    font-size: 10px;
-    padding: 8px 6px;
+    font-size: 11px;
+    padding: 9px 6px;
   }
 
   .upload-file-head {

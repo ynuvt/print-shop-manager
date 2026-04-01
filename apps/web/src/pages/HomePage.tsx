@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import type { ChangeEvent, DragEvent, CSSProperties } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
 import {
   FileText,
+  Hourglass,
   Moon,
+  Plus,
   SlidersHorizontal,
   Sun,
   Upload,
@@ -12,6 +14,8 @@ import {
 import Turnstile from "react-turnstile";
 import {
   createPrintJobFromUrls,
+  getUserSession,
+  markOnboardingCompleted,
   registerUser,
   requestPresignedUploads,
   uploadFileToR2,
@@ -31,6 +35,15 @@ import type { ThemeMode } from "../App";
 const MAX_JOB_UPLOAD_MB = 50;
 const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
 
+type WalkthroughStep =
+  | "upload"
+  | "color"
+  | "customize"
+  | "add-more"
+  | "file-select"
+  | "summary"
+  | "submit";
+
 function ToggleGroup<T extends string>({
   options,
   value,
@@ -47,6 +60,7 @@ function ToggleGroup<T extends string>({
           key={opt.value}
           type="button"
           className={value === opt.value ? "toggle-item active" : "toggle-item"}
+          data-value={opt.value}
           onClick={() => onChange(opt.value)}
         >
           {opt.label}
@@ -60,6 +74,10 @@ function FileCard({
   pf,
   expanded,
   onToggle,
+  isWalkthroughTarget,
+  walkthroughRef,
+  titleRef,
+  isTitleWalkthroughTarget,
   onUpdate,
   onRemove,
   globalColorMode,
@@ -67,6 +85,10 @@ function FileCard({
   pf: PrintFileState;
   expanded: boolean;
   onToggle: () => void;
+  isWalkthroughTarget?: boolean;
+  walkthroughRef?: (node: HTMLDivElement | null) => void;
+  titleRef?: (node: HTMLButtonElement | null) => void;
+  isTitleWalkthroughTarget?: boolean;
   onUpdate: (patch: Partial<PrintOptions>) => void;
   onRemove: () => void;
   globalColorMode: "BW" | "COLOR";
@@ -79,7 +101,16 @@ function FileCard({
   return (
     <article className="upload-file-card">
       <div className="upload-file-head">
-        <button type="button" className="upload-file-title" onClick={onToggle}>
+        <button
+          ref={titleRef}
+          type="button"
+          className={
+            isTitleWalkthroughTarget
+              ? "upload-file-title walkthrough-target"
+              : "upload-file-title"
+          }
+          onClick={onToggle}
+        >
           <div className="file-icon" aria-hidden="true">
             <FileText size={18} />
           </div>
@@ -105,7 +136,14 @@ function FileCard({
       </div>
 
       {expanded && (
-        <div className="upload-file-body">
+        <div
+          ref={walkthroughRef}
+          className={
+            isWalkthroughTarget
+              ? "upload-file-body walkthrough-target"
+              : "upload-file-body"
+          }
+        >
           <div>
             <p className="field-label">Print Sides</p>
             <ToggleGroup
@@ -204,9 +242,17 @@ export default function HomePage({
   theme: ThemeMode;
   onToggleTheme: () => void;
 }) {
+  const [showSteps, setShowSteps] = useState(true);
   const [userId, setUserId] = useState<string | null>(() =>
     localStorage.getItem("userId"),
   );
+  const [walkthroughStep, setWalkthroughStep] =
+    useState<WalkthroughStep | null>(null);
+  const [onboardingEligible, setOnboardingEligible] = useState(false);
+  const [calloutStyle, setCalloutStyle] = useState<CSSProperties>({});
+  const [colorStepTouched, setColorStepTouched] = useState(false);
+  const [walkthroughFileIndex, setWalkthroughFileIndex] = useState<number>(0);
+  const [walkthroughAddedExtra, setWalkthroughAddedExtra] = useState(false);
   const [printFiles, setPrintFiles] = useState<PrintFileState[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number[]>([]);
@@ -229,6 +275,14 @@ export default function HomePage({
     : 0;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previousFileCount = useRef(0);
+  const uploadButtonRef = useRef<HTMLButtonElement>(null);
+  const colorToggleRef = useRef<HTMLDivElement>(null);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const fileOptionsRef = useRef<HTMLDivElement | null>(null);
+  const fileTitleRef = useRef<HTMLButtonElement | null>(null);
+  const summaryCardRef = useRef<HTMLDivElement | null>(null);
+  const addMoreRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (userId) return;
@@ -243,6 +297,42 @@ export default function HomePage({
         setError("Failed to initialize session. Please verify API is running.");
       });
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    if (!localStorage.getItem("token")) return;
+
+    getUserSession()
+      .then((session) => {
+        if (session.onboardingCompleted) {
+          setOnboardingEligible(false);
+          setWalkthroughStep(null);
+          return;
+        }
+
+        setOnboardingEligible(true);
+      })
+      .catch(() => {
+        setOnboardingEligible(true);
+      });
+  }, [userId]);
+
+  useEffect(() => {
+    if (showSteps) {
+      setWalkthroughStep(null);
+      return;
+    }
+
+    if (onboardingEligible) {
+      setWalkthroughStep((current) => current ?? "upload");
+    }
+  }, [onboardingEligible, showSteps]);
+
+  useEffect(() => {
+    if (walkthroughStep !== "color") {
+      setColorStepTouched(false);
+    }
+  }, [walkthroughStep]);
 
   useEffect(() => {
     if (!userId) return;
@@ -266,6 +356,94 @@ export default function HomePage({
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, [isSubmitting]);
+
+  useEffect(() => {
+    if (walkthroughStep === "upload" && printFiles.length > 0) {
+      setWalkthroughFileIndex(0);
+      setWalkthroughStep("color");
+    }
+  }, [printFiles.length, walkthroughStep]);
+
+  useEffect(() => {
+    if (!walkthroughStep) return;
+    if (printFiles.length === 0 && walkthroughStep !== "upload") {
+      setWalkthroughStep("upload");
+    }
+  }, [printFiles.length, walkthroughStep]);
+
+  useEffect(() => {
+    if (previousFileCount.current === 0 && printFiles.length > 0) {
+      if (expandedIdx === null) {
+        setExpandedIdx(0);
+      }
+    }
+
+    if (expandedIdx !== null && expandedIdx >= printFiles.length) {
+      setExpandedIdx(null);
+    }
+
+    if (
+      walkthroughStep === "add-more" &&
+      printFiles.length > previousFileCount.current
+    ) {
+      const newIndex = printFiles.length - 1;
+      setWalkthroughFileIndex(newIndex);
+      setWalkthroughAddedExtra(true);
+      setExpandedIdx(null);
+      setWalkthroughStep("file-select");
+    }
+
+    previousFileCount.current = printFiles.length;
+  }, [expandedIdx, printFiles.length, walkthroughStep]);
+
+  useEffect(() => {
+    if (!walkthroughStep) return;
+
+    const resolveTarget = () => {
+      switch (walkthroughStep) {
+        case "upload":
+          return uploadButtonRef.current;
+        case "color":
+          return colorToggleRef.current;
+        case "customize":
+          return fileOptionsRef.current;
+        case "file-select":
+          return fileTitleRef.current;
+        case "add-more":
+          return addMoreRef.current;
+        case "summary":
+          return summaryCardRef.current;
+        case "summary":
+          return summaryCardRef.current;
+        case "submit":
+          return submitButtonRef.current;
+        default:
+          return null;
+      }
+    };
+
+    const updateCallout = () => {
+      const target = resolveTarget();
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const top = Math.min(rect.bottom + 10, window.innerHeight - 20);
+      const left = rect.left + rect.width / 2;
+      setCalloutStyle({ top, left });
+    };
+
+    const target = resolveTarget();
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    updateCallout();
+    window.addEventListener("resize", updateCallout);
+    window.addEventListener("scroll", updateCallout, true);
+    return () => {
+      window.removeEventListener("resize", updateCallout);
+      window.removeEventListener("scroll", updateCallout, true);
+    };
+  }, [walkthroughStep, printFiles.length]);
 
   const processFiles = useCallback(
     async (files: File[]) => {
@@ -352,8 +530,36 @@ export default function HomePage({
     setExpandedIdx((prev) => (prev === idx ? null : prev));
   }, []);
 
+  const handleColorModeChange = useCallback(
+    (mode: "BW" | "COLOR") => {
+      setGlobalColorMode(mode);
+      if (walkthroughStep === "color") {
+        setColorStepTouched(true);
+      }
+    },
+    [walkthroughStep],
+  );
+
+  const handleFileToggle = useCallback(
+    (idx: number) => {
+      if (walkthroughStep === "file-select" && idx === walkthroughFileIndex) {
+        setExpandedIdx(idx);
+        setWalkthroughStep("customize");
+        return;
+      }
+
+      setExpandedIdx((prev) => (prev === idx ? null : idx));
+    },
+    [walkthroughFileIndex, walkthroughStep],
+  );
+
   const onSubmit = async () => {
     if (!userId || !printFiles.length || isSubmitting) return;
+
+    if (walkthroughStep === "submit") {
+      setWalkthroughStep(null);
+      void markOnboardingCompleted();
+    }
 
     if (!captchaToken) {
       setError("Please complete the CAPTCHA verification");
@@ -444,20 +650,174 @@ export default function HomePage({
     !!captchaToken &&
     totalBytes <= MAX_JOB_UPLOAD_BYTES;
   const successDigits = verificationCode ? verificationCode.split("") : [];
+  const isWalkthroughActive = walkthroughStep !== null;
+  const showCallout =
+    walkthroughStep === "upload" ||
+    walkthroughStep === "color" ||
+    walkthroughStep === "customize" ||
+    walkthroughStep === "add-more" ||
+    walkthroughStep === "file-select" ||
+    walkthroughStep === "summary" ||
+    walkthroughStep === "submit";
+  const showCalloutButton =
+    walkthroughStep === "color" ||
+    walkthroughStep === "customize" ||
+    walkthroughStep === "add-more" ||
+    walkthroughStep === "summary" ||
+    walkthroughStep === "submit";
+  const calloutText = (() => {
+    switch (walkthroughStep) {
+      case "upload":
+        return "Start by uploading your PDF files here.";
+      case "color":
+        return "Your selected color option applies to all files in this job.";
+      case "customize":
+        return "Choose your print options and select Next.";
+      case "add-more":
+        return "Use this to add more files, then select Next.";
+      case "file-select":
+        return "Click the file to change its print options.";
+      case "summary":
+        return "This will be the total payable amount and should be paid on the shopkeeper's QR.";
+      case "submit":
+        return "You're all set! Submit your job or press Done to finish.";
+      default:
+        return "";
+    }
+  })();
+  const calloutButtonLabel = (() => {
+    switch (walkthroughStep) {
+      case "color":
+      case "customize":
+      case "add-more":
+      case "summary":
+        return "Next";
+      case "submit":
+        return "Done";
+      default:
+        return "";
+    }
+  })();
+  const handleCalloutAction = () => {
+    switch (walkthroughStep) {
+      case "color":
+        setWalkthroughStep("customize");
+        break;
+      case "customize":
+        if (walkthroughAddedExtra) {
+          setWalkthroughAddedExtra(false);
+          setWalkthroughStep("summary");
+        } else {
+          setWalkthroughStep("add-more");
+        }
+        break;
+      case "add-more":
+        setWalkthroughStep("summary");
+        break;
+      case "summary":
+        setWalkthroughStep("submit");
+        break;
+      case "submit":
+        setWalkthroughStep(null);
+        void markOnboardingCompleted();
+        break;
+      default:
+        break;
+    }
+  };
 
   return (
     <div className="app-shell">
+      {showSteps && !isSubmitting && (
+        <div
+          className="modal-shell"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="how-it-works-title"
+          onClick={() => setShowSteps(false)}
+        >
+          <div
+            className="modal-card steps-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="steps-head">
+              <div>
+                <p className="modal-label">How it works</p>
+                <h2 id="how-it-works-title">Print in four steps</h2>
+                <p className="modal-helper">
+                  Please read these steps before placing an order.
+                </p>
+              </div>
+            </div>
+            <ol className="steps-list">
+              <li className="steps-item">
+                <span className="steps-badge">1</span>
+                <p>Save your PDFs to your device.</p>
+              </li>
+              <li className="steps-item">
+                <span className="steps-badge">2</span>
+                <p>Upload your PDFs.</p>
+              </li>
+              <li className="steps-item">
+                <span className="steps-badge">3</span>
+                <p>Customize your PDF prints.</p>
+              </li>
+              <li className="steps-item">
+                <span className="steps-badge">4</span>
+                <p>Collect your prints from the stationery.</p>
+              </li>
+            </ol>
+            <div className="steps-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowSteps(false)}
+              >
+                I have read the steps
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isWalkthroughActive && (
+        <div className="walkthrough-layer" aria-hidden="true">
+          <div className="walkthrough-dim" />
+          {showCallout && calloutText && (
+            <div
+              className={
+                walkthroughStep === "upload"
+                  ? "walkthrough-callout walkthrough-callout--center"
+                  : "walkthrough-callout"
+              }
+              style={calloutStyle}
+            >
+              <span>{calloutText}</span>
+              {showCalloutButton && (
+                <button
+                  type="button"
+                  className="btn btn-primary walkthrough-callout-btn"
+                  onClick={handleCalloutAction}
+                >
+                  {calloutButtonLabel}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {isSubmitting && (
         <div className="upload-overlay" role="status" aria-live="polite">
           <div className="upload-card">
             <div className="upload-spinner" aria-hidden="true" />
             <p className="upload-title">
-              {uploadStage === "creating" ? "Creating job" : "Uploading files"}
+              {uploadStage === "creating"
+                ? "Generating OTP"
+                : "Uploading files"}
             </p>
             <p className="upload-subtitle">
               {uploadStage === "creating"
                 ? "Finalizing your print job and verifying files."
-                : `Uploading ${printFiles.length} file(s) to storage.`}
+                : `Uploading ${printFiles.length} file(s) to the shopkeeper.`}
             </p>
             <div className="upload-progress-track" aria-hidden="true">
               <span
@@ -479,15 +839,14 @@ export default function HomePage({
       )}
       <header className="top-bar">
         <div className="brand-row">
-          <img
-            src="/img/PrintLogoHourglass (1).webp"
-            alt="ZOPY logo"
-            className="brand-mark"
-          />
+          <div className="brand-mark brand-mark-icon" aria-hidden="true">
+            <Hourglass size={36} strokeWidth={2.2} />
+          </div>
           <div>
             <p className="brand-title">ZOPY</p>
             <span className="brand-subtitle">
-              {userId ? "Session active" : "Preparing session..."}
+              {/* {userId ? "Session active" : "Preparing session..."} */}
+              PRINT FROM ANYWHERE
             </span>
           </div>
         </div>
@@ -509,49 +868,53 @@ export default function HomePage({
         {error && <div className="banner-error">{error}</div>}
 
         <section className="hero-panel">
-          <div className="print-mode-top">
-            <p className="field-label">Print Type</p>
-            <ToggleGroup
-              options={[
-                { label: "Color Print", value: "COLOR" },
-                { label: "B/W Print", value: "BW" },
-              ]}
-              value={globalColorMode}
-              onChange={setGlobalColorMode}
-            />
-            <p className="color-mode-note">
-              Note: All files in this job will be printed as{" "}
-              {globalColorMode === "COLOR" ? "Color" : "B/W"} based on this top
-              selection.
-            </p>
-          </div>
-
           <div className="hero-header">
             <h1>Upload Documents</h1>
             <p>Color or B/W printing with per-file settings.</p>
           </div>
 
           {verificationCode ? (
-            <div className="success-card">
-              <p>Job submitted successfully</p>
-              <div
-                className="otp-digits"
-                aria-label={`Verification code ${verificationCode}`}
-              >
-                {successDigits.map((digit, idx) => (
-                  <div key={`${digit}-${idx}`} className="otp-digit">
-                    {digit}
-                  </div>
-                ))}
+            <div className="success-stack">
+              <div className="success-card">
+                <p>Job submitted successfully</p>
+                <div
+                  className="otp-digits"
+                  aria-label={`Verification code ${verificationCode}`}
+                >
+                  {successDigits.map((digit, idx) => (
+                    <div key={`${digit}-${idx}`} className="otp-digit">
+                      {digit}
+                    </div>
+                  ))}
+                </div>
+                <span className="highlight-text">
+                  Show this to the shopkeeper and collect your prints.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setVerificationCode(null)}
+                >
+                  Create More Jobs
+                </button>
               </div>
-              <span>Show this verification code at the counter.</span>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setVerificationCode(null)}
-              >
-                Create More Jobs
-              </button>
+              <div className="feedback-card">
+                <div>
+                  <p className="feedback-title">We are in beta</p>
+                  <p className="feedback-note highlight-text">
+                    We are also from TCET and would love to hear your feedback
+                    and ideas.
+                  </p>
+                </div>
+                <a
+                  className="btn feedback-btn"
+                  href="https://forms.gle/sMmC5ePS5RxP6ZLJ7"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Share Feedback
+                </a>
+              </div>
             </div>
           ) : (
             <>
@@ -568,7 +931,12 @@ export default function HomePage({
               >
                 <button
                   type="button"
-                  className="upload-circle"
+                  ref={uploadButtonRef}
+                  className={
+                    walkthroughStep === "upload"
+                      ? "upload-circle walkthrough-target"
+                      : "upload-circle"
+                  }
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload
@@ -581,17 +949,36 @@ export default function HomePage({
                 <p>Drag and drop or tap to browse.</p>
               </div>
 
+              <div className="print-mode-top">
+                <p className="field-label">Print Type</p>
+                <div
+                  ref={colorToggleRef}
+                  className={
+                    walkthroughStep === "color"
+                      ? "print-mode-toggle walkthrough-target"
+                      : "print-mode-toggle"
+                  }
+                >
+                  <ToggleGroup
+                    options={[
+                      { label: "Color Print", value: "COLOR" },
+                      { label: "B/W Print", value: "BW" },
+                    ]}
+                    value={globalColorMode}
+                    onChange={handleColorModeChange}
+                  />
+                </div>
+                <p className="color-mode-note">
+                  Note: All files in this job will be printed as{" "}
+                  {globalColorMode === "COLOR" ? "Color" : "B/W"} based on this
+                  top selection.
+                </p>
+              </div>
+
               {printFiles.length > 0 && (
                 <>
                   <div className="section-head">
                     <h2>File Options</h2>
-                    <button
-                      type="button"
-                      className="ghost-link"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      Add More
-                    </button>
                   </div>
 
                   <div className="upload-file-list">
@@ -600,14 +987,50 @@ export default function HomePage({
                         key={`${pf.name}-${idx}`}
                         pf={pf}
                         expanded={expandedIdx === idx}
-                        onToggle={() =>
-                          setExpandedIdx((prev) => (prev === idx ? null : idx))
+                        onToggle={() => handleFileToggle(idx)}
+                        isWalkthroughTarget={
+                          walkthroughStep === "customize" &&
+                          idx === walkthroughFileIndex
+                        }
+                        walkthroughRef={
+                          idx === walkthroughFileIndex
+                            ? (node) => {
+                                fileOptionsRef.current = node;
+                              }
+                            : undefined
+                        }
+                        titleRef={
+                          idx === walkthroughFileIndex
+                            ? (node) => {
+                                fileTitleRef.current = node;
+                              }
+                            : undefined
+                        }
+                        isTitleWalkthroughTarget={
+                          walkthroughStep === "file-select" &&
+                          idx === walkthroughFileIndex
                         }
                         onUpdate={(patch) => updateOptions(idx, patch)}
                         onRemove={() => removeFile(idx)}
                         globalColorMode={globalColorMode}
                       />
                     ))}
+                  </div>
+
+                  <div className="section-foot">
+                    <button
+                      type="button"
+                      ref={addMoreRef}
+                      className={
+                        walkthroughStep === "add-more"
+                          ? "ghost-link add-more-btn walkthrough-target"
+                          : "ghost-link add-more-btn"
+                      }
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Plus size={16} aria-hidden="true" />
+                      Add More
+                    </button>
                   </div>
 
                   {isSubmitting && uploadProgress.length > 0 && (
@@ -625,7 +1048,14 @@ export default function HomePage({
                     </div>
                   )}
 
-                  <div className="summary-card">
+                  <div
+                    ref={summaryCardRef}
+                    className={
+                      walkthroughStep === "summary"
+                        ? "summary-card walkthrough-target"
+                        : "summary-card"
+                    }
+                  >
                     <p>Total</p>
                     <strong>Rs {totals.totalCost}</strong>
                     <span>
@@ -663,11 +1093,12 @@ export default function HomePage({
                     type="button"
                     onClick={onSubmit}
                     disabled={!canSubmit}
-                    className={
+                    ref={submitButtonRef}
+                    className={`${
                       canSubmit
                         ? "btn btn-primary submit-btn"
                         : "btn btn-disabled submit-btn"
-                    }
+                    }${walkthroughStep === "submit" ? " walkthrough-target" : ""}`}
                   >
                     {isSubmitting
                       ? "Uploading and Submitting..."

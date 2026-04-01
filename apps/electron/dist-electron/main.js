@@ -85,6 +85,13 @@ electron_1.ipcMain.handle("download-files", async (event, files) => {
     }
     return downloadedPaths;
 });
+electron_1.ipcMain.handle("download-file", async (event, file, meta) => {
+    const tempDir = node_os_1.default.tmpdir();
+    const fileName = `printowl_${Date.now()}_${file.name}`;
+    const filePath = node_path_1.default.join(tempDir, fileName);
+    await downloadFile(event, file.url, filePath, meta?.fileIndex ?? 0, meta?.totalFiles ?? 1, file.name);
+    return filePath;
+});
 electron_1.ipcMain.handle("delete-files", async (event, paths) => {
     for (const filePath of paths) {
         try {

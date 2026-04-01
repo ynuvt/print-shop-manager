@@ -1,12 +1,25 @@
 import express from "express";
 import { generateUserToken } from "../utils/token.js";
+import { prisma } from "@printowl/db";
 
 const router = express.Router();
 
-router.get("/register", (req, res) => {
+router.get("/register", async (req, res) => {
   // In version 1, no real registration logic
   // Just generate a unique token
   const { token, userId } = generateUserToken();
+
+  try {
+    await prisma.user.upsert({
+      where: { id: userId },
+      create: { id: userId },
+      update: {},
+    });
+  } catch (error) {
+    console.error("Failed to create user record", error);
+    res.status(500).json({ error: "Failed to create user record" });
+    return;
+  }
 
   res.status(200).json({
     message: "Registration successful!",

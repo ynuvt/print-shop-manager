@@ -82,6 +82,13 @@ enum PrintJobStatus {
   CANCELED
 }
 
+enum UserEventType {
+  ONBOARDING_SKIPPED
+}
+
+
+
+
 model printOption {
   id       String   @id @default(uuid())
   paperSize PaperSize  @default(A4)
@@ -109,6 +116,7 @@ model file {
 model PrintJob {
   id               String   @id @default(uuid())
   userId           String
+  user             User     @relation(fields: [userId], references: [id], map: "printjob_userId_fkey")
   files             file[]         
   totalCost        Float
   totalPages       Int
@@ -118,5 +126,26 @@ model PrintJob {
   verificationCode Int       @default(autoincrement())
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
+}
+
+model User {
+  id                   String      @id
+  onboardingCompleted  Boolean     @default(false)
+  printJobs            PrintJob[]
+  events               UserEvent[]
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+}
+
+model UserEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], map: "userevent_userId_fkey")
+  type      UserEventType
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([type])
 }
 

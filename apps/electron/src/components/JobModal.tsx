@@ -9,7 +9,7 @@ interface JobModalProps {
   onStatusUpdate: (
     jobId: string,
     userId: string,
-    newStatus: "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED",
+    newStatus: "COMPLETED" | "REJECTED" | "FAILED",
   ) => Promise<void>;
   printers: { name: string; isDefault: boolean }[];
   selectedPrinter: string;
@@ -42,7 +42,6 @@ export default function JobModal({
   const [currentStatus, setCurrentStatus] = useState<JobStatus>(job.status);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadedFiles, setDownloadedFiles] = useState<string[]>([]);
   const [downloadProgress, setDownloadProgress] = useState<{
     fileIndex: number;
     totalFiles: number;
@@ -112,7 +111,6 @@ export default function JobModal({
   }, [job.files]);
 
   const isPending = currentStatus === "PENDING";
-  const isProcessing = currentStatus === "PROCESSING";
   const isCompleted = currentStatus === "COMPLETED";
 
   const created = new Date(job.createdAt).toLocaleString([], {
@@ -151,28 +149,25 @@ export default function JobModal({
     setError(null);
 
     try {
-      await onStatusUpdate(job.id, job.userId, "PROCESSING");
-      setCurrentStatus("PROCESSING");
-
-      // Download files to temp folder
-      setDownloadProgress({
-        fileIndex: 0,
-        totalFiles: job.files.length,
-        percent: 0,
-      });
-      const files = job.files.map((f: File) => ({ url: f.url, name: f.name }));
-      const paths = await window.electronAPI.downloadFiles(files);
-      setDownloadedFiles(paths);
-
-      // Print each file with its options
-      for (let i = 0; i < paths.length; i++) {
-        const filePath = paths[i];
+      for (let i = 0; i < job.files.length; i++) {
         const file = job.files[i];
-        if (!filePath || !file) continue;
+        if (!file) continue;
+
+        setDownloadProgress({
+          fileIndex: i,
+          totalFiles: job.files.length,
+          percent: 0,
+          fileName: file.name,
+        });
+
+        const filePath = await window.electronAPI.downloadFile(
+          { url: file.url, name: file.name },
+          { fileIndex: i, totalFiles: job.files.length },
+        );
 
         setPrintProgress({
           fileIndex: i,
-          totalFiles: paths.length,
+          totalFiles: job.files.length,
           percent: 0,
           fileName: file.name,
         });
@@ -219,36 +214,18 @@ export default function JobModal({
           options,
           {
             fileIndex: i,
-            totalFiles: paths.length,
+            totalFiles: job.files.length,
           },
         );
+
+        await window.electronAPI.deleteFiles([filePath]);
       }
+
+      await onStatusUpdate(job.id, job.userId, "COMPLETED");
+      setCurrentStatus("COMPLETED");
     } catch (err) {
       setError("Failed to start printing. Please try again.");
       console.error("Print error:", err);
-    } finally {
-      setLoading(false);
-      setDownloadProgress(null);
-      setPrintProgress(null);
-    }
-  }
-
-  async function handleHandover() {
-    setLoading(true);
-    setError(null);
-    try {
-      await onStatusUpdate(job.id, job.userId, "COMPLETED");
-
-      // Delete downloaded files from temp folder
-      if (downloadedFiles.length > 0) {
-        await window.electronAPI.deleteFiles(downloadedFiles);
-        setDownloadedFiles([]);
-      }
-
-      onClose();
-    } catch (err) {
-      setError("Failed to update status. Please try again.");
-      console.error("Handover error:", err);
     } finally {
       setLoading(false);
       setDownloadProgress(null);
@@ -275,15 +252,6 @@ export default function JobModal({
               #{job.verificationCode}
             </span>
             <StatusBadge status={currentStatus} />
-            {isProcessing && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-300">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
-                </span>
-                Printing...
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-4">
             <p className="text-xs text-gray-400">{created}</p>
@@ -476,7 +444,7 @@ export default function JobModal({
           {error && <p className="mb-3 text-xs text-red-500">{error}</p>}
 
           {/* Printer Selection */}
-          {(isPending || isProcessing || isCompleted) && (
+          {(isPending || isCompleted) && (
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">
                 <label
@@ -530,27 +498,6 @@ export default function JobModal({
             </div>
           )}
 
-          {isProcessing && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void handlePrint()}
-                disabled={loading}
-                className="flex-1 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-500 active:bg-violet-700 disabled:opacity-50"
-              >
-                {loading ? "Updating..." : "Print Again"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleHandover()}
-                disabled={loading}
-                className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50"
-              >
-                {loading ? "Updating..." : "Handover Done"}
-              </button>
-            </div>
-          )}
-
           {isCompleted && (
             <div className="flex items-center gap-3">
               <button
@@ -572,7 +519,7 @@ export default function JobModal({
             </div>
           )}
 
-          {!isPending && !isProcessing && !isCompleted && (
+          {!isPending && !isCompleted && (
             <button
               type="button"
               onClick={onClose}

@@ -25,6 +25,12 @@ export type UserPrintJob = {
   files: UserPrintJobFile[];
 };
 
+export type UserSession = {
+  userId: string;
+  onboardingCompleted: boolean;
+  onboardingSkipped: boolean;
+};
+
 // Helper to get token from localStorage
 function getToken() {
   return localStorage.getItem("token");
@@ -38,6 +44,33 @@ export async function registerUser(): Promise<{
   const res = await axios.get(`${BASE_URL}/auth/register`);
   if (!res.data) throw new Error("Failed to register user");
   return res.data;
+}
+
+export async function getUserSession(): Promise<UserSession> {
+  const token = getToken();
+  const res = await axios.get(`${BASE_URL}/users/session`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.data) throw new Error("Failed to fetch session");
+  return res.data as UserSession;
+}
+
+export async function markOnboardingCompleted(): Promise<void> {
+  const token = getToken();
+  const res = await axios.post(
+    `${BASE_URL}/users/onboarding/completed`,
+    {},
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to mark onboarding completed");
 }
 
 // Fetch print job status

@@ -9,7 +9,6 @@ interface HeaderProps {
   tab: Tab;
   onTabChange: (t: Tab) => void;
   totalJobs: number;
-  processingCount: number;
   printers: PrinterInfo[];
   selectedPrinter: string;
   onPrinterChange: (printer: string) => void;
@@ -19,7 +18,6 @@ export default function Header({
   tab,
   onTabChange,
   totalJobs,
-  processingCount,
   printers,
   selectedPrinter,
   onPrinterChange,
@@ -75,20 +73,6 @@ export default function Header({
           <p className="stat-label">Total</p>
           <p className="stat-value tabular-nums">{totalJobs}</p>
         </div>
-
-        <div className="stat-divider" />
-
-        <div className="stat-block">
-          <p className="stat-label">Processing</p>
-          <p
-            className="stat-value tabular-nums"
-            style={{ color: "var(--brand)" }}
-          >
-            {processingCount}
-          </p>
-        </div>
-
-        <div className="stat-divider" />
 
         <div className="flex items-center gap-2">
           <label

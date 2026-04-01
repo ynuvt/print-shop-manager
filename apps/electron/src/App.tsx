@@ -20,9 +20,9 @@ import { PrintJob, PrintJobSummary, JobStatus } from "./types";
 import { getSocket } from "./services/getSocket";
 
 type Tab = "queue" | "history";
-type QueueFilter = "ALL" | "PENDING" | "PROCESSING";
-type HistoryFilter = "ALL" | "COMPLETED" | "REJECTED";
-type UpdatableJobStatus = "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED";
+type QueueFilter = "PENDING";
+type HistoryFilter = "COMPLETED" | "REJECTED";
+type UpdatableJobStatus = "COMPLETED" | "REJECTED" | "FAILED";
 
 function sortJobsNewestFirst(items: PrintJobSummary[]): PrintJobSummary[] {
   return [...items].sort(
@@ -122,8 +122,9 @@ export default function App() {
   const [selectedJob, setSelectedJob] = useState<PrintJob | null>(null);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [tab, setTab] = useState<Tab>("queue");
-  const [queueFilter, setQueueFilter] = useState<QueueFilter>("ALL");
-  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("ALL");
+  const [queueFilter] = useState<QueueFilter>("PENDING");
+  const [historyFilter, setHistoryFilter] =
+    useState<HistoryFilter>("COMPLETED");
   const [search, setSearch] = useState("");
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -260,15 +261,7 @@ export default function App() {
       }
 
       const tabMatches = jobs.filter((j) =>
-        tab === "queue"
-          ? queueFilter === "ALL"
-            ? j.status === "PENDING" || j.status === "PROCESSING"
-            : j.status === queueFilter
-          : historyFilter === "ALL"
-            ? j.status === "COMPLETED" ||
-              j.status === "REJECTED" ||
-              j.status === "FAILED"
-            : j.status === historyFilter,
+        tab === "queue" ? j.status === queueFilter : j.status === historyFilter,
       );
 
       const matches = tabMatches.filter((j) =>
@@ -305,15 +298,7 @@ export default function App() {
 
   const filtered = useMemo(() => {
     return jobs.filter((j) =>
-      tab === "queue"
-        ? queueFilter === "ALL"
-          ? j.status === "PENDING" || j.status === "PROCESSING"
-          : j.status === queueFilter
-        : historyFilter === "ALL"
-          ? j.status === "COMPLETED" ||
-            j.status === "REJECTED" ||
-            j.status === "FAILED"
-          : j.status === historyFilter,
+      tab === "queue" ? j.status === queueFilter : j.status === historyFilter,
     );
   }, [jobs, tab, queueFilter, historyFilter]);
 
@@ -322,11 +307,6 @@ export default function App() {
     const id = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(id);
   }, [toast]);
-
-  const processingCount = useMemo(
-    () => jobs.filter((j) => j.status === "PROCESSING").length,
-    [jobs],
-  );
 
   if (!token) {
     return (
@@ -344,7 +324,6 @@ export default function App() {
         tab={tab}
         onTabChange={setTab}
         totalJobs={jobs.length}
-        processingCount={processingCount}
         printers={printers}
         selectedPrinter={selectedPrinter}
         onPrinterChange={handlePrinterChange}
@@ -369,57 +348,8 @@ export default function App() {
             className="w-full max-w-xs rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition"
           />
 
-          {tab === "queue" && (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setQueueFilter("ALL")}
-                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
-                  queueFilter === "ALL"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
-                }`}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => setQueueFilter("PENDING")}
-                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
-                  queueFilter === "PENDING"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
-                }`}
-              >
-                Pending
-              </button>
-              <button
-                type="button"
-                onClick={() => setQueueFilter("PROCESSING")}
-                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
-                  queueFilter === "PROCESSING"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
-                }`}
-              >
-                Processing
-              </button>
-            </div>
-          )}
-
           {tab === "history" && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setHistoryFilter("ALL")}
-                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${
-                  historyFilter === "ALL"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-300 bg-white text-gray-600 hover:border-gray-400"
-                }`}
-              >
-                All
-              </button>
               <button
                 type="button"
                 onClick={() => setHistoryFilter("COMPLETED")}
