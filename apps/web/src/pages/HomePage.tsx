@@ -250,7 +250,6 @@ export default function HomePage({
     useState<WalkthroughStep | null>(null);
   const [onboardingEligible, setOnboardingEligible] = useState(false);
   const [calloutStyle, setCalloutStyle] = useState<CSSProperties>({});
-  const [colorStepTouched, setColorStepTouched] = useState(false);
   const [walkthroughFileIndex, setWalkthroughFileIndex] = useState<number>(0);
   const [walkthroughAddedExtra, setWalkthroughAddedExtra] = useState(false);
   const [printFiles, setPrintFiles] = useState<PrintFileState[]>([]);
@@ -327,12 +326,6 @@ export default function HomePage({
       setWalkthroughStep((current) => current ?? "upload");
     }
   }, [onboardingEligible, showSteps]);
-
-  useEffect(() => {
-    if (walkthroughStep !== "color") {
-      setColorStepTouched(false);
-    }
-  }, [walkthroughStep]);
 
   useEffect(() => {
     if (!userId) return;
@@ -540,9 +533,6 @@ export default function HomePage({
   const handleColorModeChange = useCallback(
     (mode: "BW" | "COLOR") => {
       setGlobalColorMode(mode);
-      if (walkthroughStep === "color") {
-        setColorStepTouched(true);
-      }
     },
     [walkthroughStep],
   );
