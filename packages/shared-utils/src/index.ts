@@ -104,8 +104,7 @@ export function calculateSheetCount(
   options: PrintOptions,
 ): number {
   const selectedPages = getSelectedPageCount(totalPages, options);
-
-  return options.duplex === "BOTH"
+  return options.duplex === "BOTH" && options.colorMode != "COLOR"
     ? Math.ceil(selectedPages / 2)
     : selectedPages;
 }
