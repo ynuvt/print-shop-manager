@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import HomePage from "./pages/HomePage";
-import { Toaster } from "react-hot-toast";
+import ReviewPage from "./pages/ReviewPage";
+import TermsPage from "./pages/TermsPage";
+import AboutPage from "./pages/AboutPage";
+import { NotificationProvider } from "./components/NotificationCenter";
 
 export type ThemeMode = "dark" | "light";
 
@@ -17,9 +20,7 @@ export default function App() {
   }, [theme]);
 
   return (
-    <>
-      <Toaster />
-
+    <NotificationProvider>
       <BrowserRouter>
         <Routes>
           <Route
@@ -33,8 +34,31 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/terms"
+            element={
+              <TermsPage
+                theme={theme}
+                onToggleTheme={() =>
+                  setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+                }
+              />
+            }
+          />
+          <Route
+            path="/about"
+            element={
+              <AboutPage
+                theme={theme}
+                onToggleTheme={() =>
+                  setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+                }
+              />
+            }
+          />
+          <Route path="/review/:jobId" element={<ReviewPage />} />
         </Routes>
       </BrowserRouter>
-    </>
+    </NotificationProvider>
   );
 }

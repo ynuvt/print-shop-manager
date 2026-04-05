@@ -216,6 +216,51 @@ export async function createPrintJobFromUrls(
   return res.data;
 }
 
+export async function submitWhatsappJobReview(input: {
+  jobId: string;
+  files: Array<{ id: string; options: PrintFileOption }>;
+}): Promise<{ verificationCode: number }> {
+  const token = getToken();
+  const res = await axios.post(`${BASE_URL}/jobs/submit-whatsapp-job`, input, {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.data) throw new Error("Failed to update job");
+  return res.data as { verificationCode: number };
+}
+
+export async function deleteUserFile(fileId: string): Promise<void> {
+  const token = getToken();
+  const res = await axios.delete(`${BASE_URL}/files`, {
+    data: { id: fileId },
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.data) throw new Error("Failed to remove file");
+}
+
+export async function updateUserFilePrintOptions(
+  fileId: string,
+  options: PrintFileOption,
+): Promise<void> {
+  const token = getToken();
+  const res = await axios.put(
+    `${BASE_URL}/files/printOptions/${fileId}`,
+    options,
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to update print options");
+}
+
 // Fetch all print jobs for the currently logged-in user.
 export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
   const token = getToken();
@@ -227,6 +272,13 @@ export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
 
   if (!res.data) throw new Error("Failed to fetch user print jobs");
   return res.data;
+}
+
+export async function getPrintJobByIdPublic(id: string): Promise<UserPrintJob> {
+  const res = await axios.get(`${BASE_URL}/jobs/review/${id}`);
+
+  if (!res.data) throw new Error("Failed to fetch job");
+  return res.data as UserPrintJob;
 }
 
 export async function getUserPrintJobById(id: string): Promise<UserPrintJob> {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, CSSProperties } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
+import { Link } from "react-router-dom";
 import {
   FileText,
-  Hourglass,
   Moon,
   Plus,
   SlidersHorizontal,
@@ -242,7 +242,7 @@ export default function HomePage({
   theme: ThemeMode;
   onToggleTheme: () => void;
 }) {
-  const [showSteps, setShowSteps] = useState(true);
+  const [showSteps, setShowSteps] = useState(false);
   const [userId, setUserId] = useState<string | null>(() =>
     localStorage.getItem("userId"),
   );
@@ -284,6 +284,10 @@ export default function HomePage({
   const addMoreRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
+    setShowSteps(true);
+  }, []);
+
+  useEffect(() => {
     if (userId) return;
 
     registerUser()
@@ -317,7 +321,15 @@ export default function HomePage({
   }, [userId]);
 
   useEffect(() => {
-    if (showSteps) {
+    const stored = localStorage.getItem("lastReviewVerificationCode");
+    if (stored) {
+      setVerificationCode(stored);
+      localStorage.removeItem("lastReviewVerificationCode");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showSteps || verificationCode) {
       setWalkthroughStep(null);
       return;
     }
@@ -325,7 +337,7 @@ export default function HomePage({
     if (onboardingEligible) {
       setWalkthroughStep((current) => current ?? "upload");
     }
-  }, [onboardingEligible, showSteps]);
+  }, [onboardingEligible, showSteps, verificationCode]);
 
   useEffect(() => {
     if (!userId) return;
@@ -836,8 +848,17 @@ export default function HomePage({
       )}
       <header className="top-bar">
         <div className="brand-row">
-          <div className="brand-mark brand-mark-icon" aria-hidden="true">
-            <Hourglass size={36} strokeWidth={2.2} />
+          <div className="brand-mark" aria-hidden="true">
+            <img
+              className="brand-icon brand-icon--light"
+              src="/img/IconBlack.png"
+              alt=""
+            />
+            <img
+              className="brand-icon brand-icon--dark"
+              src="/img/iconWhite.png"
+              alt=""
+            />
           </div>
           <div>
             <p className="brand-title">ZOPY</p>
@@ -848,17 +869,22 @@ export default function HomePage({
           </div>
         </div>
 
-        <button
-          type="button"
-          className="theme-btn icon-theme-btn"
-          onClick={onToggleTheme}
-          aria-label={
-            theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
-          }
-          title={theme === "dark" ? "Light mode" : "Dark mode"}
-        >
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
+        <div className="top-bar-actions">
+          <Link to="/about" className="ghost-link">
+            About Us
+          </Link>
+          <button
+            type="button"
+            className="theme-btn icon-theme-btn"
+            onClick={onToggleTheme}
+            aria-label={
+              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+            }
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
       </header>
 
       <main className="main-wrap">
@@ -1118,6 +1144,16 @@ export default function HomePage({
 
         <PrintJobsList userId={userId} refreshTrigger={refreshTrigger} />
       </main>
+      <footer className="site-footer">
+        <div className="site-footer-inner">
+          <Link to="/terms" className="footer-link">
+            Terms & Conditions
+          </Link>
+          <Link to="/about" className="footer-link">
+            About Us
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 }

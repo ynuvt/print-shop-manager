@@ -8,8 +8,7 @@ import {
 } from "../api/api";
 import type { UserPrintJob, UserPrintJobFile } from "../api/api";
 import { getSocket } from "../services/getSocket";
-import PrintNotification from "./PrintNotification";
-import toast from "react-hot-toast";
+import { useNotifications } from "./NotificationCenter";
 
 type JobsTab = "ALL" | "ACTIVE" | "COMPLETED" | "REJECTED" | "CANCELED";
 
@@ -107,6 +106,7 @@ function JobDetailModal({
   onJobUpdated: (job: UserPrintJob) => void;
   onJobDeleted: (jobId: string) => void;
 }) {
+  const { notify } = useNotifications();
   const [job, setJob] = useState<UserPrintJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +180,7 @@ function JobDetailModal({
 
   const handleRefreshStatus = async () => {
     await loadJob();
-    toast.success("Status refreshed");
+    notify("Status refreshed", { variant: "success" });
   };
 
   const handleDeleteJob = async () => {
@@ -194,13 +194,13 @@ function JobDetailModal({
     setIsDeleting(true);
     try {
       await deleteUserPrintJob(job.id);
-      toast.success("Job deleted successfully");
+      notify("Job deleted successfully", { variant: "success" });
       onJobDeleted(job.id);
       onClose();
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Failed to delete this job";
-      toast.error(msg);
+      notify(msg, { variant: "error" });
     } finally {
       setIsDeleting(false);
     }
@@ -215,11 +215,11 @@ function JobDetailModal({
       const refreshed = await getUserPrintJobById(job.id);
       setJob(refreshed);
       onJobUpdated(refreshed);
-      toast.success("Job submitted again");
+      notify("Job submitted again", { variant: "success" });
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Failed to submit job again";
-      toast.error(msg);
+      notify(msg, { variant: "error" });
     } finally {
       setIsResubmitting(false);
     }
@@ -331,6 +331,7 @@ export default function PrintJobsList({
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<JobsTab>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
+  const { notify } = useNotifications();
 
   const handleJobUpdated = useCallback((updatedJob: UserPrintJob) => {
     setJobs((prev) =>
@@ -362,15 +363,13 @@ export default function PrintJobsList({
         setJobs(sorted);
 
         if (notification && msg) {
-          toast.custom((t) => (
-            <PrintNotification toastData={t} message={msg} />
-          ));
+          notify(msg, { variant: "info" });
         }
       } finally {
         setLoading(false);
       }
     },
-    [userId],
+    [notify, userId],
   );
 
   useEffect(() => {

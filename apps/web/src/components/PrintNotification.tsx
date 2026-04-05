@@ -1,32 +1,35 @@
-import { useEffect, useState } from "react";
-import { toast } from "react-hot-toast";
-import type { Toast } from "react-hot-toast";
+import { useEffect, useMemo, useState } from "react";
 
 interface PrintNotificationProps {
-  toastData: Toast;
   message: string;
+  variant?: "success" | "error" | "info";
+  duration?: number;
+  onDismiss: () => void;
 }
 
 export default function PrintNotification({
-  toastData,
   message,
+  variant = "info",
+  duration = 14000,
+  onDismiss,
 }: PrintNotificationProps) {
-  const DURATION = 19000;
   const [progress, setProgress] = useState(100);
   const [visible, setVisible] = useState(false);
-  const isDark =
-    document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+
+  const accent = useMemo(() => {
+    if (variant === "success") return "#1f9d57";
+    if (variant === "error") return "#c43636";
+    return "#1a7af8";
+  }, [variant]);
 
   useEffect(() => {
     const frameRate = 30;
-    const decrement = 100 / (DURATION / (1000 / frameRate));
+    const decrement = 100 / (duration / (1000 / frameRate));
     const interval = setInterval(() => {
       setProgress((p) => Math.max(0, p - decrement));
     }, 1000 / frameRate);
-    const timeout = window.setTimeout(
-      () => toast.dismiss(toastData.id),
-      DURATION,
-    );
+    const timeout = window.setTimeout(() => onDismiss(), duration);
 
     requestAnimationFrame(() => setVisible(true));
 
@@ -34,11 +37,11 @@ export default function PrintNotification({
       clearInterval(interval);
       clearTimeout(timeout);
     };
-  }, [toastData.id]);
+  }, [duration, onDismiss]);
 
   const handleDismiss = () => {
     setVisible(false);
-    setTimeout(() => toast.dismiss(toastData.id), 300);
+    setTimeout(() => onDismiss(), 300);
   };
 
   return (
@@ -71,14 +74,12 @@ export default function PrintNotification({
               width: 40,
               height: 40,
               borderRadius: 12,
-              background: isDark
-                ? "linear-gradient(140deg, #2f9bff, #1a7af8)"
-                : "linear-gradient(140deg, #2f9bff, #1a7af8)",
+              background: `linear-gradient(140deg, ${accent}, #2f9bff)`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
-              boxShadow: "0 8px 20px rgba(26,122,248,0.35)",
+              boxShadow: `0 8px 20px ${accent}55`,
             }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -171,7 +172,7 @@ export default function PrintNotification({
               height: "100%",
               width: `${progress}%`,
               borderRadius: 99,
-              background: "linear-gradient(90deg, #1a7af8, #2f9bff)",
+              background: `linear-gradient(90deg, ${accent}, #2f9bff)`,
               transition: "width 0.05s linear",
             }}
           />
