@@ -69,7 +69,8 @@ export default function AboutPage({
             <span className="legal-title-icon" aria-hidden="true">
               <Sparkles size={18} />
             </span>
-            At Zopy, we believe printing should be as simple as sending a message.
+            At Zopy, we believe printing should be as simple as sending a
+            message.
           </p>
 
           <ul className="legal-list">
@@ -80,8 +81,8 @@ export default function AboutPage({
 
           <p>
             Zopy is built for students and everyday users who just want their
-            documents printed - <strong>fast</strong>, <strong>easy</strong>, and
-            from anywhere.
+            documents printed - <strong>fast</strong>, <strong>easy</strong>,
+            and from anywhere.
           </p>
 
           <h2 className="legal-title">
@@ -95,7 +96,9 @@ export default function AboutPage({
             <li>Upload your documents directly from your phone.</li>
             <li>Customize print settings in seconds.</li>
             <li>Get an OTP for secure verification.</li>
-            <li>Walk into a nearby print shop and collect your prints instantly.</li>
+            <li>
+              Walk into a nearby print shop and collect your prints instantly.
+            </li>
           </ul>
           <p>It&apos;s a seamless bridge between your phone and print shops.</p>
 
@@ -111,8 +114,8 @@ export default function AboutPage({
             <strong> stress-free</strong>.
           </p>
           <p>
-            We&apos;re focused on transforming traditional print shops into smart,
-            connected service points - without changing how they operate.
+            We&apos;re focused on transforming traditional print shops into
+            smart, connected service points - without changing how they operate.
           </p>
 
           <h2 className="legal-title">
@@ -160,7 +163,8 @@ export default function AboutPage({
             Built for Speed. Designed for Simplicity.
           </h2>
           <p>
-            Zopy is not just a tool - it&apos;s a smarter way to get things done.
+            Zopy is not just a tool - it&apos;s a smarter way to get things
+            done.
           </p>
 
           <p className="legal-contact">

@@ -52,7 +52,7 @@ export default function TermsPage({
         <section className="hero-panel legal-card">
           <div className="hero-header">
             <h1>Terms of Service</h1>
-            <p>Effective Date: [Insert Date]</p>
+            <p>Effective Date: 04/04/2026</p>
           </div>
 
           <p>
@@ -208,7 +208,7 @@ export default function TermsPage({
         <section className="hero-panel legal-card">
           <div className="hero-header">
             <h1>Privacy Policy</h1>
-            <p>Effective Date: [Insert Date]</p>
+            <p>Effective Date: 04/04/2026</p>
           </div>
 
           <p>
@@ -337,7 +337,7 @@ export default function TermsPage({
         <section className="hero-panel legal-card">
           <div className="hero-header">
             <h1>Refund Policy</h1>
-            <p>Effective Date: [Insert Date]</p>
+            <p>Effective Date: 04/04/2026</p>
           </div>
 
           <p>
@@ -436,7 +436,7 @@ export default function TermsPage({
         <section className="hero-panel legal-card">
           <div className="hero-header">
             <h1>Acceptable Use Policy</h1>
-            <p>Effective Date: [Insert Date]</p>
+            <p>Effective Date: 04/04/2026</p>
           </div>
 
           <p>
