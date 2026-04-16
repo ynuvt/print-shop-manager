@@ -37,7 +37,6 @@ const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
 
 type WalkthroughStep =
   | "upload"
-  | "color"
   | "customize"
   | "add-more"
   | "file-select"
@@ -80,7 +79,6 @@ function FileCard({
   isTitleWalkthroughTarget,
   onUpdate,
   onRemove,
-  globalColorMode,
 }: {
   pf: PrintFileState;
   expanded: boolean;
@@ -91,12 +89,8 @@ function FileCard({
   isTitleWalkthroughTarget?: boolean;
   onUpdate: (patch: Partial<PrintOptions>) => void;
   onRemove: () => void;
-  globalColorMode: "BW" | "COLOR";
 }) {
-  const cost = calculateFileCost(pf.detectedPages, {
-    ...pf.options,
-    colorMode: globalColorMode,
-  });
+  const cost = calculateFileCost(pf.detectedPages, pf.options);
 
   return (
     <article className="upload-file-card">
@@ -120,19 +114,21 @@ function FileCard({
               {pf.detectedPages} pages • Rs {cost}
             </span>
           </div>
-          <span className="file-edit-hint">
+        </button>
+        <div className="review-file-actions">
+          <button type="button" className="file-edit-hint file-edit-hint--action" onClick={onToggle}>
             <SlidersHorizontal size={12} />
-            Tap file to edit details
-          </span>
-        </button>
-        <button
-          type="button"
-          className="icon-btn remove-file-btn"
-          onClick={onRemove}
-          aria-label="Remove file"
-        >
-          <X size={16} strokeWidth={2.4} aria-hidden="true" />
-        </button>
+            Edit details
+          </button>
+          <button
+            type="button"
+            className="icon-btn remove-file-btn"
+            onClick={onRemove}
+            aria-label="Remove file"
+          >
+            <X size={16} strokeWidth={2.4} aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       {expanded && (
@@ -144,6 +140,18 @@ function FileCard({
               : "upload-file-body"
           }
         >
+          <div>
+            <p className="field-label">Print Type</p>
+            <ToggleGroup
+              options={[
+                { label: "Color Print", value: "COLOR" },
+                { label: "B/W Print", value: "BW" },
+              ]}
+              value={pf.options.colorMode}
+              onChange={(v) => onUpdate({ colorMode: v })}
+            />
+          </div>
+
           <div>
             <p className="field-label">Print Sides</p>
             <ToggleGroup
@@ -259,8 +267,8 @@ export default function HomePage({
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [globalColorMode, setGlobalColorMode] = useState<"BW" | "COLOR">("BW");
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isPreparingFiles, setIsPreparingFiles] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [uploadStage, setUploadStage] = useState<"uploading" | "creating">(
     "uploading",
@@ -276,16 +284,15 @@ export default function HomePage({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previousFileCount = useRef(0);
   const uploadButtonRef = useRef<HTMLButtonElement>(null);
-  const colorToggleRef = useRef<HTMLDivElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const fileOptionsRef = useRef<HTMLDivElement | null>(null);
   const fileTitleRef = useRef<HTMLButtonElement | null>(null);
   const summaryCardRef = useRef<HTMLDivElement | null>(null);
   const addMoreRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    setShowSteps(true);
-  }, []);
+  // useEffect(() => {
+  //   setShowSteps(true);
+  // }, []);
 
   useEffect(() => {
     if (userId) return;
@@ -365,7 +372,7 @@ export default function HomePage({
   useEffect(() => {
     if (walkthroughStep === "upload" && printFiles.length > 0) {
       setWalkthroughFileIndex(0);
-      setWalkthroughStep("color");
+      setWalkthroughStep("customize");
     }
   }, [printFiles.length, walkthroughStep]);
 
@@ -415,8 +422,6 @@ export default function HomePage({
       switch (walkthroughStep) {
         case "upload":
           return uploadButtonRef.current;
-        case "color":
-          return colorToggleRef.current;
         case "customize":
           return fileOptionsRef.current;
         case "file-select":
@@ -471,18 +476,22 @@ export default function HomePage({
       }
 
       setError(null);
+      setIsPreparingFiles(true);
+      try {
+        const newEntries: PrintFileState[] = await Promise.all(
+          files.map(async (file) => ({
+            file,
+            name: file.name,
+            detectedPages: await getPdfPageCount(file),
+            options: defaultPrintOptions(),
+            pageRangeError: "",
+          })),
+        );
 
-      const newEntries: PrintFileState[] = await Promise.all(
-        files.map(async (file) => ({
-          file,
-          name: file.name,
-          detectedPages: await getPdfPageCount(file),
-          options: defaultPrintOptions(),
-          pageRangeError: "",
-        })),
-      );
-
-      setPrintFiles((prev) => [...prev, ...newEntries]);
+        setPrintFiles((prev) => [...prev, ...newEntries]);
+      } finally {
+        setIsPreparingFiles(false);
+      }
     },
     [totalBytes],
   );
@@ -542,13 +551,6 @@ export default function HomePage({
     setExpandedIdx((prev) => (prev === idx ? null : prev));
   }, []);
 
-  const handleColorModeChange = useCallback(
-    (mode: "BW" | "COLOR") => {
-      setGlobalColorMode(mode);
-    },
-    [walkthroughStep],
-  );
-
   const handleFileToggle = useCallback(
     (idx: number) => {
       if (walkthroughStep === "file-select" && idx === walkthroughFileIndex) {
@@ -591,7 +593,6 @@ export default function HomePage({
       const files = printFiles.map((pf) => pf.file);
       const fileOptions = printFiles.map((pf) => ({
         ...pf.options,
-        colorMode: globalColorMode,
       }));
 
       const uploads = await requestPresignedUploads(files);
@@ -630,20 +631,19 @@ export default function HomePage({
           ? err.message
           : "Something went wrong. Please try again.",
       );
-      // Reset CAPTCHA token on error so user must complete challenge again
-      setCaptchaToken(null);
+      if (
+        err instanceof Error &&
+        /captcha|turnstile|verification/i.test(err.message)
+      ) {
+        setCaptchaToken(null);
+      }
     } finally {
       setIsSubmitting(false);
       setUploadProgress([]);
     }
   };
 
-  const totals = buildJobTotals(
-    printFiles.map((f) => ({
-      ...f,
-      options: { ...f.options, colorMode: globalColorMode },
-    })),
-  );
+  const totals = buildJobTotals(printFiles);
 
   const hasErrors = printFiles.some(
     (f) =>
@@ -662,14 +662,12 @@ export default function HomePage({
   const isWalkthroughActive = walkthroughStep !== null;
   const showCallout =
     walkthroughStep === "upload" ||
-    walkthroughStep === "color" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "file-select" ||
     walkthroughStep === "summary" ||
     walkthroughStep === "submit";
   const showCalloutButton =
-    walkthroughStep === "color" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "summary" ||
@@ -678,8 +676,6 @@ export default function HomePage({
     switch (walkthroughStep) {
       case "upload":
         return "Start by uploading your PDF files here.";
-      case "color":
-        return "Your selected color option applies to all files in this job.";
       case "customize":
         return "Choose your print options and select Next.";
       case "add-more":
@@ -696,7 +692,6 @@ export default function HomePage({
   })();
   const calloutButtonLabel = (() => {
     switch (walkthroughStep) {
-      case "color":
       case "customize":
       case "add-more":
       case "summary":
@@ -709,9 +704,6 @@ export default function HomePage({
   })();
   const handleCalloutAction = () => {
     switch (walkthroughStep) {
-      case "color":
-        setWalkthroughStep("customize");
-        break;
       case "customize":
         if (walkthroughAddedExtra) {
           setWalkthroughAddedExtra(false);
@@ -945,6 +937,7 @@ export default function HomePage({
                 className={
                   isDragActive ? "upload-dropzone active" : "upload-dropzone"
                 }
+                aria-busy={isPreparingFiles}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setIsDragActive(true);
@@ -969,33 +962,17 @@ export default function HomePage({
                   />
                   <span className="upload-circle-label">Upload PDF</span>
                 </button>
-                <p>Drag and drop or tap to browse.</p>
-              </div>
-
-              <div className="print-mode-top">
-                <p className="field-label">Print Type</p>
-                <div
-                  ref={colorToggleRef}
-                  className={
-                    walkthroughStep === "color"
-                      ? "print-mode-toggle walkthrough-target"
-                      : "print-mode-toggle"
-                  }
-                >
-                  <ToggleGroup
-                    options={[
-                      { label: "Color Print", value: "COLOR" },
-                      { label: "B/W Print", value: "BW" },
-                    ]}
-                    value={globalColorMode}
-                    onChange={handleColorModeChange}
-                  />
-                </div>
-                <p className="color-mode-note">
-                  Note: All files in this job will be printed as{" "}
-                  {globalColorMode === "COLOR" ? "Color" : "B/W"} based on this
-                  top selection.
+                <p>
+                  {isPreparingFiles
+                    ? "Preparing files. Please wait..."
+                    : "Drag and drop or tap to browse."}
                 </p>
+                {isPreparingFiles && (
+                  <div className="upload-inline-loader" role="status" aria-live="polite">
+                    <span className="upload-inline-loader-dot" aria-hidden="true" />
+                    Reading file pages...
+                  </div>
+                )}
               </div>
 
               {printFiles.length > 0 && (
@@ -1035,7 +1012,6 @@ export default function HomePage({
                         }
                         onUpdate={(patch) => updateOptions(idx, patch)}
                         onRemove={() => removeFile(idx)}
-                        globalColorMode={globalColorMode}
                       />
                     ))}
                   </div>
