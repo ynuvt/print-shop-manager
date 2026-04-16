@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { FileText, SlidersHorizontal, X } from "lucide-react";
 import type { PrintFileOption } from "@printowl/types";
 import {
+  addFilesToJobFromUrls,
   getPrintJobByIdPublic,
   registerUser,
+  requestPresignedUploads,
   submitWhatsappJobReview,
+  uploadFileToR2,
+  updateUserFilePrintOptions,
+  deleteUserFile,
+  type UserPrintJob,
 } from "../api/api";
 import {
   calculateFileCost,
@@ -14,6 +21,11 @@ import {
 import { defaultPrintOptions } from "../printing/types";
 import { calculateEstimatedTime } from "@printowl/shared-utils";
 import { useNotifications } from "../components/NotificationCenter";
+import { getSocket } from "../services/getSocket";
+
+const API_ORIGIN =
+  import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in";
+const BASE_URL = `${API_ORIGIN}/api/v1`;
 
 function ToggleGroup<T extends string>({
   options,
@@ -61,6 +73,63 @@ function normalizeOptions(
   };
 }
 
+type StoredOptionMap = Record<string, PrintFileOption>;
+
+function getStoredOptions(jobId: string): StoredOptionMap {
+  const storageKey = `review-options:${jobId}`;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as StoredOptionMap;
+    return parsed ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredOptions(jobId: string, files: ReviewFileState[]): void {
+  const storageKey = `review-options:${jobId}`;
+  const payload = files.reduce<StoredOptionMap>((acc, file) => {
+    acc[file.id] = file.options;
+    return acc;
+  }, {});
+  localStorage.setItem(storageKey, JSON.stringify(payload));
+}
+
+function clearStoredOptions(jobId: string): void {
+  const storageKey = `review-options:${jobId}`;
+  localStorage.removeItem(storageKey);
+}
+
+function buildReviewFiles(
+  job: UserPrintJob,
+  storedOptions: StoredOptionMap,
+): ReviewFileState[] {
+  return job.files.map((file) => {
+    const baseOptions = normalizeOptions(file.option);
+    const mergedOptions = normalizeOptions({
+      ...baseOptions,
+      ...storedOptions[file.id],
+    });
+    const pageRangeError =
+      mergedOptions.pageRange === "CUSTOM"
+        ? (validateCustomPageRange(
+            mergedOptions.customRange ?? "",
+            file.pages,
+          ) ?? "")
+        : "";
+
+    return {
+      id: file.id,
+      name: file.name,
+      pages: file.pages,
+      url: file.url,
+      options: mergedOptions,
+      pageRangeError,
+    };
+  });
+}
+
 export default function ReviewPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
@@ -70,14 +139,173 @@ export default function ReviewPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isAddingFiles, setIsAddingFiles] = useState(false);
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const { notify } = useNotifications();
   const [userId, setUserId] = useState<string | null>(() =>
     localStorage.getItem("userId"),
   );
+  const debounceSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSaveErrorRef = useRef(0);
+  const lastPersistedOptionsRef = useRef<Record<string, PrintFileOption>>({});
+  const hasClaimedOwnerRef = useRef(false);
+  const addMoreInputRef = useRef<HTMLInputElement | null>(null);
+
+  const getPendingFiles = () =>
+    files.filter((file) => {
+      if (file.pageRangeError) return false;
+      if (
+        file.options.pageRange === "CUSTOM" &&
+        !file.options.customRange?.trim()
+      ) {
+        return false;
+      }
+      const lastSaved = lastPersistedOptionsRef.current[file.id];
+      if (!lastSaved) return true;
+      return JSON.stringify(lastSaved) !== JSON.stringify(file.options);
+    });
+
+  const persistCurrentOptionsNow = async (useKeepAlive: boolean) => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const pendingFiles = getPendingFiles();
+
+    await Promise.all(
+      pendingFiles.map(async (file) => {
+        try {
+          if (useKeepAlive) {
+            await fetch(`${BASE_URL}/files/printOptions/${file.id}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                ...file.options,
+                customRange: file.options.customRange ?? "",
+              }),
+              keepalive: true,
+            });
+          } else {
+            await updateUserFilePrintOptions(file.id, {
+              ...file.options,
+              customRange: file.options.customRange ?? "",
+            });
+          }
+
+          lastPersistedOptionsRef.current[file.id] = file.options;
+        } catch (error) {
+          console.error("Failed to persist print options.", error);
+          if (Date.now() - lastSaveErrorRef.current > 5000) {
+            lastSaveErrorRef.current = Date.now();
+            notify("Failed to save print options. Try again in a moment.", {
+              variant: "error",
+            });
+          }
+        }
+      }),
+    );
+  };
 
   useEffect(() => {
-    if (userId) return;
+    if (userId && jobId && !error) {
+      console.log("Joining job updates room for user:", userId);
+      getSocket().emit("join-job-updates", jobId);
+      return () => {
+        getSocket().emit("leave-job-updates", jobId);
+      };
+    }
+  }, [userId, jobId, error]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceSaveRef.current) {
+        clearTimeout(debounceSaveRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      void persistCurrentOptionsNow(true);
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [files]);
+
+  const refreshJob = async (mode: "initial" | "manual" | "socket") => {
+    if (!jobId) return;
+    if (mode === "initial") {
+      setIsLoading(true);
+    }
+    if (mode === "manual") {
+      setIsRefreshing(true);
+    }
+
+    try {
+      const job = await getPrintJobByIdPublic(jobId);
+      const whatsAppLabel = job.userMetadata?.name?.trim()
+        ? `${job.userMetadata.name}`
+        : (job.userMetadata?.phoneNumber ?? "");
+      setJobTitle(whatsAppLabel ? `WhatsApp: ${whatsAppLabel}` : "Review Job");
+      const storedOptions = getStoredOptions(jobId);
+      const nextFiles = buildReviewFiles(job, storedOptions);
+      setFiles(nextFiles);
+      lastPersistedOptionsRef.current = nextFiles.reduce(
+        (acc, file) => {
+          acc[file.id] = file.options;
+          return acc;
+        },
+        {} as Record<string, PrintFileOption>,
+      );
+      if (mode === "initial") {
+        setExpandedIdx(0);
+      }
+    } catch (err) {
+      if (mode === "initial") {
+        setError(
+          err instanceof Error ? err.message : "Unable to load this job.",
+        );
+      } else {
+        notify("Failed to refresh job details.", { variant: "error" });
+      }
+    } finally {
+      if (mode === "initial") {
+        setIsLoading(false);
+      }
+      if (mode === "manual") {
+        setIsRefreshing(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!userId || !jobId) return;
+
+    const handleJobFileAdded = (updatedJobId: string) => {
+      console.log("Received job-file-added event for job:", updatedJobId);
+      if (updatedJobId !== jobId) return;
+      if (debounceSaveRef.current) {
+        clearTimeout(debounceSaveRef.current);
+      }
+      void persistCurrentOptionsNow(false).then(() => refreshJob("socket"));
+    };
+
+    getSocket().on("job-file-added", handleJobFileAdded);
+
+    return () => {
+      getSocket().off("job-file-added", handleJobFileAdded);
+    };
+  }, [userId, jobId]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (userId && token) return;
 
     registerUser()
       .then(({ token, userId }) => {
@@ -91,41 +319,39 @@ export default function ReviewPage() {
   }, [userId]);
 
   useEffect(() => {
+    if (hasClaimedOwnerRef.current) return;
+    if (!jobId || !userId) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    hasClaimedOwnerRef.current = true;
+    void refreshJob("manual");
+  }, [jobId, userId]);
+
+  useEffect(() => {
     if (!jobId) {
       setError("Missing job ID in the review link.");
       setIsLoading(false);
       return;
     }
 
-    setIsLoading(true);
-    getPrintJobByIdPublic(jobId)
-      .then((job) => {
-        setJobTitle(
-          job.verificationCode ? `Job #${job.verificationCode}` : "Review Job",
-        );
-        setFiles(
-          job.files.map((file) => ({
-            id: file.id,
-            name: file.name,
-            pages: file.pages,
-            url: file.url,
-            options: normalizeOptions(file.option),
-            pageRangeError: "",
-          })),
-        );
-        setExpandedIdx(0);
-      })
-      .catch((err) => {
-        setError(
-          err instanceof Error ? err.message : "Unable to load this job.",
-        );
-      })
-      .finally(() => setIsLoading(false));
+    void refreshJob("initial");
   }, [jobId]);
 
-  const jobColorMode = useMemo<"BW" | "COLOR">(() => {
-    return files[0]?.options.colorMode ?? "BW";
-  }, [files]);
+  useEffect(() => {
+    if (!jobId || isLoading || error) return;
+    saveStoredOptions(jobId, files);
+  }, [jobId, files, isLoading, error]);
+
+  useEffect(() => {
+    if (!files.length || isLoading) return;
+    if (debounceSaveRef.current) {
+      clearTimeout(debounceSaveRef.current);
+    }
+    debounceSaveRef.current = setTimeout(() => {
+      void persistCurrentOptionsNow(false);
+    }, 1500);
+  }, [files, isLoading]);
 
   const totals = useMemo(() => {
     const totalPages = files.reduce((sum, file) => sum + file.pages, 0);
@@ -160,22 +386,26 @@ export default function ReviewPage() {
     );
   };
 
-  const updateColorMode = (mode: "BW" | "COLOR") => {
-    setFiles((prev) =>
-      prev.map((file) => {
-        const nextOptions = { ...file.options, colorMode: mode };
-        return { ...file, options: nextOptions };
-      }),
-    );
-  };
-
   const removeFile = async (idx: number) => {
     const confirmed = window.confirm(
       "Remove this file? This action cannot be undone. You will need to create a new job to add it back.",
     );
     if (!confirmed) return;
-    setFiles((prev) => prev.filter((_, i) => i !== idx));
-    setExpandedIdx((prev) => (prev === idx ? null : prev));
+    const target = files[idx];
+    if (!target) return;
+
+    try {
+      await deleteUserFile(target.id);
+      setFiles((prev) => prev.filter((_, i) => i !== idx));
+      setExpandedIdx((prev) => (prev === idx ? null : prev));
+      if (jobId) {
+        void refreshJob("manual");
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to remove file.", {
+        variant: "error",
+      });
+    }
   };
 
   const onSubmit = async () => {
@@ -201,12 +431,80 @@ export default function ReviewPage() {
         "lastReviewVerificationCode",
         String(result.verificationCode),
       );
+      if (jobId) {
+        clearStoredOptions(jobId);
+      }
       navigate("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit job.");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const addMoreDocumentsFromDevice = async (selected: File[]) => {
+    if (!jobId) return;
+    if (!selected.length) return;
+    if (isAddingFiles) return;
+
+    setIsAddingFiles(true);
+    try {
+      const pdfs = selected.filter((file) =>
+        file.name.toLowerCase().endsWith(".pdf"),
+      );
+      if (!pdfs.length) {
+        notify("Please select a PDF file.", { variant: "error" });
+        return;
+      }
+
+      const uploads = await requestPresignedUploads(pdfs);
+
+      await Promise.all(
+        uploads.map((upload, idx) => uploadFileToR2(upload.uploadUrl, pdfs[idx])),
+      );
+
+      await addFilesToJobFromUrls(
+        jobId,
+        uploads.map((upload) => ({
+          name: upload.name,
+          url: upload.publicUrl,
+        })),
+      );
+
+      await refreshJob("manual");
+      notify("Added file(s) to this job.", { variant: "success" });
+    } catch (err) {
+      notify(
+        err instanceof Error ? err.message : "Failed to add documents.",
+        { variant: "error" },
+      );
+    } finally {
+      setIsAddingFiles(false);
+    }
+  };
+
+  const forwardMoreFilesOnWhatsapp = () => {
+    const digits = "918369757906";
+    window.open(
+      `https://wa.me/${digits}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
+  const toggleFileExpanded = (idx: number) => {
+    setExpandedIdx((prev) => (prev === idx ? null : idx));
+  };
+
+  const handleCardClick = (idx: number, event: MouseEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) {
+      toggleFileExpanded(idx);
+      return;
+    }
+    const interactive = target.closest("a,button,input,select,textarea,label");
+    if (interactive) return;
+    toggleFileExpanded(idx);
   };
 
   if (isLoading) {
@@ -283,35 +581,58 @@ export default function ReviewPage() {
             <p>Confirm your print options, remove files, and submit.</p>
           </div>
 
-          <div className="print-mode-top">
-            <p className="field-label">Print Type</p>
-            <ToggleGroup
-              options={[
-                { label: "Color Print", value: "COLOR" },
-                { label: "B/W Print", value: "BW" },
-              ]}
-              value={jobColorMode}
-              onChange={updateColorMode}
-            />
-            <p className="color-mode-note">
-              Color mode applies to all files in this job.
-            </p>
-          </div>
-
           <div className="section-head">
             <h2>Files in this job</h2>
+            <div className="review-actions">
+              <button
+                type="button"
+                className="btn review-action-btn"
+                onClick={() => addMoreInputRef.current?.click()}
+                disabled={isAddingFiles || isSubmitting}
+              >
+                {isAddingFiles ? "Adding..." : "Add more document from device"}
+              </button>
+              <button
+                type="button"
+                className="btn review-action-btn"
+                onClick={forwardMoreFilesOnWhatsapp}
+              >
+                Forward more files on WhatsApp
+              </button>
+              <button
+                type="button"
+                className="btn review-action-btn review-action-btn--subtle"
+                onClick={() => void refreshJob("manual")}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? "Refreshing..." : "Refresh Files"}
+              </button>
+            </div>
           </div>
 
           <div className="upload-file-list">
             {files.map((file, idx) => (
-              <article className="upload-file-card" key={file.id}>
+              <article
+                className="upload-file-card review-file-card"
+                key={file.id}
+                role="button"
+                tabIndex={0}
+                onClick={(event) => handleCardClick(idx, event)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggleFileExpanded(idx);
+                  }
+                }}
+              >
                 <div className="upload-file-head">
                   <button
                     type="button"
                     className="upload-file-title"
-                    onClick={() =>
-                      setExpandedIdx((prev) => (prev === idx ? null : idx))
-                    }
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleFileExpanded(idx);
+                    }}
                   >
                     <div className="file-icon" aria-hidden="true">
                       <FileText size={18} />
@@ -325,28 +646,50 @@ export default function ReviewPage() {
                     </div>
                   </button>
                   <div className="review-file-actions">
+                    <button
+                      type="button"
+                      className="file-edit-hint file-edit-hint--action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleFileExpanded(idx);
+                      }}
+                    >
+                      <SlidersHorizontal size={12} />
+                      Edit details
+                    </button>
                     <a href={file.url} target="_blank" rel="noreferrer">
                       View File
                     </a>
                     <button
                       type="button"
                       className="icon-btn remove-file-btn"
-                      onClick={() => void removeFile(idx)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void removeFile(idx);
+                      }}
                       aria-label="Remove file"
                     >
                       <X size={16} strokeWidth={2.4} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
-                <div className="review-file-footer">
-                  <span className="file-edit-hint">
-                    <SlidersHorizontal size={12} />
-                    Tap file to edit details
-                  </span>
-                </div>
 
                 {expandedIdx === idx && (
                   <div className="upload-file-body">
+                    <div>
+                      <p className="field-label">Print Type</p>
+                      <ToggleGroup
+                        options={[
+                          { label: "Color Print", value: "COLOR" },
+                          { label: "B/W Print", value: "BW" },
+                        ]}
+                        value={file.options.colorMode}
+                        onChange={(v) =>
+                          updateFileOptions(idx, { colorMode: v })
+                        }
+                      />
+                    </div>
+
                     <div>
                       <p className="field-label">Print Sides</p>
                       <ToggleGroup
@@ -506,6 +849,20 @@ export default function ReviewPage() {
             </p>
           )}
         </section>
+
+        <input
+          ref={addMoreInputRef}
+          type="file"
+          accept=".pdf"
+          multiple
+          className="hidden-input"
+          onChange={(event) => {
+            const selected = Array.from(event.target.files ?? []);
+            void addMoreDocumentsFromDevice(selected).finally(() => {
+              if (addMoreInputRef.current) addMoreInputRef.current.value = "";
+            });
+          }}
+        />
       </main>
 
       <footer className="site-footer">
