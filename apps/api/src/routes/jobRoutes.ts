@@ -397,6 +397,53 @@ function parseUrlFilesFromBody(rawFiles: unknown): UrlFileForCreate[] {
   });
 }
 
+type UrlFileForAppend = {
+  name: string;
+  url: string;
+};
+
+function parseUrlFilesForAppend(rawFiles: unknown): UrlFileForAppend[] {
+  if (!Array.isArray(rawFiles)) {
+    throw new PrintJobAnalysisError("files must be an array.", 400);
+  }
+
+  return rawFiles.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new PrintJobAnalysisError(
+        `Invalid file payload at index ${index + 1}.`,
+        400,
+      );
+    }
+
+    const name =
+      typeof (item as { name?: unknown }).name === "string"
+        ? (item as { name: string }).name.trim()
+        : "";
+    const url =
+      typeof (item as { url?: unknown }).url === "string"
+        ? (item as { url: string }).url.trim()
+        : "";
+
+    if (!name || !url) {
+      throw new PrintJobAnalysisError(
+        `Missing name or url for file ${index + 1}.`,
+        400,
+      );
+    }
+
+    try {
+      new URL(url);
+    } catch {
+      throw new PrintJobAnalysisError(
+        `Invalid url for file ${index + 1}.`,
+        400,
+      );
+    }
+
+    return { name, url };
+  });
+}
+
 /*
  * Legacy upload flow (direct file upload to backend):
  * Disabled in favor of presigned client uploads + create-with-urls.
@@ -712,6 +759,189 @@ app.post(
     } finally {
       console.log("Emitting job-created event to admin room");
       socket.emit("job-created", "admin");
+    }
+  },
+);
+
+app.post(
+  "/:jobId/add-files-from-urls",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    const { jobId } = req.params;
+    if (!jobId || typeof jobId !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    let incomingFiles: UrlFileForAppend[] = [];
+
+    try {
+      incomingFiles = parseUrlFilesForAppend(req.body.files);
+      if (!incomingFiles.length) {
+        return res
+          .status(400)
+          .json({ error: "At least one PDF file is required." });
+      }
+
+      const job = await prisma.printJob.findUnique({
+        where: { id: jobId },
+        include: {
+          owners: { select: { userId: true } },
+        },
+      });
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      if (job.status !== PrintJobStatus.DRAFT) {
+        return res
+          .status(403)
+          .json({ error: "This job is not available for review." });
+      }
+
+      const isOwner =
+        job.userId === req.user.uid ||
+        job.owners.some((owner) => owner.userId === req.user.uid);
+
+      if (!isOwner) {
+        return res
+          .status(403)
+          .json({ error: "You do not have access to this job." });
+      }
+
+      const defaultOptions = optionsSchema.parse({
+        paperSize: "A4",
+        colorMode: "BW",
+        orientation: "PORTRAIT",
+        scaleMode: "FIT",
+        pageRange: "ALL",
+        customRange: "",
+        duplex: "ONE",
+        copies: 1,
+      });
+
+      const processedFiles: UploadedFileForCreate[] = [];
+      let totalBytes = 0;
+
+      for (const file of incomingFiles) {
+        const response = await fetch(file.url);
+        if (!response.ok) {
+          throw new PrintJobAnalysisError(
+            `Unable to fetch ${file.name} from storage. Please re-upload and try again.`,
+            502,
+          );
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        totalBytes += buffer.byteLength;
+
+        if (totalBytes > CREATE_WITH_URLS_MAX_TOTAL_BYTES) {
+          throw new PrintJobAnalysisError(
+            `Total upload too large. Max combined size is ${CREATE_WITH_URLS_MAX_TOTAL_MB} MB.`,
+            413,
+          );
+        }
+
+        let pages: number;
+        try {
+          pages = await getPdfPageCountFromBuffer(buffer);
+        } catch {
+          throw new PrintJobAnalysisError(
+            `Unable to inspect ${file.name}. Only valid PDF files can be submitted.`,
+            400,
+          );
+        }
+
+        const cost = calculateFileCost(pages, {
+          paperSize: defaultOptions.paperSize,
+          colorMode: defaultOptions.colorMode,
+          orientation: defaultOptions.orientation,
+          scaleMode: defaultOptions.scaleMode,
+          pageRange: defaultOptions.pageRange,
+          customRange: defaultOptions.customRange,
+          duplex: defaultOptions.duplex,
+          copies: defaultOptions.copies,
+        });
+
+        processedFiles.push({
+          name: file.name,
+          url: file.url,
+          pages,
+          cost,
+          option: defaultOptions,
+        });
+      }
+
+      const addedPages = processedFiles.reduce(
+        (sum, file) => sum + file.pages,
+        0,
+      );
+      const addedCost = processedFiles.reduce(
+        (sum, file) => sum + file.cost,
+        0,
+      );
+
+      await prisma.$transaction(async (tx) => {
+        for (const file of processedFiles) {
+          await tx.file.create({
+            data: {
+              name: file.name,
+              pages: file.pages,
+              url: file.url,
+              printJob: {
+                connect: { id: jobId },
+              },
+              option: {
+                create: {
+                  paperSize: file.option.paperSize,
+                  colorMode: mapColorMode(file.option.colorMode),
+                  orientation: mapOrientation(file.option.orientation),
+                  scaleMode: mapScaleMode(file.option.scaleMode),
+                  pageRange: mapPageRange(file.option.pageRange),
+                  customRange: file.option.customRange,
+                  duplex: mapDuplex(file.option.duplex),
+                  copies: file.option.copies,
+                },
+              },
+            },
+          });
+        }
+
+        const nextTotalPages = (job.totalPages ?? 0) + addedPages;
+        const nextTotalCost = (job.totalCost ?? 0) + addedCost;
+
+        await tx.printJob.update({
+          where: { id: jobId },
+          data: {
+            totalPages: nextTotalPages,
+            totalCost: nextTotalCost,
+            estimatedTime: calculateEstimatedTime(nextTotalPages),
+          },
+        });
+      });
+
+      socket.emit("job-file-added", jobId);
+
+      return res.status(200).json({
+        addedFilesCount: processedFiles.length,
+        addedPages,
+        addedCost,
+      });
+    } catch (error) {
+      await Promise.allSettled(
+        incomingFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
+      );
+
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+
+      return res.status(500).json({ error: "Failed to add files." });
     }
   },
 );

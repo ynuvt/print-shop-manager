@@ -275,7 +275,10 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                           type: "reply",
                           reply: { id: "current", title: "File status" },
                         },
-                        { type: "reply", reply: { id: "edit", title: "Edit job" } },
+                        {
+                          type: "reply",
+                          reply: { id: "edit", title: "Edit job" },
+                        },
                       ],
                     });
                   }
@@ -296,10 +299,9 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message:
-                      `${waBold("Unsupported file type")}\nPlease send a ${waBold(
-                        "PDF",
-                      )}. This file wasn’t added to your draft.`,
+                    message: `${waBold("Unsupported file type")}\nPlease send a ${waBold(
+                      "PDF",
+                    )}. This file wasn’t added to your draft.`,
                     phoneNumberId,
                   });
                 }
@@ -393,16 +395,18 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     waBold("Help"),
                     "Type any command below:",
                     "• steps — how it works",
-                    "• current — view your draft",
+                    "• current — all files status",
                     "• edit — open review link",
-                    "• history — recent jobs",
                     "• login — link WhatsApp to web",
                     "• clear — delete your draft",
                     "",
                     "Start by checking if you already have files in your draft.",
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "history", title: "History" } },
+                    {
+                      type: "reply",
+                      reply: { id: "current", title: "Current status" },
+                    },
                   ],
                 });
               }
@@ -527,7 +531,10 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     phoneNumberId,
                     body: body + "\nNext: tap “Edit job” to review options.",
                     buttons: [
-                      { type: "reply", reply: { id: "edit", title: "Edit job" } },
+                      {
+                        type: "reply",
+                        reply: { id: "edit", title: "Edit job" },
+                      },
                     ],
                   });
                 }
@@ -603,8 +610,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message:
-                        `${waBold("Still receiving your file")}\nPlease wait a few seconds, then tap “Edit job” again.`,
+                      message: `${waBold("Still receiving your file")}\nPlease wait a few seconds, then tap “Edit job” again.`,
                       phoneNumberId,
                     });
                   }
@@ -644,12 +650,12 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                 const message = reviewUrl
                   ? `*Edit your job options* ✏️\nUpdate print options and submit here:\n${reviewUrl}\n\n*Tip:* Reply with *history* to see past jobs.`
                   : "*Edit your job options* ✏️\nReply with *history* to see past jobs.";
-                sendWhatsAppStickerFromFile({
-                  to: userData.displayPhoneNumber,
-                  phoneNumberId,
-                  filePath: STICKER_FILE_PATH,
-                  mimeType: "image/webp",
-                });
+                // sendWhatsAppStickerFromFile({
+                //   to: userData.displayPhoneNumber,
+                //   phoneNumberId,
+                //   filePath: STICKER_FILE_PATH,
+                //   mimeType: "image/webp",
+                // });
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
                   message: reviewUrl
