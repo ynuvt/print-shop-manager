@@ -13,6 +13,7 @@ import {
   fetchAllJobs,
   fetchJobByCode,
   getAuthToken,
+  NotFoundError,
   logout,
   updateJobStatus,
 } from "./api/api";
@@ -269,8 +270,30 @@ export default function App() {
       );
 
       if (matches.length === 0) {
-        setToast("No job found");
-        return;
+        try {
+          const fetched = await fetchJobByCode(code);
+          setSelectedJob(fetched);
+          setJobModalOpen(true);
+
+          setJobs((prev) => {
+            const exists = prev.some((job) => job.id === fetched.id);
+            if (exists) return prev;
+            const { files: _files, ...summary } = fetched;
+            return sortJobsNewestFirst([summary, ...prev]);
+          });
+          return;
+        } catch (error) {
+          if (error instanceof NotFoundError) {
+            setToast("No job found");
+            return;
+          }
+
+          const message =
+            error instanceof Error ? error.message : "Failed to load job.";
+          setLoadError(message);
+          setToast("Unable to fetch job from server");
+          return;
+        }
       }
 
       setLoadError(null);
@@ -340,13 +363,23 @@ export default function App() {
           onSubmit={(e) => void handleSearchSubmit(e)}
           className="shrink-0 border-b border-gray-200 bg-white px-5 py-3"
         >
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by code and press Enter..."
-            className="w-full max-w-xs rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition"
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by code and press Enter..."
+              className="w-full max-w-xs rounded-lg border border-gray-300 bg-gray-50 px-3 py-1.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:ring-2 focus:ring-blue-500/30 transition"
+            />
+            <button
+              type="button"
+              onClick={() => void refreshJobs()}
+              disabled={loadingJobs}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loadingJobs ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
 
           {tab === "history" && (
             <div className="mt-2 flex flex-wrap items-center gap-2">

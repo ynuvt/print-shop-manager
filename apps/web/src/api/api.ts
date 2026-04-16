@@ -20,9 +20,13 @@ export type UserPrintJob = {
   totalPages: number;
   estimatedTime: number;
   status: string;
-  verificationCode: string;
+  verificationCode: string | null;
   createdAt: string;
   files: UserPrintJobFile[];
+  userMetadata?: {
+    phoneNumber: string;
+    name?: string | null;
+  } | null;
 };
 
 export type UserSession = {
@@ -44,6 +48,29 @@ export async function registerUser(): Promise<{
   const res = await axios.get(`${BASE_URL}/auth/register`);
   if (!res.data) throw new Error("Failed to register user");
   return res.data;
+}
+
+export async function loginWithWhatsappOtp(code: string): Promise<{
+  token: string;
+  userId: string;
+}> {
+  const token = getToken();
+  if (!token) {
+    throw new Error("Missing session token. Please open the link again.");
+  }
+
+  const res = await axios.post(
+    `${BASE_URL}/auth/whatsapp-login`,
+    { code },
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to login with WhatsApp.");
+  return res.data as { token: string; userId: string };
 }
 
 export async function getUserSession(): Promise<UserSession> {
@@ -243,6 +270,22 @@ export async function deleteUserFile(fileId: string): Promise<void> {
   if (!res.data) throw new Error("Failed to remove file");
 }
 
+export async function resyncWhatsappJobs(): Promise<{ updatedCount: number }> {
+  const token = getToken();
+  const res = await axios.post(
+    `${BASE_URL}/jobs/resync-whatsapp`,
+    {},
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to resync WhatsApp jobs");
+  return res.data as { updatedCount: number };
+}
+
 export async function updateUserFilePrintOptions(
   fileId: string,
   options: PrintFileOption,
@@ -275,10 +318,44 @@ export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
 }
 
 export async function getPrintJobByIdPublic(id: string): Promise<UserPrintJob> {
-  const res = await axios.get(`${BASE_URL}/jobs/review/${id}`);
+  const token = getToken();
+  const res = await axios.get(`${BASE_URL}/jobs/review/${id}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : undefined,
+  });
 
   if (!res.data) throw new Error("Failed to fetch job");
   return res.data as UserPrintJob;
+}
+
+export async function addFilesToJobFromUrls(
+  jobId: string,
+  files: Array<{ name: string; url: string }>,
+): Promise<{
+  addedFilesCount: number;
+  addedPages: number;
+  addedCost: number;
+}> {
+  const token = getToken();
+  if (!token) {
+    throw new Error("Missing session token. Please open the link again.");
+  }
+
+  const res = await axios.post(
+    `${BASE_URL}/jobs/${jobId}/add-files-from-urls`,
+    { files },
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to add files");
+  return res.data as {
+    addedFilesCount: number;
+    addedPages: number;
+    addedCost: number;
+  };
 }
 
 export async function getUserPrintJobById(id: string): Promise<UserPrintJob> {

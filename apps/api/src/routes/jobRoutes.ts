@@ -1,6 +1,7 @@
 import { prisma } from "@printowl/db";
 import { Job, JobSchema, JobUpdateSchema } from "@printowl/types";
 import express from "express";
+import jwt from "jsonwebtoken";
 import multer from "multer";
 import {
   calculateEstimatedTime,
@@ -24,6 +25,12 @@ import {
 } from "../utils/r2Storage.js";
 import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
+import {
+  ColorMode,
+  duplex,
+  orientation as orientationEnum,
+  scaleMode as scaleModeEnum,
+} from "../../../../packages/db/dist/generated/prisma/client.js";
 
 const app = express.Router();
 const CREATE_WITH_FILES_MAX_UPLOAD_MB = 50;
@@ -38,6 +45,39 @@ const upload = multer({
     fileSize: CREATE_WITH_FILES_MAX_UPLOAD_MB * 1024 * 1024,
   },
 });
+
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+
+  if (!secret) {
+    throw new PrintJobAnalysisError(
+      "JWT_SECRET is missing. Add it to apps/api/.env before starting the API.",
+      500,
+    );
+  }
+
+  return secret;
+}
+
+function getOptionalUserFromRequest(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+
+  const token = authHeader.split(" ")[1];
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as {
+      uid: string;
+      role: string;
+      createdAt: number;
+    };
+
+    return decoded;
+  } catch {
+    return null;
+  }
+}
 
 const uploadFilesMiddleware: express.RequestHandler = (req, res, next) => {
   upload.array("files")(req, res, (error) => {
@@ -112,6 +152,45 @@ function mapScaleMode(scaleMode: "FIT" | "SHRINK" | "NOSCALE") {
   return scaleMode;
 }
 
+function mapColorModeToEnum(colorMode: "BW" | "COLOR") {
+  return colorMode === "COLOR" ? ColorMode.COLOR : ColorMode.BW;
+}
+
+function mapOrientationToEnum(orientation: "PORTRAIT" | "LANDSCAPE") {
+  return orientation === "LANDSCAPE"
+    ? orientationEnum.LANDSCAPE
+    : orientationEnum.PORTRAIT;
+}
+
+function mapScaleModeToEnum(scaleMode: "FIT" | "SHRINK" | "NOSCALE") {
+  if (scaleMode === "NOSCALE") return scaleModeEnum.NOSCALE;
+  if (scaleMode === "SHRINK") return scaleModeEnum.SHRINK;
+  return scaleModeEnum.FIT;
+}
+
+function mapDuplexToEnum(duplexMode: "ONE" | "BOTH") {
+  return duplexMode === "ONE" ? duplex.ONE : duplex.BOTH;
+}
+
+async function generateUniqueVerificationCode(): Promise<number> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = Math.floor(1000 + Math.random() * 9000);
+    const existing = await prisma.printJob.findFirst({
+      where: { verificationCode: candidate },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return candidate;
+    }
+  }
+
+  throw new PrintJobAnalysisError(
+    "Unable to generate a unique verification code.",
+    500,
+  );
+}
+
 async function buildPrintJobCreateData(job: Job, userId: string) {
   const analyzedJob = await analyzePrintJob(job);
 
@@ -151,12 +230,13 @@ type UploadedFileForCreate = {
   option: Job["files"][number]["option"];
 };
 
-function buildPrintJobCreateDataFromProcessedFiles(
+async function buildPrintJobCreateDataFromProcessedFiles(
   files: UploadedFileForCreate[],
   userId: string,
 ) {
   const totalPages = files.reduce((sum, file) => sum + file.pages, 0);
   const totalCost = files.reduce((sum, file) => sum + file.cost, 0);
+  const verificationCode = await generateUniqueVerificationCode();
 
   return {
     userId,
@@ -164,6 +244,7 @@ function buildPrintJobCreateDataFromProcessedFiles(
     totalPages,
     estimatedTime: calculateEstimatedTime(totalPages),
     status: mapStatus("PENDING"),
+    verificationCode,
     files: {
       create: files.map((file) => ({
         name: file.name,
@@ -314,22 +395,6 @@ function parseUrlFilesFromBody(rawFiles: unknown): UrlFileForCreate[] {
 
     return { name, url, options: optionsResult.data };
   });
-}
-
-function assertSingleColorModeInOptions(
-  options: Array<{ colorMode: "BW" | "COLOR" }>,
-) {
-  if (!options.length) return;
-
-  const firstMode = options[0]!.colorMode;
-  const hasMismatch = options.some((opt) => opt.colorMode !== firstMode);
-
-  if (hasMismatch) {
-    throw new PrintJobAnalysisError(
-      "All files in a job must use the same color mode (either all B/W or all Color).",
-      400,
-    );
-  }
 }
 
 /*
@@ -550,10 +615,6 @@ app.post(
           .json({ error: "At least one PDF file is required." });
       }
 
-      assertSingleColorModeInOptions(
-        incomingFiles.map((file) => ({ colorMode: file.options.colorMode })),
-      );
-
       const uploadedFiles: UploadedFileForCreate[] = [];
       let totalBytes = 0;
 
@@ -628,7 +689,7 @@ app.post(
       }
 
       const createdJob = await prisma.printJob.create({
-        data: buildPrintJobCreateDataFromProcessedFiles(
+        data: await buildPrintJobCreateDataFromProcessedFiles(
           uploadedFiles,
           req.user.uid,
         ),
@@ -748,7 +809,12 @@ app.get(
     console.log("Fetching jobs for user:", req.user!.uid);
     try {
       const jobs = await prisma.printJob.findMany({
-        where: { userId: req.user!.uid },
+        where: {
+          OR: [
+            { userId: req.user!.uid },
+            { owners: { some: { userId: req.user!.uid } } },
+          ],
+        },
         include: {
           files: {
             include: {
@@ -761,6 +827,323 @@ app.get(
     } catch (error) {
       console.log(error);
       res.status(500).json({ error: "Failed to fetch user jobs." });
+    }
+  },
+);
+
+app.post(
+  "/resync-whatsapp",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const linked = await prisma.whatsAppUser.findFirst({
+      where: { userId: req.user.uid },
+      select: { phoneNumber: true },
+    });
+
+    if (!linked?.phoneNumber) {
+      return res.status(400).json({
+        error: "Please link your WhatsApp account before syncing jobs.",
+      });
+    }
+
+    const result = await prisma.printJob.updateMany({
+      where: {
+        userMetadataId: linked.phoneNumber,
+        status: { not: PrintJobStatus.DRAFT },
+      },
+      data: { userId: req.user.uid },
+    });
+
+    return res.status(200).json({ updatedCount: result.count });
+  },
+);
+
+app.get("/review/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!id || typeof id !== "string") {
+    return res.status(400).json({ error: "Job ID is required." });
+  }
+
+  try {
+    const job = await prisma.printJob.findFirst({
+      where: { id, status: PrintJobStatus.DRAFT },
+      include: {
+        files: {
+          include: {
+            option: true,
+          },
+        },
+        userMetadata: true,
+      },
+    });
+
+    if (!job) {
+      return res.status(404).json({ error: "Job not found." });
+    }
+
+    const optionalUser = getOptionalUserFromRequest(req);
+    if (optionalUser?.uid) {
+      await prisma.printJobOwner.upsert({
+        where: {
+          userId_printJobId: {
+            userId: optionalUser.uid,
+            printJobId: job.id,
+          },
+        },
+        update: {},
+        create: {
+          userId: optionalUser.uid,
+          printJobId: job.id,
+        },
+      });
+    }
+
+    console.log("Fetched job for review:", job);
+    return res.status(200).json(job);
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to fetch job." });
+  }
+});
+
+app.post(
+  "/submit-whatsapp-job",
+  authMiddleware(["customer"]),
+  async (req: ExtendedRequest, res) => {
+    const { jobId, files } = req.body as {
+      jobId?: string;
+      files?: Array<{ id: string; options: unknown }>;
+    };
+    const userId = req.user!.uid;
+
+    if (!jobId || typeof jobId !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+
+    if (!Array.isArray(files) || !files.length) {
+      return res.status(400).json({ error: "At least one file is required." });
+    }
+
+    let parsedFiles: Array<{
+      id: string;
+      options: ReturnType<typeof optionsSchema.parse>;
+    }> = [];
+
+    try {
+      parsedFiles = files.map((file, index) => {
+        if (!file || typeof file !== "object") {
+          throw new PrintJobAnalysisError(
+            `Invalid file payload at index ${index + 1}.`,
+            400,
+          );
+        }
+
+        const fileId =
+          typeof (file as { id?: unknown }).id === "string"
+            ? (file as { id: string }).id.trim()
+            : "";
+
+        if (!fileId) {
+          throw new PrintJobAnalysisError(
+            `Missing file id at index ${index + 1}.`,
+            400,
+          );
+        }
+
+        const optionsResult = optionsSchema.safeParse(
+          (file as { options?: unknown }).options,
+        );
+
+        if (!optionsResult.success) {
+          throw new PrintJobAnalysisError(
+            `Invalid print options for file ${index + 1}.`,
+            400,
+          );
+        }
+
+        return { id: fileId, options: optionsResult.data };
+      });
+    } catch (error) {
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+
+      return res.status(400).json({ error: "Invalid request payload." });
+    }
+
+    try {
+      const job = await prisma.printJob.findUnique({
+        where: { id: jobId },
+        include: {
+          files: {
+            include: {
+              option: true,
+            },
+          },
+          owners: {
+            select: {
+              userId: true,
+            },
+          },
+        },
+      });
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      if (job.status !== PrintJobStatus.DRAFT) {
+        return res
+          .status(403)
+          .json({ error: "This job is not available for review." });
+      }
+
+      const isOwner =
+        job.userId === userId ||
+        job.owners.some((owner) => owner.userId === userId);
+
+      if (!isOwner) {
+        return res
+          .status(403)
+          .json({ error: "You do not have access to this job." });
+      }
+
+      const jobFilesById = new Map(job.files.map((file) => [file.id, file]));
+      const requestedIds = new Set(parsedFiles.map((file) => file.id));
+
+      for (const fileId of requestedIds) {
+        if (!jobFilesById.has(fileId)) {
+          return res
+            .status(400)
+            .json({ error: "One or more files are invalid for this job." });
+        }
+      }
+
+      const removedFiles = job.files.filter(
+        (file) => !requestedIds.has(file.id),
+      );
+      const updateEntries = parsedFiles.map((file) => {
+        const existing = jobFilesById.get(file.id)!;
+        const optionId = existing.option?.id;
+
+        if (!optionId) {
+          throw new PrintJobAnalysisError(
+            `${existing.name}: missing print options for this file.`,
+            400,
+          );
+        }
+
+        if (file.options.pageRange === "CUSTOM") {
+          const rangeError = validateCustomPageRange(
+            file.options.customRange ?? "",
+            existing.pages,
+          );
+          if (rangeError) {
+            throw new PrintJobAnalysisError(
+              `${existing.name}: ${rangeError}`,
+              400,
+            );
+          }
+        }
+
+        const cost = calculateFileCost(existing.pages, {
+          paperSize: file.options.paperSize,
+          colorMode: file.options.colorMode,
+          orientation: file.options.orientation,
+          scaleMode: file.options.scaleMode,
+          pageRange: file.options.pageRange,
+          customRange: file.options.customRange,
+          duplex: file.options.duplex,
+          copies: file.options.copies,
+        });
+
+        return {
+          fileId: file.id,
+          optionId,
+          pages: existing.pages,
+          cost,
+          options: file.options,
+        };
+      });
+
+      const totalPages = updateEntries.reduce(
+        (sum, file) => sum + file.pages,
+        0,
+      );
+      const totalCost = updateEntries.reduce((sum, file) => sum + file.cost, 0);
+
+      const verificationCode =
+        job.verificationCode ?? (await generateUniqueVerificationCode());
+
+      await prisma.$transaction(async (tx) => {
+        for (const entry of updateEntries) {
+          await tx.printOption.update({
+            where: { id: entry.optionId },
+            data: {
+              copies: entry.options.copies,
+              colorMode: mapColorModeToEnum(entry.options.colorMode),
+              orientation: mapOrientationToEnum(entry.options.orientation),
+              scaleMode: mapScaleModeToEnum(entry.options.scaleMode),
+              duplex: mapDuplexToEnum(entry.options.duplex),
+              paperSize: entry.options.paperSize,
+              pageRange: entry.options.pageRange,
+              customRange: entry.options.customRange,
+            },
+          });
+        }
+
+        if (removedFiles.length) {
+          const optionIds = removedFiles
+            .map((file) => file.option?.id)
+            .filter((id): id is string => !!id);
+
+          await tx.file.deleteMany({
+            where: { id: { in: removedFiles.map((file) => file.id) } },
+          });
+
+          if (optionIds.length) {
+            await tx.printOption.deleteMany({
+              where: { id: { in: optionIds } },
+            });
+          }
+        }
+
+        await tx.printJob.update({
+          where: { id: jobId },
+          data: {
+            userId,
+            totalPages,
+            totalCost,
+            estimatedTime: calculateEstimatedTime(totalPages),
+            status: PrintJobStatus.PENDING,
+            verificationCode,
+          },
+        });
+      });
+
+      await Promise.allSettled(
+        removedFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
+      );
+
+      const statusText = PrintJobStatus.PENDING;
+      const msg = `Your print job with verification code ${verificationCode} is now ${statusText}.`;
+      socket.emit("job-status-updated", userId, job.id, msg);
+      socket.emit("job-created", "admin");
+
+      return res.status(200).json({
+        message: "Job updated successfully.",
+        verificationCode,
+      });
+    } catch (error) {
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+
+      console.error("submit-whatsapp-job failed:", error);
+      return res.status(500).json({ error: "Failed to update job." });
     }
   },
 );

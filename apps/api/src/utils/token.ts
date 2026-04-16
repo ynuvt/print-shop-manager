@@ -23,3 +23,16 @@ export function generateUserToken(role: "admin" | "customer" = "customer") {
 
   return { token: jwt.sign(payload, getJwtSecret()), userId: payload.uid };
 }
+
+export function generateTokenForUser(
+  userId: string,
+  role: "admin" | "customer" = "customer",
+) {
+  const payload = {
+    uid: userId,
+    createdAt: Date.now(),
+    role,
+  };
+
+  return { token: jwt.sign(payload, getJwtSecret()), userId };
+}

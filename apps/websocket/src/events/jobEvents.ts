@@ -12,4 +12,18 @@ export function jobEvents(socket: Socket, io: Server) {
       io.to(userId).emit("job-status-updated", userId, jobId, msg);
     },
   );
+  //Join user to listed to specific job updates like file added, processing started, etc
+  socket.on("join-job-updates", (jobId: string) => {
+    socket.join(jobId);
+    console.log(`${socket.id} joined job updates for job ${jobId}`);
+  });
+
+  socket.on("leave-job-updates", (jobId: string) => {
+    socket.leave(jobId);
+    console.log(`${socket.id} left job updates for job ${jobId}`);
+  });
+
+  socket.on("job-file-added", (jobId: string) => {
+    io.to(jobId).emit("job-file-added", jobId);
+  });
 }

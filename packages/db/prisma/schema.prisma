@@ -74,8 +74,10 @@ enum scaleMode {
 }
 
 enum PrintJobStatus {
-  PENDING
-  PROCESSING
+  DRAFT // this status will be used for jobs that is created with whatsapp source as we want to create the job in the database as soon as we receive the message from whatsapp so that if the user send one file then another file slowly then we'll keep adding it to his currnet draft job and once he confirms the order then we'll change the status to pending. For web source we can directly set the status to pending when the job is created as we expect all the files to be send in one request and the options will be default.
+  Editing // this status will be used when the user is editing the job, either from whatsapp or from web, so that we can show the current status of the job as editing while the user is making changes to it and once he's done with the changes then we can update the status back to pending. This will help us in showing the correct status of the job to the user and also in case of whatsapp source we can show a message like "Your order is being processed, please wait while we update your order with the new file/options" when the user is editing the job.
+  PROCESSING //processing will come first in case we later support word to pdf conversion and we want to show the job as processing while the conversion is happening, once the conversion is done then we can update the status to pending which means it's ready for printing. For now we can directly set it to pending when the job is created.
+  PENDING 
   COMPLETED
   REJECTED
   FAILED
@@ -85,12 +87,17 @@ enum PrintJobStatus {
 enum UserEventType {
   ONBOARDING_SKIPPED
 }
+enum Source {
+  WEB
+  WHATSAPP
+}
 
 
 
 
 model printOption {
   id       String   @id @default(uuid())
+  createdAt DateTime @default(now())
   paperSize PaperSize  @default(A4)
   colorMode ColorMode  @default(BW)
   orientation orientation @default(PORTRAIT)
@@ -99,31 +106,57 @@ model printOption {
   customRange String?
   duplex     duplex  @default(ONE)
   copies    Int
-  file      file?   
+  fileId    String   @unique
+  file      file     @relation(fields: [fileId], references: [id], onDelete: Cascade, map: "printoption_fileId_fkey")
 }
 
 model file {
   id       String   @id @default(uuid())
   name     String
+  mimeType String   @default("application/pdf")
+  messageId  String?
+  createdAt DateTime @default(now())
   pages    Int
   url      String
-  optionId String   @unique
-  option   printOption @relation(fields: [optionId], references: [id], map: "file_optionId_fkey") 
+  option   printOption?
   printJobId String
-  printJob PrintJob    @relation(fields: [printJobId], references: [id], map: "file_printJobId_fkey")
+  printJob PrintJob    @relation(fields: [printJobId], references: [id], onDelete: Cascade, map: "file_printJobId_fkey")
 }
 
+model WhatsAppUser {
+  phoneNumber        String   @id
+  name               String?
+  lastFileStartedProcessingAt DateTime?
+  userId             String?  @unique
+  user               User?    @relation(fields: [userId], references: [id], map: "whatsappuser_userId_fkey")
+  printJobs          PrintJob[]
+  loginOtps          WhatsAppLoginOtp[]
+}
+
+model WhatsAppLoginOtp {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  phoneNumber  String
+  whatsAppUser WhatsAppUser @relation(fields: [phoneNumber], references: [phoneNumber], onDelete: Cascade, map: "whatsapploginotp_phoneNumber_fkey")
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime @default(now())
+}
 model PrintJob {
   id               String   @id @default(uuid())
-  userId           String
-  user             User     @relation(fields: [userId], references: [id], map: "printjob_userId_fkey")
-  files             file[]         
+  userId           String?
+  user             User?     @relation(fields: [userId], references: [id], map: "printjob_userId_fkey")
+  owners           PrintJobOwner[]
+  files            file[]
   totalCost        Float
+  source           Source   @default(WEB)
+  userMetadataId   String?
+  userMetadata     WhatsAppUser? @relation(fields: [userMetadataId], references: [phoneNumber], map: "printjob_userMetadataId_fkey")
   totalPages       Int
   estimatedTime    Int
   deleted          Boolean  @default(false)
   status           PrintJobStatus @default(PENDING)
-  verificationCode Int       @default(autoincrement())
+  verificationCode Int?
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
 }
@@ -132,9 +165,23 @@ model User {
   id                   String      @id
   onboardingCompleted  Boolean     @default(false)
   printJobs            PrintJob[]
+  printJobOwners       PrintJobOwner[]
   events               UserEvent[]
+  whatsAppUser         WhatsAppUser?
+  name                  String?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
+}
+
+model PrintJobOwner {
+  userId     String
+  printJobId String
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  printJob   PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+
+  @@id([userId, printJobId])
+  @@index([printJobId])
 }
 
 model UserEvent {

@@ -4,6 +4,7 @@ import {
   deleteUserPrintJob,
   getUserPrintJobById,
   getUserPrintJobs,
+  resyncWhatsappJobs,
   resubmitCompletedPrintJob,
 } from "../api/api";
 import type { UserPrintJob, UserPrintJobFile } from "../api/api";
@@ -328,6 +329,7 @@ export default function PrintJobsList({
 }) {
   const [jobs, setJobs] = useState<UserPrintJob[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<JobsTab>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
@@ -451,6 +453,33 @@ export default function PrintJobsList({
         <div className="jobs-panel-head">
           <h3>Recent Jobs</h3>
           <div className="jobs-panel-actions">
+            <button
+              type="button"
+              className="ghost-link"
+              onClick={async () => {
+                if (isResyncing) return;
+                setIsResyncing(true);
+                try {
+                  await resyncWhatsappJobs();
+                  await load({ notification: false });
+                  notify(`Synced WhatsApp job(s).`, {
+                    variant: "success",
+                  });
+                } catch (err) {
+                  notify(
+                    err instanceof Error
+                      ? err.message
+                      : "Failed to sync WhatsApp jobs.",
+                    { variant: "error" },
+                  );
+                } finally {
+                  setIsResyncing(false);
+                }
+              }}
+              disabled={isResyncing}
+            >
+              {isResyncing ? "Syncing..." : "Sync WhatsApp"}
+            </button>
             <button
               type="button"
               className="ghost-link"

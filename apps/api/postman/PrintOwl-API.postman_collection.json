@@ -13,6 +13,7 @@
     { "key": "verificationCode", "value": "" },
     { "key": "jobId", "value": "" },
     { "key": "fileId", "value": "" },
+    { "key": "analysisDate", "value": "2026-04-06" },
     { "key": "sampleFilePath", "value": "/absolute/path/to/sample.pdf" }
   ],
   "item": [
@@ -321,6 +322,92 @@
               "raw": "{{baseUrl}}/api/v1/files",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "files"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analysis",
+      "item": [
+        {
+          "name": "GET /api/v1/analysis/summary (overall, admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analysis/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "analysis", "summary"]
+            }
+          },
+          "response": [
+            {
+              "name": "Example Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/analysis/summary",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["api", "v1", "analysis", "summary"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"date\": null,\n  \"isOverall\": true,\n  \"totalJobs\": 100,\n  \"statusCounts\": {\n    \"PENDING\": 10,\n    \"COMPLETED\": 80,\n    \"FAILED\": 10\n  },\n  \"pagesPrintedByDay\": [\n    { \"date\": \"2026-04-06\", \"pages\": 120 }\n  ],\n  \"totalCompletedCost\": 1234.56,\n  \"pending\": {\n    \"count\": 10,\n    \"jobs\": []\n  },\n  \"completed\": {\n    \"count\": 80,\n    \"jobs\": []\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET /api/v1/analysis/summary?date={{analysisDate}} (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analysis/summary?date={{analysisDate}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "analysis", "summary"],
+              "query": [{ "key": "date", "value": "{{analysisDate}}" }]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/analysis/users (overall, admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analysis/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "analysis", "users"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/analysis/users?date={{analysisDate}} (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analysis/users?date={{analysisDate}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "analysis", "users"],
+              "query": [{ "key": "date", "value": "{{analysisDate}}" }]
             }
           }
         }

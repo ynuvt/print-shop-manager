@@ -4,6 +4,7 @@ import HomePage from "./pages/HomePage";
 import ReviewPage from "./pages/ReviewPage";
 import TermsPage from "./pages/TermsPage";
 import AboutPage from "./pages/AboutPage";
+import AuthOtpPage from "./pages/AuthOtpPage";
 import { NotificationProvider } from "./components/NotificationCenter";
 
 export type ThemeMode = "dark" | "light";
@@ -57,6 +58,7 @@ export default function App() {
             }
           />
           <Route path="/review/:jobId" element={<ReviewPage />} />
+          <Route path="/auth/otp" element={<AuthOtpPage />} />
         </Routes>
       </BrowserRouter>
     </NotificationProvider>
