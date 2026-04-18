@@ -153,9 +153,9 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Upload failed")}
-Arre yaar, ${waBold(rawFileName)} download nahi ho paayi.
-Ek baar aur bhej do — iss baar scene pakka set!`,
+                      message: `${waBold("Upload L")} 💀
+Couldn't fetch ${waBold(rawFileName)}.
+Resend it and we'll run it back. fr`,
                       phoneNumberId,
                     });
                   }
@@ -332,18 +332,18 @@ Please try again or send a different file.`,
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    body: `${waBold("File received")}
+                    body: `${waBold("File received ✅")}
 ${waBold(pdfFileName)} • ${pages} page(s)
 
-Ab next scene kya?`,
+Next move? pick a button 👇`,
                     buttons: [
                       {
                         type: "reply",
-                        reply: { id: "current", title: "Status dekho" },
+                        reply: { id: "current", title: "Status check" },
                       },
                       {
                         type: "reply",
-                        reply: { id: "edit", title: "Job edit" },
+                        reply: { id: "edit", title: "Edit / Submit" },
                       },
                     ],
                   });
@@ -353,9 +353,9 @@ Ab next scene kya?`,
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Error")}
-${waBold(rawFileName)} process nahi ho paayi.
-Ek baar phir try karte hain — file dobara bhej do.`,
+                    message: `${waBold("Processing L")} 🫠
+Couldn't process ${waBold(rawFileName)}.
+Resend it (or try a different file).`,
                     phoneNumberId,
                   });
                 }
@@ -403,15 +403,15 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Namaste! Hero entry ✅"),
-                    "Yeh hai Zopy ka filmy print counter — tum file bhejo, hum PDF + job ready kar denge.",
+                    waBold("yo 👋 welcome"),
+                    "Send docs here — we'll auto-PDF + prep your print job. we cookin. fr",
                     "",
-                    waBold("Flow (Director's cut)"),
-                    "1) Ek ya zyada documents bhejo",
-                    "2) Har file pe confirmation aayega",
-                    "3) 'edit' karke options dekho aur submit kar do",
+                    waBold("How it works (speedrun)"),
+                    "1) Drop one or more files",
+                    '2) Wait for "File received" on each',
+                    '3) Tap "Edit job" → set options → submit',
                     "",
-                    "Confuse ho? 'menu' likho — main guide hoon.",
+                    "Type *menu* anytime for commands.",
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
@@ -424,16 +424,19 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Step-by-step (filmy)"),
-                    "1) Documents yahin bhejo",
-                    '2) Har file ka "File received" confirmation aayega',
-                    '3) "Job edit" dabao, options set karo',
-                    "4) Submit = print shuru",
+                    waBold("How it works (speedrun)"),
+                    "1) Send files here",
+                    '2) Wait for "File received" on each file',
+                    '3) Hit "Edit job" to tweak options',
+                    "4) Submit = printing starts",
                     "",
-                    "Tip: Submit se pehle jitni marzi files add kar sakte ho.",
+                    "Tip: You can keep adding files before submit. no cap.",
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "edit", title: "Job edit" } },
+                    {
+                      type: "reply",
+                      reply: { id: "edit", title: "Edit / Submit" },
+                    },
                   ],
                 });
               }
@@ -448,21 +451,21 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Menu (hero ki madad)"),
-                    "Command likho:",
-                    "• steps — flow samjho",
+                    waBold("Menu (no cap)"),
+                    "Type a command:",
+                    "• steps — speedrun how it works",
                     "• current — draft status",
-                    "• edit — review link",
-                    "• login — web se jodo",
-                    "• clear — draft hatao",
+                    "• edit — get review link",
+                    "• login — link WhatsApp ↔ web",
+                    "• clear — wipe draft",
                     "• history — recent jobs",
                     "",
-                    "Samajh nahi aa raha? Bas 'steps' likh do.",
+                    "Pro tip: start with *current*.",
                   ].join("\n"),
                   buttons: [
                     {
                       type: "reply",
-                      reply: { id: "current", title: "Draft status" },
+                      reply: { id: "current", title: "Status check" },
                     },
                   ],
                 });
@@ -492,7 +495,7 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Abhi tak koi job nahi bani.*\n\nEk *document* bhejo — pehli entry ho jayegi.",
+                      "*No jobs yet.*\n\nSend a *document* and we'll cook up your first print run. fr",
                     phoneNumberId,
                   });
                 } else {
@@ -500,14 +503,14 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                     const reviewUrl = buildReviewUrl(job.id);
                     const link = reviewUrl ?? "Link unavailable";
                     if (job.status === PrintJobStatus.DRAFT) {
-                      return `${index + 1}) Draft (adhoora scene) \u2022 ${link}`;
+                      return `${index + 1}) Draft (still cooking) \u2022 ${link}`;
                     }
                     const shortId = job.verificationCode ?? "Job";
                     return `${index + 1}) ${shortId} \u2022 ${job.status} \u2022 ${link}`;
                   });
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Recent jobs (filmy recap)")}\n\n${lines.join("\n")}`,
+                    message: `${waBold("Recent jobs (recap)")}\n\n${lines.join("\n")}`,
                     phoneNumberId,
                   });
                 }
@@ -539,7 +542,7 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Abhi koi active draft nahi hai.*\n\nEk document bhejo — naya scene shuru!",
+                      "*No active draft rn.*\n\nSend a document to start one.",
                     phoneNumberId,
                   });
                 } else {
@@ -568,17 +571,17 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                         (file, index) =>
                           `${index + 1}) ${file.name} \u2022 ${file.pages} pages`,
                       )
-                    : ["Abhi koi file add nahi hui."];
+                    : ["No files yet. send one."];
                   const headerLine = draftJob.verificationCode
                     ? `${draftJob.verificationCode} \u2022 ${draftJob.status}`
-                    : "Draft job (abhi adhura)";
+                    : "Draft (still cooking)";
                   const lines = [
-                    `*Tumhara draft job* \u270d\ufe0f`,
+                    `*Draft check* \uD83E\uDDFE`,
                     headerLine,
                     `Total pages: ${totalPages}`,
                     `Estimated cost: ${totalCost}`,
                     "",
-                    "*Is job ki files:*",
+                    "*Files loaded:*",
                     ...fileLines,
                     "",
                   ];
@@ -587,12 +590,11 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     body:
-                      body +
-                      '\nNext scene: "Job edit" dabao, options set karo.',
+                      body + '\nNext: tap "Edit job" to tweak options + submit. bet.',
                     buttons: [
                       {
                         type: "reply",
-                        reply: { id: "edit", title: "Job edit" },
+                        reply: { id: "edit", title: "Edit / Submit" },
                       },
                     ],
                   });
@@ -622,7 +624,7 @@ Ek baar phir try karte hain — file dobara bhej do.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Draft hi nahi hai, clear kya karein?*\n\nPehle ek document bhejo — phir clear bhi kar denge.",
+                      "*Nothing to clear rn.*\n\nSend a document first.",
                     phoneNumberId,
                   });
                 }
@@ -644,8 +646,8 @@ Ek baar phir try karte hain — file dobara bhej do.`,
               if (phoneNumberId && userData.displayPhoneNumber) {
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
-                  message: `${waBold("Draft clear ✅")}
-Naya job shuru karna ho to bas ek document bhej do.`,
+                  message: `${waBold("Draft wiped ✅")}
+Send a document anytime to start again. we go again.`,
                   phoneNumberId,
                 });
               }
@@ -670,8 +672,8 @@ Naya job shuru karna ho to bas ek document bhej do.`,
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("File aa rahi hai...")}
-Thoda sa ruk jao (2-3 sec), phir \"Job edit\" dobara dabao.`,
+                      message: `${waBold("Hold up")} 📥
+Still receiving your file. Wait a few sec, then tap \"Edit job\" again.`,
                       phoneNumberId,
                     });
                   }
@@ -699,7 +701,7 @@ Thoda sa ruk jao (2-3 sec), phir \"Job edit\" dobara dabao.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Abhi edit karne layak koi draft nahi hai.*\n\nAgar abhi files bheji hain, to har file ka confirmation aane do, phir *edit* likho.\n\n*Tip:* Recent jobs ke liye *history* likho.",
+                      "*No draft to edit rn.*\n\nIf you just sent files, wait for the \"File received\" confirmations, then reply *edit*.\n\nTip: reply *history* to see recent jobs.",
                     phoneNumberId,
                   });
                 }
@@ -721,12 +723,12 @@ Thoda sa ruk jao (2-3 sec), phir \"Job edit\" dobara dabao.`,
                   to: userData.displayPhoneNumber,
                   message: reviewUrl
                     ? [
-                        waBold("Review & submit (final scene)"),
-                        "Is link pe jaake print options set karo aur submit kar do:",
+                        waBold("Final boss: review 😤"),
+                        "Open this link to tweak options + submit:",
                         reviewUrl,
                       ].join("\n")
-                    : `${waBold("Review link unavailable")}
-Thodi der baad phir try karna.`,
+                    : `${waBold("Review link is down rn")} ⚠️
+Try again in a bit.`,
                   phoneNumberId,
                 });
               }
@@ -736,7 +738,7 @@ Thodi der baad phir try karna.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Login link unavailable*\n\nAbhi scene ready nahi hai — thodi der baad try karna.",
+                      "*Login link is down rn* \u26a0\ufe0f\n\nTry again in a bit.",
                     phoneNumberId,
                   });
                 }
@@ -777,8 +779,8 @@ Thodi der baad phir try karna.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message: [
-                      waBold("WhatsApp ko web se jodo"),
-                      "1 minute ke andar yeh link khol do:",
+                      waBold("Link WhatsApp to web"),
+                      "Open this within 60s (expires):",
                       loginUrl,
                     ].join("\n"),
                     phoneNumberId,
@@ -791,11 +793,11 @@ Thodi der baad phir try karna.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Zopy mein swagat hai!"),
+                    waBold("Zopy here 👋"),
                     "",
-                    waBold("Print job shuru karo"),
-                    "Apni document files yahin bhejo.",
-                    'Done ho jao to "Job edit" dabao, options dekho, aur submit kar do.',
+                    waBold("Start a print job"),
+                    "Send your document files here — we'll auto-PDF + prep it.",
+                    'When you\'re done, tap "Edit job" to tweak options + submit. bet.',
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
