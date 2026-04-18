@@ -3,3 +3,6 @@ node_modules
 .env
 
 /src/generated/prisma
+
+# Local backups (may contain user data)
+prisma/backups/

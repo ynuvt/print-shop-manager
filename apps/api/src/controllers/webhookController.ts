@@ -154,8 +154,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
                       message: `${waBold("Upload failed")}
-Couldn't download ${waBold(rawFileName)}.
-Please try sending the file again.`,
+Arre yaar, ${waBold(rawFileName)} download nahi ho paayi.
+Ek baar aur bhej do — iss baar scene pakka set!`,
                       phoneNumberId,
                     });
                   }
@@ -209,7 +209,7 @@ Please try again or send a different file.`,
                 }
                 */
 
-                let pdfBuffer = buffer;
+                let pdfBuffer: Buffer = buffer;
                 let pdfFileName = rawFileName.toLowerCase().endsWith(".pdf")
                   ? rawFileName
                   : `${rawFileName}.pdf`;
@@ -335,15 +335,15 @@ Please try again or send a different file.`,
                     body: `${waBold("File received")}
 ${waBold(pdfFileName)} • ${pages} page(s)
 
-What would you like to do next?`,
+Ab next scene kya?`,
                     buttons: [
                       {
                         type: "reply",
-                        reply: { id: "current", title: "File status" },
+                        reply: { id: "current", title: "Status dekho" },
                       },
                       {
                         type: "reply",
-                        reply: { id: "edit", title: "Edit job" },
+                        reply: { id: "edit", title: "Job edit" },
                       },
                     ],
                   });
@@ -354,8 +354,8 @@ What would you like to do next?`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message: `${waBold("Error")}
-Failed to process ${waBold(rawFileName)}.
-Please try again.`,
+${waBold(rawFileName)} process nahi ho paayi.
+Ek baar phir try karte hain — file dobara bhej do.`,
                     phoneNumberId,
                   });
                 }
@@ -403,13 +403,15 @@ Please try again.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Welcome"),
-                    "Print your documents (PDF, Word, PPT, etc.) directly from WhatsApp.",
+                    waBold("Namaste! Hero entry ✅"),
+                    "Yeh hai Zopy ka filmy print counter — tum file bhejo, hum PDF + job ready kar denge.",
                     "",
-                    waBold("How it works"),
-                    "1) Send one or more documents",
-                    "2) Wait for confirmation for each file",
-                    "3) Open your review link and submit",
+                    waBold("Flow (Director's cut)"),
+                    "1) Ek ya zyada documents bhejo",
+                    "2) Har file pe confirmation aayega",
+                    "3) 'edit' karke options dekho aur submit kar do",
+                    "",
+                    "Confuse ho? 'menu' likho — main guide hoon.",
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
@@ -422,16 +424,16 @@ Please try again.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("How it works"),
-                    "1) Send one or more documents here",
-                    '2) Wait for "File received" for each document',
-                    '3) Tap "Edit job" to review options',
-                    "4) Submit to start printing",
+                    waBold("Step-by-step (filmy)"),
+                    "1) Documents yahin bhejo",
+                    '2) Har file ka "File received" confirmation aayega',
+                    '3) "Job edit" dabao, options set karo',
+                    "4) Submit = print shuru",
                     "",
-                    "Tip: You can send more files anytime before submitting.",
+                    "Tip: Submit se pehle jitni marzi files add kar sakte ho.",
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "edit", title: "Edit job" } },
+                    { type: "reply", reply: { id: "edit", title: "Job edit" } },
                   ],
                 });
               }
@@ -446,20 +448,21 @@ Please try again.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Help"),
-                    "Type any command below:",
-                    "• steps — how it works",
-                    "• current — all files status",
-                    "• edit — open review link",
-                    "• login — link WhatsApp to web",
-                    "• clear — delete your draft",
+                    waBold("Menu (hero ki madad)"),
+                    "Command likho:",
+                    "• steps — flow samjho",
+                    "• current — draft status",
+                    "• edit — review link",
+                    "• login — web se jodo",
+                    "• clear — draft hatao",
+                    "• history — recent jobs",
                     "",
-                    "Start by checking if you already have files in your draft.",
+                    "Samajh nahi aa raha? Bas 'steps' likh do.",
                   ].join("\n"),
                   buttons: [
                     {
                       type: "reply",
-                      reply: { id: "current", title: "Current status" },
+                      reply: { id: "current", title: "Draft status" },
                     },
                   ],
                 });
@@ -489,7 +492,7 @@ Please try again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No jobs found yet.*\n\nSend a *document* to create your first job. \ud83d\udcc4",
+                      "*Abhi tak koi job nahi bani.*\n\nEk *document* bhejo — pehli entry ho jayegi.",
                     phoneNumberId,
                   });
                 } else {
@@ -497,14 +500,14 @@ Please try again.`,
                     const reviewUrl = buildReviewUrl(job.id);
                     const link = reviewUrl ?? "Link unavailable";
                     if (job.status === PrintJobStatus.DRAFT) {
-                      return `${index + 1}) Draft \u2022 ${link}`;
+                      return `${index + 1}) Draft (adhoora scene) \u2022 ${link}`;
                     }
                     const shortId = job.verificationCode ?? "Job";
                     return `${index + 1}) ${shortId} \u2022 ${job.status} \u2022 ${link}`;
                   });
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Recent jobs")}\n\n${lines.join("\n")}`,
+                    message: `${waBold("Recent jobs (filmy recap)")}\n\n${lines.join("\n")}`,
                     phoneNumberId,
                   });
                 }
@@ -536,7 +539,7 @@ Please try again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No active draft right now.*\n\nSend a document to start one. \ud83d\udcc4",
+                      "*Abhi koi active draft nahi hai.*\n\nEk document bhejo — naya scene shuru!",
                     phoneNumberId,
                   });
                 } else {
@@ -565,17 +568,17 @@ Please try again.`,
                         (file, index) =>
                           `${index + 1}) ${file.name} \u2022 ${file.pages} pages`,
                       )
-                    : ["No files added yet."];
+                    : ["Abhi koi file add nahi hui."];
                   const headerLine = draftJob.verificationCode
                     ? `${draftJob.verificationCode} \u2022 ${draftJob.status}`
-                    : "Draft job";
+                    : "Draft job (abhi adhura)";
                   const lines = [
-                    `*Current draft job* \u270d\ufe0f`,
+                    `*Tumhara draft job* \u270d\ufe0f`,
                     headerLine,
                     `Total pages: ${totalPages}`,
                     `Estimated cost: ${totalCost}`,
                     "",
-                    "*Files in this job:*",
+                    "*Is job ki files:*",
                     ...fileLines,
                     "",
                   ];
@@ -583,11 +586,11 @@ Please try again.`,
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    body: body + '\nNext: tap "Edit job" to review options.',
+                    body: body + '\nNext scene: "Job edit" dabao, options set karo.',
                     buttons: [
                       {
                         type: "reply",
-                        reply: { id: "edit", title: "Edit job" },
+                        reply: { id: "edit", title: "Job edit" },
                       },
                     ],
                   });
@@ -617,7 +620,7 @@ Please try again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No draft to clear.*\n\nSend a document to start a job first. \ud83d\uddc2\ufe0f",
+                      "*Draft hi nahi hai, clear kya karein?*\n\nPehle ek document bhejo — phir clear bhi kar denge.",
                     phoneNumberId,
                   });
                 }
@@ -639,8 +642,8 @@ Please try again.`,
               if (phoneNumberId && userData.displayPhoneNumber) {
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
-                  message: `${waBold("Draft cleared")}
-You can start a new job anytime by sending a document.`,
+                  message: `${waBold("Draft clear ✅")}
+Naya job shuru karna ho to bas ek document bhej do.`,
                   phoneNumberId,
                 });
               }
@@ -665,8 +668,8 @@ You can start a new job anytime by sending a document.`,
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Still receiving your file")}
-  Please wait a few seconds, then tap \"Edit job\" again.`,
+                      message: `${waBold("File aa rahi hai...")}
+Thoda sa ruk jao (2-3 sec), phir \"Job edit\" dobara dabao.`,
                       phoneNumberId,
                     });
                   }
@@ -694,7 +697,7 @@ You can start a new job anytime by sending a document.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No draft to edit right now.*\n\nIf you just sent files, wait for the *upload confirmation* for each file, then reply with *edit*.\n\n*Tip:* Reply with *history* to see your jobs.",
+                      "*Abhi edit karne layak koi draft nahi hai.*\n\nAgar abhi files bheji hain, to har file ka confirmation aane do, phir *edit* likho.\n\n*Tip:* Recent jobs ke liye *history* likho.",
                     phoneNumberId,
                   });
                 }
@@ -716,12 +719,12 @@ You can start a new job anytime by sending a document.`,
                   to: userData.displayPhoneNumber,
                   message: reviewUrl
                     ? [
-                        waBold("Review & submit"),
-                        "Open this link to set print options and submit:",
+                        waBold("Review & submit (final scene)"),
+                        "Is link pe jaake print options set karo aur submit kar do:",
                         reviewUrl,
                       ].join("\n")
                     : `${waBold("Review link unavailable")}
-Please try again later.`,
+Thodi der baad phir try karna.`,
                   phoneNumberId,
                 });
               }
@@ -731,7 +734,7 @@ Please try again later.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Login link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
+                      "*Login link unavailable*\n\nAbhi scene ready nahi hai — thodi der baad try karna.",
                     phoneNumberId,
                   });
                 }
@@ -772,8 +775,8 @@ Please try again later.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message: [
-                      waBold("Link WhatsApp to web"),
-                      "Open this within 1 minute:",
+                      waBold("WhatsApp ko web se jodo"),
+                      "1 minute ke andar yeh link khol do:",
                       loginUrl,
                     ].join("\n"),
                     phoneNumberId,
@@ -786,11 +789,11 @@ Please try again later.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Welcome to Zopy"),
+                    waBold("Zopy mein swagat hai!"),
                     "",
-                    waBold("Start a print job"),
-                    "Send your document files here.",
-                    'When you\'re done, tap "Edit job" to review options and submit.',
+                    waBold("Print job shuru karo"),
+                    "Apni document files yahin bhejo.",
+                    'Done ho jao to "Job edit" dabao, options dekho, aur submit kar do.',
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
