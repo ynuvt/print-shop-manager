@@ -167,3 +167,80 @@ export async function sendWhatsAppStickerFromFile(
     );
   }
 }
+
+interface SendWhatsAppPdfArgs {
+  to: string;
+  phoneNumberId: string;
+  buffer: Buffer;
+  fileName: string;
+}
+
+export async function sendWhatsAppPdfDocument(
+  args: SendWhatsAppPdfArgs,
+): Promise<void> {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error("WHATSAPP_ACCESS_TOKEN is not configured.");
+  }
+
+  const pdfBytes = new Uint8Array(args.buffer);
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", "application/pdf");
+  form.append(
+    "file",
+    new Blob([pdfBytes], { type: "application/pdf" }),
+    args.fileName,
+  );
+
+  const uploadResponse = await fetch(
+    `${WHATSAPP_API_BASE}/${args.phoneNumberId}/media`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: form,
+    },
+  );
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(
+      `Failed to upload WhatsApp PDF: ${uploadResponse.status} ${errorText}`,
+    );
+  }
+
+  const uploadData = (await uploadResponse.json()) as { id?: string };
+  if (!uploadData.id) {
+    throw new Error("WhatsApp PDF upload did not return an id.");
+  }
+
+  const messageResponse = await fetch(
+    `${WHATSAPP_API_BASE}/${args.phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: args.to,
+        type: "document",
+        document: {
+          id: uploadData.id,
+          filename: args.fileName,
+        },
+      }),
+    },
+  );
+
+  if (!messageResponse.ok) {
+    const errorText = await messageResponse.text();
+    throw new Error(
+      `Failed to send WhatsApp PDF: ${messageResponse.status} ${errorText}`,
+    );
+  }
+}

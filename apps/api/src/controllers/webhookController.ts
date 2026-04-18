@@ -10,6 +10,7 @@ import {
   sendWhatsAppStickerFromFile,
   sendWhatsAppTextMessage,
   sendWhatsAppButtonMessage,
+  sendWhatsAppPdfDocument,
 } from "../modules/whatsappServices.js";
 import { getPdfPageCountFromBuffer } from "../utils/pdfPageCount.js";
 import {
@@ -17,8 +18,8 @@ import {
   deleteObjectFromR2ByUrl,
   uploadBufferToR2,
 } from "../utils/r2Storage.js";
+import { convertToPdfFromBuffer } from "../utils/convertToPdf.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
-import { printOption } from "../../../../packages/db/dist/generated/prisma/client.js";
 import socket from "../config/socket.js";
 
 const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL ?? "").replace(
@@ -92,216 +93,269 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
             // ─── DOCUMENT HANDLER ────────────────────────────────────────────
             if (incomingMessage.type === "document") {
               const mimeType = incomingMessage.document?.mime_type || "";
+              console.log("Received document:", incomingMessage.document);
 
-              if (mimeType === "application/pdf") {
-                console.log("Received PDF message:", incomingMessage.document);
-                const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
-                const fileName =
-                  incomingMessage.document?.filename || "whatsapp-file.pdf";
+              const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+              const rawFileName =
+                incomingMessage.document?.filename || "whatsapp-file";
 
-                if (!accessToken || !incomingMessage.document?.url) {
-                  console.log("Missing WhatsApp access token or document URL.");
-                  continue;
-                }
+              if (!accessToken || !incomingMessage.document?.url) {
+                console.log("Missing WhatsApp access token or document URL.");
+                continue;
+              }
 
-                try {
-                  if (userData.displayPhoneNumber) {
-                    const timestampSeconds = Number(incomingMessage.timestamp);
-                    const startedProcessingAt = Number.isFinite(
-                      timestampSeconds,
-                    )
-                      ? new Date(timestampSeconds * 1000)
-                      : new Date();
+              const isPdf = mimeType === "application/pdf";
+              // NEW: Check if Word file
+              const isWordFile =
+                mimeType ===
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                mimeType === "application/msword" ||
+                rawFileName.toLowerCase().endsWith(".docx") ||
+                rawFileName.toLowerCase().endsWith(".doc");
 
-                    await prisma.whatsAppUser.upsert({
-                      where: {
-                        phoneNumber: userData.displayPhoneNumber,
-                      },
-                      create: {
-                        phoneNumber: userData.displayPhoneNumber,
-                        name: userData.displayName || null,
-                        lastFileStartedProcessingAt: startedProcessingAt,
-                      },
-                      update: {
-                        name: userData.displayName || null,
-                        lastFileStartedProcessingAt: startedProcessingAt,
-                      },
-                      select: {
-                        phoneNumber: true,
-                      },
-                    });
-                  }
+              try {
+                if (userData.displayPhoneNumber) {
+                  const timestampSeconds = Number(incomingMessage.timestamp);
+                  const startedProcessingAt = Number.isFinite(timestampSeconds)
+                    ? new Date(timestampSeconds * 1000)
+                    : new Date();
 
-                  const response = await fetch(incomingMessage.document.url, {
-                    headers: {
-                      Authorization: `Bearer ${accessToken}`,
-                    },
-                  });
-
-                  if (!response.ok) {
-                    console.log(
-                      "Failed to download WhatsApp document:",
-                      response.status,
-                    );
-                    if (phoneNumberId && userData.displayPhoneNumber) {
-                      await sendWhatsAppTextMessage({
-                        to: userData.displayPhoneNumber,
-                        message: `${waBold("Upload failed")}\nCouldn't download ${waBold(
-                          fileName,
-                        )}.\nPlease try sending the PDF again.`,
-                        phoneNumberId,
-                      });
-                    }
-                    continue;
-                  }
-
-                  const arrayBuffer = await response.arrayBuffer();
-                  const buffer = Buffer.from(arrayBuffer);
-                  const pages = await getPdfPageCountFromBuffer(buffer);
-
-                  const key = buildR2ObjectKey(
-                    userData.displayPhoneNumber || "whatsapp",
-                    fileName,
-                  );
-                  const uploaded = await uploadBufferToR2({
-                    key,
-                    buffer,
-                    contentType: "application/pdf",
-                  });
-
-                  const defaultOptions: PrintOptions = {
-                    paperSize: "A4",
-                    colorMode: "BW",
-                    orientation: "PORTRAIT",
-                    scaleMode: "FIT",
-                    pageRange: "ALL",
-                    customRange: "",
-                    duplex: "ONE",
-                    copies: 1,
-                  };
-                  const cost = calculateFileCost(pages, defaultOptions);
-
-                  const existingJob = await prisma.printJob.findFirst({
+                  await prisma.whatsAppUser.upsert({
                     where: {
-                      userMetadata: {
-                        phoneNumber: userData.displayPhoneNumber,
-                      },
-                      status: PrintJobStatus.DRAFT,
+                      phoneNumber: userData.displayPhoneNumber,
+                    },
+                    create: {
+                      phoneNumber: userData.displayPhoneNumber,
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: startedProcessingAt,
+                    },
+                    update: {
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: startedProcessingAt,
                     },
                     select: {
-                      id: true,
-                      totalCost: true,
-                      totalPages: true,
+                      phoneNumber: true,
                     },
                   });
+                }
 
-                  let printJobId = existingJob?.id;
+                const response = await fetch(incomingMessage.document.url, {
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                  },
+                });
 
-                  if (!printJobId) {
-                    const existingUser = await prisma.whatsAppUser.findUnique({
-                      where: {
-                        phoneNumber: userData.displayPhoneNumber,
-                      },
-                      select: {
-                        phoneNumber: true,
-                      },
-                    });
-                    if (!existingUser) {
-                      throw new Error("WhatsApp user record not found.");
-                    }
-
-                    const newJob = await prisma.printJob.create({
-                      data: {
-                        totalCost: cost,
-                        totalPages: pages,
-                        estimatedTime: 0,
-                        source: "WHATSAPP",
-                        status: PrintJobStatus.DRAFT,
-                        userMetadata: {
-                          connect: {
-                            phoneNumber: existingUser.phoneNumber,
-                          },
-                        },
-                      },
-                    });
-
-                    printJobId = newJob.id;
-                  } else {
-                    const nextTotalPages =
-                      (existingJob?.totalPages ?? 0) + pages;
-                    const nextTotalCost = (existingJob?.totalCost ?? 0) + cost;
-                    await prisma.printJob.update({
-                      where: {
-                        id: printJobId,
-                      },
-                      data: {
-                        totalPages: nextTotalPages,
-                        totalCost: nextTotalCost,
-                        estimatedTime: 0,
-                      },
-                    });
-                  }
-
-                  await prisma.file.create({
-                    data: {
-                      name: fileName,
-                      mimeType: "application/pdf",
-                      messageId: incomingMessage.id,
-                      pages,
-                      url: uploaded.url,
-                      printJob: {
-                        connect: {
-                          id: printJobId,
-                        },
-                      },
-                      option: {
-                        create: {
-                          copies: 1,
-                        },
-                      },
-                    },
-                  });
-
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    socket.emit("job-file-added", printJobId);
-                    await sendWhatsAppButtonMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      body: `${waBold("File received")}\n${waBold(
-                        fileName,
-                      )} • ${pages} page(s)\n\nWhat would you like to do next?`,
-                      buttons: [
-                        {
-                          type: "reply",
-                          reply: { id: "current", title: "File status" },
-                        },
-                        {
-                          type: "reply",
-                          reply: { id: "edit", title: "Edit job" },
-                        },
-                      ],
-                    });
-                  }
-                } catch (error) {
-                  console.log("Failed to download or upload file:", error);
+                if (!response.ok) {
+                  console.log(
+                    "Failed to download WhatsApp document:",
+                    response.status,
+                  );
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Upload failed")}\nCouldn't upload ${waBold(
-                        fileName,
-                      )}.\nPlease try again.`,
+                      message: `${waBold("Upload failed")}
+Couldn't download ${waBold(rawFileName)}.
+Please try sending the file again.`,
                       phoneNumberId,
                     });
                   }
+                  continue;
                 }
-              } else {
-                console.log(mimeType, "is not supported yet.");
+
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+
+                // NEW: Handle Word files
+                /*
+                if (isWordFile) {
+                  console.log(`Converting Word file: ${rawFileName}`);
+                  try {
+                    const converted = await convertToPdfFromBuffer(
+                      buffer,
+                      rawFileName,
+                    );
+                    // Use the same name as input file but with .pdf extension.
+                    // WhatsApp sometimes repeats extensions like: file.docx.doc.docx
+                    let baseName = (rawFileName || "document").trim();
+                    if (!baseName) baseName = "document";
+                  while (/\.(docx|doc)$/i.test(baseName)) {
+                      baseName = baseName.replace(/\.(docx|doc)$/i, "");
+                    }
+                    if (!baseName.trim()) baseName = "document";
+                    const pdfFileName = `${baseName}.pdf`;
+
+                    if (phoneNumberId && userData.displayPhoneNumber) {
+                      await sendWhatsAppPdfDocument({
+                        to: userData.displayPhoneNumber,
+                        phoneNumberId,
+                        buffer: converted.pdfBuffer,
+                        fileName: pdfFileName,
+                      });
+                      console.log(`Sent converted PDF to user: ${pdfFileName}`);
+                    }
+                  } catch (conversionError) {
+                    console.error("Word to PDF conversion failed:", conversionError);
+                    if (phoneNumberId && userData.displayPhoneNumber) {
+                      await sendWhatsAppTextMessage({
+                        to: userData.displayPhoneNumber,
+                        message: `${waBold("Conversion failed")}
+Couldn't convert ${waBold(rawFileName)} to PDF.
+Please try again or send a different file.`,
+                        phoneNumberId,
+                      });
+                    }
+                  }
+                  continue;
+                }
+                */
+
+                let pdfBuffer = buffer;
+                let pdfFileName = rawFileName.toLowerCase().endsWith(".pdf")
+                  ? rawFileName
+                  : `${rawFileName}.pdf`;
+
+                if (!isPdf) {
+                  const converted = await convertToPdfFromBuffer(
+                    buffer,
+                    rawFileName,
+                  );
+                  pdfBuffer = converted.pdfBuffer;
+                  pdfFileName = converted.pdfFileName;
+                }
+
+                const pages = await getPdfPageCountFromBuffer(pdfBuffer);
+
+                const key = buildR2ObjectKey(
+                  userData.displayPhoneNumber || "whatsapp",
+                  pdfFileName,
+                );
+                const uploaded = await uploadBufferToR2({
+                  key,
+                  buffer: pdfBuffer,
+                  contentType: "application/pdf",
+                });
+
+                const defaultOptions: PrintOptions = {
+                  paperSize: "A4",
+                  colorMode: "BW",
+                  orientation: "PORTRAIT",
+                  scaleMode: "FIT",
+                  pageRange: "ALL",
+                  customRange: "",
+                  duplex: "ONE",
+                  copies: 1,
+                };
+                const cost = calculateFileCost(pages, defaultOptions);
+
+                const existingJob = await prisma.printJob.findFirst({
+                  where: {
+                    userMetadata: {
+                      phoneNumber: userData.displayPhoneNumber,
+                    },
+                    status: PrintJobStatus.DRAFT,
+                  },
+                  select: {
+                    id: true,
+                    totalCost: true,
+                    totalPages: true,
+                  },
+                });
+
+                let printJobId = existingJob?.id;
+
+                if (!printJobId) {
+                  const existingUser = await prisma.whatsAppUser.findUnique({
+                    where: {
+                      phoneNumber: userData.displayPhoneNumber,
+                    },
+                    select: {
+                      phoneNumber: true,
+                    },
+                  });
+                  if (!existingUser) {
+                    throw new Error("WhatsApp user record not found.");
+                  }
+
+                  const newJob = await prisma.printJob.create({
+                    data: {
+                      totalCost: cost,
+                      totalPages: pages,
+                      estimatedTime: 0,
+                      source: "WHATSAPP",
+                      status: PrintJobStatus.DRAFT,
+                      userMetadata: {
+                        connect: {
+                          phoneNumber: existingUser.phoneNumber,
+                        },
+                      },
+                    },
+                  });
+
+                  printJobId = newJob.id;
+                } else {
+                  const nextTotalPages = (existingJob?.totalPages ?? 0) + pages;
+                  const nextTotalCost = (existingJob?.totalCost ?? 0) + cost;
+                  await prisma.printJob.update({
+                    where: {
+                      id: printJobId,
+                    },
+                    data: {
+                      totalPages: nextTotalPages,
+                      totalCost: nextTotalCost,
+                      estimatedTime: 0,
+                    },
+                  });
+                }
+
+                await prisma.file.create({
+                  data: {
+                    name: pdfFileName,
+                    mimeType: "application/pdf",
+                    messageId: incomingMessage.id,
+                    pages,
+                    url: uploaded.url,
+                    printJob: {
+                      connect: {
+                        id: printJobId,
+                      },
+                    },
+                    option: {
+                      create: {
+                        copies: 1,
+                      },
+                    },
+                  },
+                });
+
+                if (phoneNumberId && userData.displayPhoneNumber) {
+                  socket.emit("job-file-added", printJobId);
+                  await sendWhatsAppButtonMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    body: `${waBold("File received")}
+${waBold(pdfFileName)} • ${pages} page(s)
+
+What would you like to do next?`,
+                    buttons: [
+                      {
+                        type: "reply",
+                        reply: { id: "current", title: "File status" },
+                      },
+                      {
+                        type: "reply",
+                        reply: { id: "edit", title: "Edit job" },
+                      },
+                    ],
+                  });
+                }
+              } catch (error) {
+                console.log("Failed to process document:", error);
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Unsupported file type")}\nPlease send a ${waBold(
-                      "PDF",
-                    )}. This file wasn’t added to your draft.`,
+                    message: `${waBold("Error")}
+Failed to process ${waBold(rawFileName)}.
+Please try again.`,
                     phoneNumberId,
                   });
                 }
@@ -350,10 +404,10 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   phoneNumberId,
                   body: [
                     waBold("Welcome"),
-                    "Print your PDF documents directly from WhatsApp.",
+                    "Print your documents (PDF, Word, PPT, etc.) directly from WhatsApp.",
                     "",
                     waBold("How it works"),
-                    "1) Send one or more PDF files",
+                    "1) Send one or more documents",
                     "2) Wait for confirmation for each file",
                     "3) Open your review link and submit",
                   ].join("\n"),
@@ -369,12 +423,12 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   phoneNumberId,
                   body: [
                     waBold("How it works"),
-                    "1) Send one or more PDFs here",
-                    "2) Wait for “File received” for each PDF",
-                    "3) Tap “Edit job” to review options",
+                    "1) Send one or more documents here",
+                    '2) Wait for "File received" for each document',
+                    '3) Tap "Edit job" to review options',
                     "4) Submit to start printing",
                     "",
-                    "Tip: You can send more PDFs anytime before submitting.",
+                    "Tip: You can send more files anytime before submitting.",
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "edit", title: "Edit job" } },
@@ -435,7 +489,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No jobs found yet.*\n\nSend a *PDF* to create your first job. 📄",
+                      "*No jobs found yet.*\n\nSend a *document* to create your first job. \ud83d\udcc4",
                     phoneNumberId,
                   });
                 } else {
@@ -443,10 +497,10 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     const reviewUrl = buildReviewUrl(job.id);
                     const link = reviewUrl ?? "Link unavailable";
                     if (job.status === PrintJobStatus.DRAFT) {
-                      return `${index + 1}) Draft • ${link}`;
+                      return `${index + 1}) Draft \u2022 ${link}`;
                     }
                     const shortId = job.verificationCode ?? "Job";
-                    return `${index + 1}) ${shortId} • ${job.status} • ${link}`;
+                    return `${index + 1}) ${shortId} \u2022 ${job.status} \u2022 ${link}`;
                   });
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
@@ -482,7 +536,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No active draft right now.*\n\nSend a PDF to start one. 📄",
+                      "*No active draft right now.*\n\nSend a document to start one. \ud83d\udcc4",
                     phoneNumberId,
                   });
                 } else {
@@ -509,14 +563,14 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   const fileLines = draftJob.files.length
                     ? draftJob.files.map(
                         (file, index) =>
-                          `${index + 1}) ${file.name} • ${file.pages} pages`,
+                          `${index + 1}) ${file.name} \u2022 ${file.pages} pages`,
                       )
                     : ["No files added yet."];
                   const headerLine = draftJob.verificationCode
-                    ? `${draftJob.verificationCode} • ${draftJob.status}`
+                    ? `${draftJob.verificationCode} \u2022 ${draftJob.status}`
                     : "Draft job";
                   const lines = [
-                    `*Current draft job* ✍️`,
+                    `*Current draft job* \u270d\ufe0f`,
                     headerLine,
                     `Total pages: ${totalPages}`,
                     `Estimated cost: ${totalCost}`,
@@ -529,7 +583,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    body: body + "\nNext: tap “Edit job” to review options.",
+                    body: body + '\nNext: tap "Edit job" to review options.',
                     buttons: [
                       {
                         type: "reply",
@@ -563,7 +617,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No draft to clear.*\n\nSend a PDF to start a job first. 🗂️",
+                      "*No draft to clear.*\n\nSend a document to start a job first. \ud83d\uddc2\ufe0f",
                     phoneNumberId,
                   });
                 }
@@ -585,7 +639,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
               if (phoneNumberId && userData.displayPhoneNumber) {
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
-                  message: `${waBold("Draft cleared")}\nYou can start a new job anytime by sending a PDF.`,
+                  message: `${waBold("Draft cleared")}
+You can start a new job anytime by sending a document.`,
                   phoneNumberId,
                 });
               }
@@ -610,7 +665,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Still receiving your file")}\nPlease wait a few seconds, then tap “Edit job” again.`,
+                      message: `${waBold("Still receiving your file")}
+  Please wait a few seconds, then tap \"Edit job\" again.`,
                       phoneNumberId,
                     });
                   }
@@ -648,8 +704,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
               const reviewUrl = buildReviewUrl(existingJob.id);
               if (phoneNumberId && userData.displayPhoneNumber) {
                 const message = reviewUrl
-                  ? `*Edit your job options* ✏️\nUpdate print options and submit here:\n${reviewUrl}\n\n*Tip:* Reply with *history* to see past jobs.`
-                  : "*Edit your job options* ✏️\nReply with *history* to see past jobs.";
+                  ? `*Edit your job options* \u270f\ufe0f\nUpdate print options and submit here:\n${reviewUrl}\n\n*Tip:* Reply with *history* to see past jobs.`
+                  : "*Edit your job options* \u270f\ufe0f\nReply with *history* to see past jobs.";
                 // sendWhatsAppStickerFromFile({
                 //   to: userData.displayPhoneNumber,
                 //   phoneNumberId,
@@ -664,7 +720,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                         "Open this link to set print options and submit:",
                         reviewUrl,
                       ].join("\n")
-                    : `${waBold("Review link unavailable")}\nPlease try again later.`,
+                    : `${waBold("Review link unavailable")}
+Please try again later.`,
                   phoneNumberId,
                 });
               }
@@ -674,7 +731,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Login link unavailable* ⚠️\n\nPlease try again later.",
+                      "*Login link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
                     phoneNumberId,
                   });
                 }
@@ -732,8 +789,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     waBold("Welcome to Zopy"),
                     "",
                     waBold("Start a print job"),
-                    "Send your PDF files here.",
-                    "When you’re done, tap “Edit job” to review options and submit.",
+                    "Send your document files here.",
+                    'When you\'re done, tap "Edit job" to review options and submit.',
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
