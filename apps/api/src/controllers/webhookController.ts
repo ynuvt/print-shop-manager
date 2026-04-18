@@ -153,9 +153,9 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Upload L")} 💀
-Couldn't fetch ${waBold(rawFileName)}.
-Resend it and we'll run it back. fr`,
+                      message: `${waBold("Upload failed")}
+Couldn't download ${waBold(rawFileName)}.
+Please try sending the file again.`,
                       phoneNumberId,
                     });
                   }
@@ -209,7 +209,7 @@ Please try again or send a different file.`,
                 }
                 */
 
-                let pdfBuffer: Buffer = buffer;
+                let pdfBuffer = buffer;
                 let pdfFileName = rawFileName.toLowerCase().endsWith(".pdf")
                   ? rawFileName
                   : `${rawFileName}.pdf`;
@@ -332,18 +332,18 @@ Please try again or send a different file.`,
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    body: `${waBold("File received ✅")}
+                    body: `${waBold("File received")}
 ${waBold(pdfFileName)} • ${pages} page(s)
 
-Next move? pick a button 👇`,
+What would you like to do next?`,
                     buttons: [
                       {
                         type: "reply",
-                        reply: { id: "current", title: "Status check" },
+                        reply: { id: "current", title: "File status" },
                       },
                       {
                         type: "reply",
-                        reply: { id: "edit", title: "Edit / Submit" },
+                        reply: { id: "edit", title: "Edit job" },
                       },
                     ],
                   });
@@ -353,9 +353,9 @@ Next move? pick a button 👇`,
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Processing L")} 🫠
-Couldn't process ${waBold(rawFileName)}.
-Resend it (or try a different file).`,
+                    message: `${waBold("Error")}
+Failed to process ${waBold(rawFileName)}.
+Please try again.`,
                     phoneNumberId,
                   });
                 }
@@ -403,15 +403,13 @@ Resend it (or try a different file).`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("yo 👋 welcome"),
-                    "Send docs here — we'll auto-PDF + prep your print job. we cookin. fr",
+                    waBold("Welcome"),
+                    "Print your documents (PDF, Word, PPT, etc.) directly from WhatsApp.",
                     "",
-                    waBold("How it works (speedrun)"),
-                    "1) Drop one or more files",
-                    '2) Wait for "File received" on each',
-                    '3) Tap "Edit job" → set options → submit',
-                    "",
-                    "Type *menu* anytime for commands.",
+                    waBold("How it works"),
+                    "1) Send one or more documents",
+                    "2) Wait for confirmation for each file",
+                    "3) Open your review link and submit",
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
@@ -424,19 +422,16 @@ Resend it (or try a different file).`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("How it works (speedrun)"),
-                    "1) Send files here",
-                    '2) Wait for "File received" on each file',
-                    '3) Hit "Edit job" to tweak options',
-                    "4) Submit = printing starts",
+                    waBold("How it works"),
+                    "1) Send one or more documents here",
+                    '2) Wait for "File received" for each document',
+                    '3) Tap "Edit job" to review options',
+                    "4) Submit to start printing",
                     "",
-                    "Tip: You can keep adding files before submit. no cap.",
+                    "Tip: You can send more files anytime before submitting.",
                   ].join("\n"),
                   buttons: [
-                    {
-                      type: "reply",
-                      reply: { id: "edit", title: "Edit / Submit" },
-                    },
+                    { type: "reply", reply: { id: "edit", title: "Edit job" } },
                   ],
                 });
               }
@@ -451,21 +446,20 @@ Resend it (or try a different file).`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Menu (no cap)"),
-                    "Type a command:",
-                    "• steps — speedrun how it works",
-                    "• current — draft status",
-                    "• edit — get review link",
-                    "• login — link WhatsApp ↔ web",
-                    "• clear — wipe draft",
-                    "• history — recent jobs",
+                    waBold("Help"),
+                    "Type any command below:",
+                    "• steps — how it works",
+                    "• current — all files status",
+                    "• edit — open review link",
+                    "• login — link WhatsApp to web",
+                    "• clear — delete your draft",
                     "",
-                    "Pro tip: start with *current*.",
+                    "Start by checking if you already have files in your draft.",
                   ].join("\n"),
                   buttons: [
                     {
                       type: "reply",
-                      reply: { id: "current", title: "Status check" },
+                      reply: { id: "current", title: "Current status" },
                     },
                   ],
                 });
@@ -495,7 +489,7 @@ Resend it (or try a different file).`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No jobs yet.*\n\nSend a *document* and we'll cook up your first print run. fr",
+                      "*No jobs found yet.*\n\nSend a *document* to create your first job. \ud83d\udcc4",
                     phoneNumberId,
                   });
                 } else {
@@ -503,14 +497,14 @@ Resend it (or try a different file).`,
                     const reviewUrl = buildReviewUrl(job.id);
                     const link = reviewUrl ?? "Link unavailable";
                     if (job.status === PrintJobStatus.DRAFT) {
-                      return `${index + 1}) Draft (still cooking) \u2022 ${link}`;
+                      return `${index + 1}) Draft \u2022 ${link}`;
                     }
                     const shortId = job.verificationCode ?? "Job";
                     return `${index + 1}) ${shortId} \u2022 ${job.status} \u2022 ${link}`;
                   });
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Recent jobs (recap)")}\n\n${lines.join("\n")}`,
+                    message: `${waBold("Recent jobs")}\n\n${lines.join("\n")}`,
                     phoneNumberId,
                   });
                 }
@@ -542,7 +536,7 @@ Resend it (or try a different file).`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No active draft rn.*\n\nSend a document to start one.",
+                      "*No active draft right now.*\n\nSend a document to start one. \ud83d\udcc4",
                     phoneNumberId,
                   });
                 } else {
@@ -571,17 +565,17 @@ Resend it (or try a different file).`,
                         (file, index) =>
                           `${index + 1}) ${file.name} \u2022 ${file.pages} pages`,
                       )
-                    : ["No files yet. send one."];
+                    : ["No files added yet."];
                   const headerLine = draftJob.verificationCode
                     ? `${draftJob.verificationCode} \u2022 ${draftJob.status}`
-                    : "Draft (still cooking)";
+                    : "Draft job";
                   const lines = [
-                    `*Draft check* \uD83E\uDDFE`,
+                    `*Current draft job* \u270d\ufe0f`,
                     headerLine,
                     `Total pages: ${totalPages}`,
                     `Estimated cost: ${totalCost}`,
                     "",
-                    "*Files loaded:*",
+                    "*Files in this job:*",
                     ...fileLines,
                     "",
                   ];
@@ -589,13 +583,11 @@ Resend it (or try a different file).`,
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    body:
-                      body +
-                      '\nNext: tap "Edit job" to tweak options + submit. bet.',
+                    body: body + '\nNext: tap "Edit job" to review options.',
                     buttons: [
                       {
                         type: "reply",
-                        reply: { id: "edit", title: "Edit / Submit" },
+                        reply: { id: "edit", title: "Edit job" },
                       },
                     ],
                   });
@@ -624,7 +616,8 @@ Resend it (or try a different file).`,
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: "*Nothing to clear rn.*\n\nSend a document first.",
+                    message:
+                      "*No draft to clear.*\n\nSend a document to start a job first. \ud83d\uddc2\ufe0f",
                     phoneNumberId,
                   });
                 }
@@ -646,8 +639,8 @@ Resend it (or try a different file).`,
               if (phoneNumberId && userData.displayPhoneNumber) {
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
-                  message: `${waBold("Draft wiped ✅")}
-Send a document anytime to start again. we go again.`,
+                  message: `${waBold("Draft cleared")}
+You can start a new job anytime by sending a document.`,
                   phoneNumberId,
                 });
               }
@@ -672,8 +665,8 @@ Send a document anytime to start again. we go again.`,
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Hold up")} 📥
-Still receiving your file. Wait a few sec, then tap \"Edit job\" again.`,
+                      message: `${waBold("Still receiving your file")}
+  Please wait a few seconds, then tap \"Edit job\" again.`,
                       phoneNumberId,
                     });
                   }
@@ -701,7 +694,7 @@ Still receiving your file. Wait a few sec, then tap \"Edit job\" again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      '*No draft to edit rn.*\n\nIf you just sent files, wait for the "File received" confirmations, then reply *edit*.\n\nTip: reply *history* to see recent jobs.',
+                      "*No draft to edit right now.*\n\nIf you just sent files, wait for the *upload confirmation* for each file, then reply with *edit*.\n\n*Tip:* Reply with *history* to see your jobs.",
                     phoneNumberId,
                   });
                 }
@@ -723,12 +716,12 @@ Still receiving your file. Wait a few sec, then tap \"Edit job\" again.`,
                   to: userData.displayPhoneNumber,
                   message: reviewUrl
                     ? [
-                        waBold("Final boss: review 😤"),
-                        "Open this link to tweak options + submit:",
+                        waBold("Review & submit"),
+                        "Open this link to set print options and submit:",
                         reviewUrl,
                       ].join("\n")
-                    : `${waBold("Review link is down rn")} ⚠️
-Try again in a bit.`,
+                    : `${waBold("Review link unavailable")}
+Please try again later.`,
                   phoneNumberId,
                 });
               }
@@ -738,7 +731,7 @@ Try again in a bit.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Login link is down rn* \u26a0\ufe0f\n\nTry again in a bit.",
+                      "*Login link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
                     phoneNumberId,
                   });
                 }
@@ -780,7 +773,7 @@ Try again in a bit.`,
                     to: userData.displayPhoneNumber,
                     message: [
                       waBold("Link WhatsApp to web"),
-                      "Open this within 60s (expires):",
+                      "Open this within 1 minute:",
                       loginUrl,
                     ].join("\n"),
                     phoneNumberId,
@@ -793,11 +786,11 @@ Try again in a bit.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
-                    waBold("Zopy here 👋"),
+                    waBold("Welcome to Zopy"),
                     "",
                     waBold("Start a print job"),
-                    "Send your document files here — we'll auto-PDF + prep it.",
-                    'When you\'re done, tap "Edit job" to tweak options + submit. bet.',
+                    "Send your document files here.",
+                    'When you\'re done, tap "Edit job" to review options and submit.',
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "Menu" } },
