@@ -590,7 +590,8 @@ Resend it (or try a different file).`,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     body:
-                      body + '\nNext: tap "Edit job" to tweak options + submit. bet.',
+                      body +
+                      '\nNext: tap "Edit job" to tweak options + submit. bet.',
                     buttons: [
                       {
                         type: "reply",
@@ -623,8 +624,7 @@ Resend it (or try a different file).`,
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message:
-                      "*Nothing to clear rn.*\n\nSend a document first.",
+                    message: "*Nothing to clear rn.*\n\nSend a document first.",
                     phoneNumberId,
                   });
                 }
@@ -701,7 +701,7 @@ Still receiving your file. Wait a few sec, then tap \"Edit job\" again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No draft to edit rn.*\n\nIf you just sent files, wait for the \"File received\" confirmations, then reply *edit*.\n\nTip: reply *history* to see recent jobs.",
+                      '*No draft to edit rn.*\n\nIf you just sent files, wait for the "File received" confirmations, then reply *edit*.\n\nTip: reply *history* to see recent jobs.',
                     phoneNumberId,
                   });
                 }
