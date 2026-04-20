@@ -37,6 +37,7 @@ const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
 
 type WalkthroughStep =
   | "upload"
+  | "print-type"
   | "customize"
   | "add-more"
   | "file-select"
@@ -116,7 +117,11 @@ function FileCard({
           </div>
         </button>
         <div className="review-file-actions">
-          <button type="button" className="file-edit-hint file-edit-hint--action" onClick={onToggle}>
+          <button
+            type="button"
+            className="file-edit-hint file-edit-hint--action"
+            onClick={onToggle}
+          >
             <SlidersHorizontal size={12} />
             Edit details
           </button>
@@ -140,18 +145,6 @@ function FileCard({
               : "upload-file-body"
           }
         >
-          <div>
-            <p className="field-label">Print Type</p>
-            <ToggleGroup
-              options={[
-                { label: "Color Print", value: "COLOR" },
-                { label: "B/W Print", value: "BW" },
-              ]}
-              value={pf.options.colorMode}
-              onChange={(v) => onUpdate({ colorMode: v })}
-            />
-          </div>
-
           <div>
             <p className="field-label">Print Sides</p>
             <ToggleGroup
@@ -260,6 +253,8 @@ export default function HomePage({
   const [calloutStyle, setCalloutStyle] = useState<CSSProperties>({});
   const [walkthroughFileIndex, setWalkthroughFileIndex] = useState<number>(0);
   const [walkthroughAddedExtra, setWalkthroughAddedExtra] = useState(false);
+  const [globalColorMode, setGlobalColorMode] =
+    useState<PrintOptions["colorMode"]>("BW");
   const [printFiles, setPrintFiles] = useState<PrintFileState[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number[]>([]);
@@ -285,6 +280,7 @@ export default function HomePage({
   const previousFileCount = useRef(0);
   const uploadButtonRef = useRef<HTMLButtonElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const printModeRef = useRef<HTMLDivElement | null>(null);
   const fileOptionsRef = useRef<HTMLDivElement | null>(null);
   const fileTitleRef = useRef<HTMLButtonElement | null>(null);
   const summaryCardRef = useRef<HTMLDivElement | null>(null);
@@ -372,7 +368,7 @@ export default function HomePage({
   useEffect(() => {
     if (walkthroughStep === "upload" && printFiles.length > 0) {
       setWalkthroughFileIndex(0);
-      setWalkthroughStep("customize");
+      setWalkthroughStep("print-type");
     }
   }, [printFiles.length, walkthroughStep]);
 
@@ -389,12 +385,14 @@ export default function HomePage({
         setExpandedIdx(0);
       }
 
-      requestAnimationFrame(() => {
-        const target = fileOptionsRef.current;
-        if (target) {
-          target.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-      });
+      if (!walkthroughStep) {
+        requestAnimationFrame(() => {
+          const target = fileOptionsRef.current;
+          if (target) {
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        });
+      }
     }
 
     if (expandedIdx !== null && expandedIdx >= printFiles.length) {
@@ -416,12 +414,21 @@ export default function HomePage({
   }, [expandedIdx, printFiles.length, walkthroughStep]);
 
   useEffect(() => {
+    if (walkthroughStep !== "customize") return;
+    setExpandedIdx((current) =>
+      current === walkthroughFileIndex ? current : walkthroughFileIndex,
+    );
+  }, [walkthroughFileIndex, walkthroughStep]);
+
+  useEffect(() => {
     if (!walkthroughStep) return;
 
     const resolveTarget = () => {
       switch (walkthroughStep) {
         case "upload":
           return uploadButtonRef.current;
+        case "print-type":
+          return printModeRef.current;
         case "customize":
           return fileOptionsRef.current;
         case "file-select":
@@ -483,7 +490,7 @@ export default function HomePage({
             file,
             name: file.name,
             detectedPages: await getPdfPageCount(file),
-            options: defaultPrintOptions(),
+            options: { ...defaultPrintOptions(), colorMode: globalColorMode },
             pageRangeError: "",
           })),
         );
@@ -493,7 +500,20 @@ export default function HomePage({
         setIsPreparingFiles(false);
       }
     },
-    [totalBytes],
+    [globalColorMode, totalBytes],
+  );
+
+  const applyGlobalColorMode = useCallback(
+    (mode: PrintOptions["colorMode"]) => {
+      setGlobalColorMode(mode);
+      setPrintFiles((prev) =>
+        prev.map((file) => ({
+          ...file,
+          options: { ...file.options, colorMode: mode },
+        })),
+      );
+    },
+    [],
   );
 
   const onFilesSelected = useCallback(
@@ -662,12 +682,14 @@ export default function HomePage({
   const isWalkthroughActive = walkthroughStep !== null;
   const showCallout =
     walkthroughStep === "upload" ||
+    walkthroughStep === "print-type" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "file-select" ||
     walkthroughStep === "summary" ||
     walkthroughStep === "submit";
   const showCalloutButton =
+    walkthroughStep === "print-type" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "summary" ||
@@ -676,6 +698,8 @@ export default function HomePage({
     switch (walkthroughStep) {
       case "upload":
         return "Start by uploading your PDF files here.";
+      case "print-type":
+        return "Choose Color or B/W for all files, then select Next.";
       case "customize":
         return "Choose your print options and select Next.";
       case "add-more":
@@ -692,6 +716,7 @@ export default function HomePage({
   })();
   const calloutButtonLabel = (() => {
     switch (walkthroughStep) {
+      case "print-type":
       case "customize":
       case "add-more":
       case "summary":
@@ -704,6 +729,9 @@ export default function HomePage({
   })();
   const handleCalloutAction = () => {
     switch (walkthroughStep) {
+      case "print-type":
+        setWalkthroughStep("customize");
+        break;
       case "customize":
         if (walkthroughAddedExtra) {
           setWalkthroughAddedExtra(false);
@@ -885,7 +913,7 @@ export default function HomePage({
         <section className="hero-panel">
           <div className="hero-header">
             <h1>Upload Documents</h1>
-            <p>Color or B/W printing with per-file settings.</p>
+            <p>Choose Color or B/W once, then set options per file.</p>
           </div>
 
           {verificationCode ? (
@@ -968,8 +996,15 @@ export default function HomePage({
                     : "Drag and drop or tap to browse."}
                 </p>
                 {isPreparingFiles && (
-                  <div className="upload-inline-loader" role="status" aria-live="polite">
-                    <span className="upload-inline-loader-dot" aria-hidden="true" />
+                  <div
+                    className="upload-inline-loader"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span
+                      className="upload-inline-loader-dot"
+                      aria-hidden="true"
+                    />
                     Reading file pages...
                   </div>
                 )}
@@ -979,6 +1014,27 @@ export default function HomePage({
                 <>
                   <div className="section-head">
                     <h2>File Options</h2>
+                  </div>
+
+                  <div
+                    ref={printModeRef}
+                    className={
+                      walkthroughStep === "print-type"
+                        ? "print-mode-top walkthrough-target"
+                        : "print-mode-top"
+                    }
+                  >
+                    <p className="field-label">
+                      Print Type (applies to all files)
+                    </p>
+                    <ToggleGroup
+                      options={[
+                        { label: "Color Print", value: "COLOR" },
+                        { label: "B/W Print", value: "BW" },
+                      ]}
+                      value={globalColorMode}
+                      onChange={(v) => applyGlobalColorMode(v)}
+                    />
                   </div>
 
                   <div className="upload-file-list">

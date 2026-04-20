@@ -62,6 +62,8 @@ type ReviewFileState = {
   pageRangeError: string;
 };
 
+type GlobalColorMode = "BW" | "COLOR" | "MIXED";
+
 function normalizeOptions(
   options: PrintFileOption | null | undefined,
 ): PrintFileOption {
@@ -363,6 +365,15 @@ export default function ReviewPage() {
     return { totalPages, totalCost, estimatedTime };
   }, [files]);
 
+  const globalColorMode: GlobalColorMode = useMemo(() => {
+    if (!files.length) return "BW";
+    const allColor = files.every((file) => file.options.colorMode === "COLOR");
+    if (allColor) return "COLOR";
+    const allBw = files.every((file) => file.options.colorMode === "BW");
+    if (allBw) return "BW";
+    return "MIXED";
+  }, [files]);
+
   const hasErrors = files.some(
     (file) =>
       file.pageRangeError ||
@@ -383,6 +394,15 @@ export default function ReviewPage() {
             : "";
         return { ...file, options: nextOptions, pageRangeError: rangeError };
       }),
+    );
+  };
+
+  const applyGlobalColorMode = (mode: Exclude<GlobalColorMode, "MIXED">) => {
+    setFiles((prev) =>
+      prev.map((file) => ({
+        ...file,
+        options: { ...file.options, colorMode: mode },
+      })),
     );
   };
 
@@ -460,7 +480,9 @@ export default function ReviewPage() {
       const uploads = await requestPresignedUploads(pdfs);
 
       await Promise.all(
-        uploads.map((upload, idx) => uploadFileToR2(upload.uploadUrl, pdfs[idx])),
+        uploads.map((upload, idx) =>
+          uploadFileToR2(upload.uploadUrl, pdfs[idx]),
+        ),
       );
 
       await addFilesToJobFromUrls(
@@ -474,10 +496,9 @@ export default function ReviewPage() {
       await refreshJob("manual");
       notify("Added file(s) to this job.", { variant: "success" });
     } catch (err) {
-      notify(
-        err instanceof Error ? err.message : "Failed to add documents.",
-        { variant: "error" },
-      );
+      notify(err instanceof Error ? err.message : "Failed to add documents.", {
+        variant: "error",
+      });
     } finally {
       setIsAddingFiles(false);
     }
@@ -485,11 +506,7 @@ export default function ReviewPage() {
 
   const forwardMoreFilesOnWhatsapp = () => {
     const digits = "918369757906";
-    window.open(
-      `https://wa.me/${digits}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    window.open(`https://wa.me/${digits}`, "_blank", "noopener,noreferrer");
   };
 
   const toggleFileExpanded = (idx: number) => {
@@ -610,6 +627,27 @@ export default function ReviewPage() {
             </div>
           </div>
 
+          <div className="print-mode-top">
+            <p className="field-label">Print Type (applies to all files)</p>
+            <ToggleGroup<GlobalColorMode>
+              options={[
+                { label: "Color Print", value: "COLOR" },
+                { label: "B/W Print", value: "BW" },
+              ]}
+              value={globalColorMode}
+              onChange={(v) => {
+                if (v === "MIXED") return;
+                applyGlobalColorMode(v);
+              }}
+            />
+            {globalColorMode === "MIXED" && (
+              <p className="color-mode-note">
+                This job has mixed print types. Pick one to apply it to all
+                files.
+              </p>
+            )}
+          </div>
+
           <div className="upload-file-list">
             {files.map((file, idx) => (
               <article
@@ -676,20 +714,6 @@ export default function ReviewPage() {
 
                 {expandedIdx === idx && (
                   <div className="upload-file-body">
-                    <div>
-                      <p className="field-label">Print Type</p>
-                      <ToggleGroup
-                        options={[
-                          { label: "Color Print", value: "COLOR" },
-                          { label: "B/W Print", value: "BW" },
-                        ]}
-                        value={file.options.colorMode}
-                        onChange={(v) =>
-                          updateFileOptions(idx, { colorMode: v })
-                        }
-                      />
-                    </div>
-
                     <div>
                       <p className="field-label">Print Sides</p>
                       <ToggleGroup
