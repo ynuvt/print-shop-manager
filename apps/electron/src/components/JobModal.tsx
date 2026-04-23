@@ -1,117 +1,81 @@
 import { useEffect, useMemo, useState } from "react";
 import StatusBadge from "./StatusBadge";
-import type { PrintJob, JobStatus, File } from "../types";
+import type { PrintJob, JobStatus, ActivePrintJobState } from "../types";
 import type { PrintFileOption } from "@printowl/types";
 
 interface JobModalProps {
   job: PrintJob;
   onClose: () => void;
-  onStatusUpdate: (
-    jobId: string,
-    userId: string,
-    newStatus: "COMPLETED" | "REJECTED" | "FAILED",
-  ) => Promise<void>;
+  onReject: (jobId: string, userId: string) => Promise<void>;
+  onStartPrint: (job: PrintJob, printerName: string) => void;
+  activePrintState: ActivePrintJobState | null;
+  isPrintBusy: boolean;
   printers: { name: string; isDefault: boolean }[];
   selectedPrinter: string;
-  onPrinterChange: (printer: string) => void;
   selectedColorPrinter: string;
-  onColorPrinterChange: (printer: string) => void;
 }
-
-const OPTION_LABELS = {
-  colorMode: { BW: "B&W", COLOR: "Color" },
-  duplex: { ONE: "Single-sided", BOTH: "Duplex" },
-  pageRange: { ALL: "All pages", CUSTOM: "Custom range" },
-  orientation: { PORTRAIT: "Vertical", LANDSCAPE: "Horizontal" },
-  scaleMode: {
-    FIT: "Fit to paper",
-    NOSCALE: "Original size",
-  },
-};
 
 export default function JobModal({
   job,
   onClose,
-  onStatusUpdate,
+  onReject,
+  onStartPrint,
+  activePrintState,
+  isPrintBusy,
   printers,
   selectedPrinter,
-  onPrinterChange,
   selectedColorPrinter,
-  onColorPrinterChange,
 }: JobModalProps) {
-  const [currentStatus, setCurrentStatus] = useState<JobStatus>(job.status);
-  const [loading, setLoading] = useState(false);
+  const [rejectLoading, setRejectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{
-    fileIndex: number;
-    totalFiles: number;
-    percent: number;
-    fileName?: string;
-  } | null>(null);
-  const [printProgress, setPrintProgress] = useState<{
-    fileIndex: number;
-    totalFiles: number;
-    percent: number;
-    fileName?: string;
-  } | null>(null);
-  // Local printer selection for THIS job only (doesn't affect global state)
-  const [localPrinterSelection, setLocalPrinterSelection] =
-    useState<string>(selectedPrinter);
+  const [localPrinter, setLocalPrinter] = useState<string>(selectedPrinter);
+
+  // Is this the job currently printing?
+  const isThisJobActive =
+    activePrintState !== null && activePrintState.jobId === job.id;
+  const printPhase = isThisJobActive ? activePrintState.phase : null;
+  const fileProgressMap = isThisJobActive
+    ? activePrintState.fileProgressMap
+    : {};
+  const printProgress = isThisJobActive
+    ? activePrintState.printProgress
+    : null;
+
+  // Determine displayed status: use live phase if this job is active
+  const displayStatus: JobStatus =
+    printPhase === "completed" ? "COMPLETED" : job.status;
 
   useEffect(() => {
-    setCurrentStatus(job.status);
-
-    // Reset progress state when a new job is loaded
-    setDownloadProgress(null);
-    setPrintProgress(null);
     setError(null);
 
-    // Auto-select color printer LOCALLY for COLOR jobs only (doesn't affect global state)
-    const hasColorFiles = job.files.some(
+    // Auto-select color printer for COLOR jobs
+    const hasColor = job.files.some(
       (f) => (f.option.colorMode || "BW").toUpperCase() === "COLOR",
     );
-
-    if (hasColorFiles && selectedColorPrinter) {
-      console.log(
-        "Color job detected, auto-selecting color printer (LOCAL):",
-        selectedColorPrinter,
-      );
-      setLocalPrinterSelection(selectedColorPrinter);
-    } else {
-      // For B&W jobs, use the global printer selection
-      console.log("B&W job detected, using global printer:", selectedPrinter);
-      setLocalPrinterSelection(selectedPrinter);
-    }
+    setLocalPrinter(hasColor && selectedColorPrinter ? selectedColorPrinter : selectedPrinter);
   }, [job.id, job.files, selectedColorPrinter, selectedPrinter]);
-
-  useEffect(() => {
-    const offDownload = window.electronAPI?.onDownloadProgress?.((payload) => {
-      setDownloadProgress(payload);
-    });
-
-    const offPrint = window.electronAPI?.onPrintProgress?.((payload) => {
-      setPrintProgress(payload);
-    });
-
-    return () => {
-      offDownload?.();
-      offPrint?.();
-    };
-  }, []);
 
   const printTypeLabel = useMemo(() => {
     const modes = job.files
       .map((f) => (f.option.colorMode || "BW").toUpperCase())
-      .filter((mode) => mode === "BW" || mode === "COLOR");
-
+      .filter((m) => m === "BW" || m === "COLOR");
     if (modes.length === 0) return "B/W";
-    if (modes.every((mode) => mode === "BW")) return "B/W";
-    if (modes.every((mode) => mode === "COLOR")) return "Color";
+    if (modes.every((m) => m === "BW")) return "B/W";
+    if (modes.every((m) => m === "COLOR")) return "Color";
     return "Mixed";
   }, [job.files]);
 
-  const isPending = currentStatus === "PENDING";
-  const isCompleted = currentStatus === "COMPLETED";
+  // Download progress computations
+  const entries = Object.values(fileProgressMap);
+  const overallPercent =
+    entries.length > 0
+      ? Math.round(entries.reduce((s, e) => s + e.percent, 0) / job.files.length)
+      : 0;
+  const completedFileCount = entries.filter((e) => e.percent >= 100).length;
+
+  const isPending = displayStatus === "PENDING";
+  const isCompleted = displayStatus === "COMPLETED";
+  const isActivePhase = printPhase === "downloading" || printPhase === "printing";
 
   const created = new Date(job.createdAt).toLocaleString([], {
     month: "short",
@@ -122,408 +86,462 @@ export default function JobModal({
   });
 
   async function handleReject() {
-    const confirmed = window.confirm(
-      `Are you sure you want to reject job #${job.verificationCode}?`,
-    );
-    if (!confirmed) return;
-
-    setLoading(true);
+    if (!window.confirm(`Reject job #${job.verificationCode}?`)) return;
+    setRejectLoading(true);
     setError(null);
     try {
-      await onStatusUpdate(job.id, job.userId, "REJECTED");
+      await onReject(job.id, job.userId);
       onClose();
     } catch {
-      setError("Failed to reject job. Please try again.");
+      setError("Failed to reject job.");
     } finally {
-      setLoading(false);
+      setRejectLoading(false);
     }
   }
 
-  async function handlePrint() {
-    if (!localPrinterSelection) {
+  function handlePrint() {
+    if (!localPrinter) {
       setError("Please select a printer first.");
       return;
     }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      for (let i = 0; i < job.files.length; i++) {
-        const file = job.files[i];
-        if (!file) continue;
-
-        setDownloadProgress({
-          fileIndex: i,
-          totalFiles: job.files.length,
-          percent: 0,
-          fileName: file.name,
-        });
-
-        const filePath = await window.electronAPI.downloadFile(
-          { url: file.url, name: file.name },
-          { fileIndex: i, totalFiles: job.files.length },
-        );
-
-        setPrintProgress({
-          fileIndex: i,
-          totalFiles: job.files.length,
-          percent: 0,
-          fileName: file.name,
-        });
-
-        const fileOption: PrintFileOption = file.option ?? {
-          paperSize: "A4",
-          colorMode: "BW",
-          orientation: "PORTRAIT",
-          scaleMode: "FIT",
-          pageRange: "ALL",
-          duplex: "ONE",
-          copies: 1,
-        };
-
-        const customPages =
-          fileOption.pageRange === "CUSTOM"
-            ? fileOption.customRange?.trim()
-            : undefined;
-
-        const isDuplex = fileOption.duplex === "BOTH";
-
-        const options = {
-          // Ensure printer receives normalized values for all configurable settings.
-          copies: Math.max(1, Number(fileOption.copies) || 1),
-          paperSize: "A4",
-          // pdf-to-printer uses `side`; keep `duplex` too for adapter compatibility.
-          side: isDuplex ? "duplexlong" : "simplex",
-          duplex: isDuplex ? "Duplex" : "Simplex",
-          monochrome: fileOption.colorMode !== "COLOR",
-          orientation:
-            fileOption.orientation === "LANDSCAPE" ? "landscape" : "portrait",
-          scale:
-            fileOption.scaleMode === "NOSCALE"
-              ? "noscale"
-              : fileOption.scaleMode === "SHRINK"
-                ? "shrink"
-                : "fit",
-          ...(customPages ? { pages: customPages } : {}),
-        };
-
-        await window.electronAPI.printPDF(
-          filePath,
-          localPrinterSelection,
-          options,
-          {
-            fileIndex: i,
-            totalFiles: job.files.length,
-          },
-        );
-
-        await window.electronAPI.deleteFiles([filePath]);
-      }
-
-      await onStatusUpdate(job.id, job.userId, "COMPLETED");
-      setCurrentStatus("COMPLETED");
-    } catch (err) {
-      setError("Failed to start printing. Please try again.");
-      console.error("Print error:", err);
-    } finally {
-      setLoading(false);
-      setDownloadProgress(null);
-      setPrintProgress(null);
-    }
+    onStartPrint(job, localPrinter);
   }
 
-  function handleBackdropClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (e.target === e.currentTarget) onClose();
-  }
+  // Can this job be printed? Only if no other job is busy, or this job itself is done/failed
+  const canPrint =
+    !isPrintBusy || (isThisJobActive && (printPhase === "completed" || printPhase === "failed"));
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+      style={{ background: "rgba(0,0,0,0.5)" }}
       role="dialog"
       aria-modal="true"
-      onClick={handleBackdropClick}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="flex w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl max-h-[88vh]">
-        {/* ── Modal header ────────────────────────────── */}
-        <div className="flex shrink-0 items-center justify-between gap-4 rounded-t-2xl border-b border-gray-200 bg-white px-6 py-4">
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-2xl font-bold text-gray-900">
-              #{job.verificationCode}
-            </span>
-            <StatusBadge status={currentStatus} />
-          </div>
-          <div className="flex items-center gap-4">
-            <p className="text-xs text-gray-400">{created}</p>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
+      <div
+        className="flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-2xl shadow-2xl"
+        style={{
+          background: "var(--panel)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        {/* ─── Header ─────────────────────────────────── */}
+        <div
+          className="relative shrink-0 px-6 py-5"
+          style={{
+            borderBottom: "1px solid var(--border)",
+            background: "var(--panel-muted)",
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div
+                className="flex h-10 w-10 items-center justify-center rounded-xl font-mono text-sm font-bold text-white shadow-sm"
+                style={{ background: "var(--brand)" }}
               >
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
+                <span style={{ color: "var(--panel)" }}>#</span>
+              </div>
+              <div>
+                <h2
+                  className="font-mono text-xl font-bold tracking-tight"
+                  style={{ color: "var(--text)" }}
+                >
+                  {job.verificationCode}
+                </h2>
+                <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{created}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <StatusBadge status={displayStatus} />
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="rounded-lg p-2 transition hover:opacity-70"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
+
+          {/* Active phase indicator bar */}
+          {isActivePhase && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden" style={{ background: "var(--border)" }}>
+              <div
+                className="h-full w-1/3 animate-[shimmer_1.5s_ease-in-out_infinite] rounded-full"
+                style={{ background: "var(--brand)" }}
+              />
+            </div>
+          )}
         </div>
 
-        {/* ── Scrollable body ─────────────────────────── */}
+        {/* ─── Body ───────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {(downloadProgress || printProgress) && (
-            <div className="mb-4 rounded-lg border border-gray-200 bg-white px-4 py-3">
-              <p className="text-sm font-medium text-gray-700">
-                {downloadProgress
-                  ? `Downloading ${downloadProgress.fileName ?? ""} (${downloadProgress.fileIndex + 1}/${downloadProgress.totalFiles}) — ${downloadProgress.percent}%`
-                  : `Printing ${printProgress?.fileName ?? ""} (${printProgress?.fileIndex! + 1}/${printProgress?.totalFiles}) — ${printProgress?.percent}%`}
-              </p>
-              <div className="mt-2 h-2 w-full rounded-full bg-gray-200">
+          {/* Download progress panel */}
+          {printPhase === "downloading" && entries.length > 0 && (
+            <div
+              className="mb-5 rounded-xl p-4"
+              style={{
+                border: "1px solid rgba(59,130,246,0.3)",
+                background: "rgba(59,130,246,0.06)",
+              }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex h-5 w-5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-40" />
+                    <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-500">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                    </span>
+                  </div>
+                  <span className="text-sm font-semibold text-blue-500">Downloading files</span>
+                </div>
+                <span className="text-xs font-bold text-blue-400 tabular-nums">
+                  {completedFileCount}/{job.files.length} · {overallPercent}%
+                </span>
+              </div>
+
+              <div className="mb-3 h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(59,130,246,0.15)" }}>
                 <div
-                  className="h-full rounded-full bg-blue-600 transition-all"
-                  style={{
-                    width: `${(downloadProgress ?? printProgress)?.percent ?? 0}%`,
-                  }}
+                  className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                  style={{ width: `${overallPercent}%` }}
                 />
+              </div>
+
+              <div className="flex flex-col gap-1.5 max-h-32 overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+                {Object.entries(fileProgressMap)
+                  .sort(([, a], [, b]) => a.fileIndex - b.fileIndex)
+                  .map(([fId, entry]) => {
+                    const done = entry.percent >= 100;
+                    return (
+                      <div key={fId} className="flex items-center gap-2">
+                        <div className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-500" : ""}`} style={!done ? { border: "1px solid rgba(59,130,246,0.4)", background: "var(--panel)" } : {}}>
+                          {done ? (
+                            <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          ) : (
+                            <div className="h-1 w-1 rounded-full bg-blue-400 animate-pulse" />
+                          )}
+                        </div>
+                        <span className="flex-1 truncate text-[11px]" style={{ color: done ? "var(--text-muted)" : "var(--text)", fontWeight: done ? 400 : 500 }}>{entry.fileName}</span>
+                        <span className={`shrink-0 text-[10px] tabular-nums font-semibold ${done ? "text-emerald-500" : "text-blue-500"}`}>{entry.percent}%</span>
+                        <div className="w-16 shrink-0 h-1 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
+                          <div className={`h-full rounded-full transition-all duration-200 ${done ? "bg-emerald-400" : "bg-blue-500"}`} style={{ width: `${entry.percent}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           )}
 
-          {/* Summary row */}
-          <div className="mb-6 grid grid-cols-3 gap-3">
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-                Total Cost
-              </p>
-              <p className="mt-1 font-mono text-lg font-bold text-gray-900">
-                ₹{job.totalCost.toFixed(2)}
-              </p>
+          {/* Print progress panel */}
+          {printPhase === "printing" && printProgress && (
+            <div
+              className="mb-5 rounded-xl p-4"
+              style={{
+                border: "1px solid rgba(139,92,246,0.3)",
+                background: "rgba(139,92,246,0.06)",
+              }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex h-5 w-5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-40" />
+                    <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-500">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 6 2 18 2 18 9" />
+                        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                        <rect x="6" y="14" width="12" height="8" />
+                      </svg>
+                    </span>
+                  </div>
+                  <span className="text-sm font-semibold text-violet-500">{printProgress.fileName ?? "Sending to printer…"}</span>
+                </div>
+                <span className="text-xs font-bold text-violet-400 tabular-nums">{printProgress.percent}%</span>
+              </div>
+              <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(139,92,246,0.15)" }}>
+                <div className="h-full rounded-full bg-violet-500 transition-all duration-300" style={{ width: `${printProgress.percent}%` }} />
+              </div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-                Pages
-              </p>
-              <p className="mt-1 text-lg font-bold text-gray-900">
-                {job.totalPages}
-              </p>
+          )}
+
+          {/* Completed banner */}
+          {printPhase === "completed" && (
+            <div
+              className="mb-5 flex items-center gap-3 rounded-xl p-4"
+              style={{
+                border: "1px solid rgba(16,185,129,0.3)",
+                background: "rgba(16,185,129,0.06)",
+              }}
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-emerald-500">All files sent to printer</p>
+                <p className="text-xs text-emerald-400 mt-0.5">Job #{job.verificationCode} completed successfully</p>
+              </div>
             </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-                Print Type
-              </p>
-              <p className="mt-1 text-lg font-bold text-gray-900">
-                {printTypeLabel}
-              </p>
+          )}
+
+          {/* Failed banner */}
+          {printPhase === "failed" && (
+            <div
+              className="mb-5 flex items-center gap-3 rounded-xl p-4"
+              style={{
+                border: "1px solid rgba(239,68,68,0.3)",
+                background: "rgba(239,68,68,0.06)",
+              }}
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-500">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-red-500">Print failed</p>
+                <p className="text-xs text-red-400 mt-0.5">{activePrintState?.error || "An error occurred"}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Summary cards */}
+          <div className="mb-5 grid grid-cols-3 gap-3">
+            <div
+              className="rounded-xl p-4 text-center"
+              style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Total Cost</p>
+              <p className="mt-1.5 font-mono text-xl font-bold" style={{ color: "var(--text)" }}>₹{job.totalCost.toFixed(2)}</p>
+            </div>
+            <div
+              className="rounded-xl p-4 text-center"
+              style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Pages</p>
+              <p className="mt-1.5 text-xl font-bold" style={{ color: "var(--text)" }}>{job.totalPages}</p>
+            </div>
+            <div
+              className="rounded-xl p-4 text-center"
+              style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Print Type</p>
+              <p className="mt-1.5 text-xl font-bold" style={{ color: "var(--text)" }}>{printTypeLabel}</p>
             </div>
           </div>
 
-          {/* Files */}
+          {/* Files list */}
           <div>
-            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
               Files ({job.files.length})
             </p>
             <ul className="flex flex-col gap-3">
-              {job.files.map((file) => (
-                <li
-                  key={file.url}
-                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100">
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="text-gray-500"
-                          aria-hidden="true"
+              {job.files.map((file) => {
+                const opt: PrintFileOption = file.option ?? {
+                  paperSize: "A4", colorMode: "BW", orientation: "PORTRAIT",
+                  scaleMode: "FIT", pageRange: "ALL", duplex: "ONE", copies: 1,
+                };
+                return (
+                  <li
+                    key={file.url}
+                    className="rounded-xl p-4 transition"
+                    style={{ border: "1px solid var(--border)", background: "var(--panel)" }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <div
+                          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                          style={{ border: "1px solid var(--border)", background: "var(--panel-muted)", color: "var(--text-muted)" }}
                         >
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold" style={{ color: "var(--text)" }}>{file.name}</p>
+                          <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{file.pages} page{file.pages !== 1 ? "s" : ""}</p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-900">
-                          {file.name}
-                        </p>
-                        <p className="mt-0.5 text-xs text-gray-500">
-                          {file.pages} page{file.pages !== 1 ? "s" : ""}
-                        </p>
-                      </div>
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition hover:opacity-80"
+                        style={{ border: "1px solid var(--border)", color: "var(--brand)" }}
+                      >
+                        View File
+                      </a>
                     </div>
-                    <a
-                      href={file.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="shrink-0 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50"
-                    >
-                      View File
-                    </a>
-                  </div>
-
-                  {/* Print options */}
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {(() => {
-                      const option: PrintFileOption = file.option ?? {
-                        paperSize: "A4",
-                        colorMode: "BW",
-                        orientation: "PORTRAIT",
-                        scaleMode: "FIT",
-                        pageRange: "ALL",
-                        duplex: "ONE",
-                        copies: 1,
-                      };
-                      const colorModeLabel =
-                        option.colorMode === "COLOR" ? "Color" : "B&W";
-                      const duplexLabel =
-                        option.duplex === "BOTH" ? "Duplex" : "Single-sided";
-                      const orientationLabel =
-                        option.orientation === "LANDSCAPE"
-                          ? OPTION_LABELS.orientation.LANDSCAPE
-                          : OPTION_LABELS.orientation.PORTRAIT;
-                      const scaleLabel =
-                        option.scaleMode === "NOSCALE"
-                          ? OPTION_LABELS.scaleMode.NOSCALE
-                          : option.scaleMode === "SHRINK"
-                            ? OPTION_LABELS.scaleMode.SHRINK
-                            : OPTION_LABELS.scaleMode.FIT;
-                      const pageRangeLabel =
-                        option.pageRange === "CUSTOM"
-                          ? `Custom range${option.customRange ? ` (${option.customRange})` : ""}`
-                          : "All pages";
-
-                      return (
-                        <>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {option.paperSize}
-                          </span>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {colorModeLabel}
-                          </span>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {duplexLabel}
-                          </span>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {orientationLabel}
-                          </span>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {scaleLabel}
-                          </span>
-                          <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                            {pageRangeLabel}
-                          </span>
-                          <span className="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700">
-                            {option.copies}× copies
-                          </span>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </li>
-              ))}
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {[
+                        opt.paperSize,
+                        opt.colorMode === "COLOR" ? "Color" : "B&W",
+                        opt.duplex === "BOTH" ? "Duplex" : "Single",
+                        opt.orientation === "LANDSCAPE" ? "Landscape" : "Portrait",
+                        ...(opt.pageRange === "CUSTOM" ? [opt.customRange || "Custom"] : []),
+                      ].map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium"
+                          style={{
+                            background: "var(--panel-muted)",
+                            color: "var(--text-muted)",
+                            border: "1px solid var(--border)",
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                      <span
+                        className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{
+                          background: "var(--brand-light)",
+                          color: "var(--brand)",
+                          border: "1px solid var(--brand-light)",
+                        }}
+                      >
+                        {opt.copies}× copies
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>
 
-        {/* ── Fixed footer ────────────────────────────── */}
-        <div className="shrink-0 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-6 py-4">
-          {error && <p className="mb-3 text-xs text-red-500">{error}</p>}
+        {/* ─── Footer ─────────────────────────────────── */}
+        <div
+          className="shrink-0 px-6 py-4"
+          style={{
+            borderTop: "1px solid var(--border)",
+            background: "var(--panel-muted)",
+          }}
+        >
+          {error && (
+            <p className="mb-3 text-xs" style={{ color: "var(--error)" }}>{error}</p>
+          )}
 
-          {/* Printer Selection */}
-          {(isPending || isCompleted) && (
+          {/* Printer selector — show when can print */}
+          {(isPending || isCompleted) && !isActivePhase && (
             <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1.5">
                 <label
                   htmlFor="printer-select"
-                  className="block text-sm font-medium text-gray-700"
+                  className="text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: "var(--text-muted)" }}
                 >
-                  Select Printer
+                  Printer
                 </label>
                 {printTypeLabel === "Color" && (
-                  <span className="text-xs text-green-600 font-medium">
-                    ✓ Color printer auto-selected
-                  </span>
+                  <span className="text-[10px] font-medium" style={{ color: "var(--success)" }}>✓ Color auto-selected</span>
                 )}
               </div>
               <select
                 id="printer-select"
-                value={localPrinterSelection}
-                onChange={(e) => setLocalPrinterSelection(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                value={localPrinter}
+                onChange={(e) => setLocalPrinter(e.target.value)}
+                className="select-input w-full rounded-xl px-3 py-2.5 text-sm font-medium outline-none"
               >
-                <option value="">Choose a printer...</option>
-                {printers.map((printer) => (
-                  <option key={printer.name} value={printer.name}>
-                    {printer.name}
-                    {printer.isDefault ? " (Default)" : ""}
-                    {printer.name === selectedColorPrinter ? " 🎨 Color" : ""}
+                <option value="">Choose a printer…</option>
+                {printers.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
+                    {p.isDefault ? " (Default)" : ""}
+                    {p.name === selectedColorPrinter ? " 🎨" : ""}
                   </option>
                 ))}
               </select>
             </div>
           )}
 
-          {isPending && (
+          {/* Action buttons */}
+          {isPending && !isActivePhase && (
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => void handleReject()}
-                disabled={loading}
-                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+                disabled={rejectLoading || isPrintBusy}
+                className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80 disabled:opacity-50"
+                style={{
+                  border: "1px solid var(--border)",
+                  background: "var(--panel)",
+                  color: "var(--error)",
+                }}
               >
-                Reject Job
+                Reject
               </button>
               <button
                 type="button"
-                onClick={() => void handlePrint()}
-                disabled={loading}
-                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500 active:bg-blue-700 disabled:opacity-50"
+                onClick={handlePrint}
+                disabled={!canPrint}
+                className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
+                style={{ background: "var(--brand)", color: "var(--panel)" }}
               >
-                {loading ? "Updating..." : "Print Job"}
+                {isPrintBusy && !isThisJobActive ? "Printer Busy" : "Print Job"}
               </button>
             </div>
           )}
 
-          {isCompleted && (
+          {isActivePhase && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80"
+              style={{
+                border: "1px solid var(--border)",
+                background: "var(--panel)",
+                color: "var(--text-muted)",
+              }}
+            >
+              Close — printing continues in background
+            </button>
+          )}
+
+          {isCompleted && !isActivePhase && (
             <div className="flex items-center gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                disabled={loading}
-                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-50"
+                className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80"
+                style={{
+                  border: "1px solid var(--border)",
+                  background: "var(--panel)",
+                  color: "var(--text-muted)",
+                }}
               >
                 Close
               </button>
               <button
                 type="button"
-                onClick={() => void handlePrint()}
-                disabled={loading}
-                className="flex-1 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-500 active:bg-violet-700 disabled:opacity-50"
+                onClick={handlePrint}
+                disabled={isPrintBusy && !isThisJobActive}
+                className="flex-1 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
               >
-                {loading ? "Updating..." : "Print Again"}
+                Print Again
               </button>
             </div>
           )}
 
-          {!isPending && !isCompleted && (
+          {!isPending && !isCompleted && !isActivePhase && (
             <button
               type="button"
               onClick={onClose}
-              className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100"
+              className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80"
+              style={{
+                border: "1px solid var(--border)",
+                background: "var(--panel)",
+                color: "var(--text-muted)",
+              }}
             >
               Close
             </button>

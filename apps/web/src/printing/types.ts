@@ -18,7 +18,9 @@ export const defaultPrintOptions = (): PrintFileOption => ({
 
 /** A file the user has selected, with its detected page count and chosen print options. */
 export type PrintFileState = {
-  file: File;
+  id?: string;
+  url?: string;
+  file?: File;
   name: string;
   detectedPages: number;
   options: PrintFileOption;

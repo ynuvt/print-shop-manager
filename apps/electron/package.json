@@ -17,6 +17,7 @@
     "check-types": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "pdf-lib": "^1.17.1",
     "pdf-to-printer": "^5.7.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
@@ -38,7 +39,7 @@
     "wait-on": "^8.0.5"
   },
   "build": {
-    "appId": "com.printowl.desktop",
+    "appId": "com.zopy.desktop",
     "productName": "Zopy",
     "artifactName": "Zopy Setup ${version}.${ext}",
     "electronVersion": "37.4.0",

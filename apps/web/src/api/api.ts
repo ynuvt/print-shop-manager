@@ -22,6 +22,8 @@ export type UserPrintJob = {
   status: string;
   verificationCode: string | null;
   createdAt: string;
+  source?: string;
+  userMetadataId?: string | null;
   files: UserPrintJobFile[];
   userMetadata?: {
     phoneNumber: string;
@@ -243,6 +245,27 @@ export async function createPrintJobFromUrls(
   return res.data;
 }
 
+export async function getWebDraftJob(): Promise<UserPrintJob | null> {
+  const token = getToken();
+  const res = await axios.get(`${BASE_URL}/jobs/web-draft`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  return res.data ? (res.data as UserPrintJob) : null;
+}
+
+export async function addFilesToWebDraft(
+  files: Array<{ name: string; url: string }>,
+): Promise<{ job: UserPrintJob }> {
+  const token = getToken();
+  const res = await axios.post(
+    `${BASE_URL}/jobs/web-draft/add-files`,
+    { files },
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+  if (!res.data) throw new Error("Failed to append files");
+  return res.data as { job: UserPrintJob };
+}
+
 export async function submitWhatsappJobReview(input: {
   jobId: string;
   files: Array<{ id: string; options: PrintFileOption }>;
@@ -272,18 +295,28 @@ export async function deleteUserFile(fileId: string): Promise<void> {
 
 export async function resyncWhatsappJobs(): Promise<{ updatedCount: number }> {
   const token = getToken();
-  const res = await axios.post(
-    `${BASE_URL}/jobs/resync-whatsapp`,
-    {},
-    {
-      headers: {
-        authorization: `Bearer ${token}`,
+  try {
+    const res = await axios.post(
+      `${BASE_URL}/jobs/resync-whatsapp`,
+      {},
+      {
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
       },
-    },
-  );
+    );
 
-  if (!res.data) throw new Error("Failed to resync WhatsApp jobs");
-  return res.data as { updatedCount: number };
+    if (!res.data) throw new Error("Failed to resync WhatsApp jobs");
+    return res.data as { updatedCount: number };
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const serverError = error.response?.data?.error;
+      if (typeof serverError === "string" && serverError.trim()) {
+        throw new Error(serverError);
+      }
+    }
+    throw error;
+  }
 }
 
 export async function updateUserFilePrintOptions(

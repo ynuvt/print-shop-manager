@@ -13,12 +13,16 @@ import {
 } from "lucide-react";
 import Turnstile from "react-turnstile";
 import {
-  createPrintJobFromUrls,
+  submitWhatsappJobReview,
+  getWebDraftJob,
+  addFilesToWebDraft,
+  updateUserFilePrintOptions,
   getUserSession,
   markOnboardingCompleted,
   registerUser,
   requestPresignedUploads,
   uploadFileToR2,
+  deleteUserFile,
 } from "../api/api";
 import PrintJobsList from "../components/PrintJobsList";
 import {
@@ -26,7 +30,6 @@ import {
   calculateFileCost,
   validateCustomPageRange,
 } from "../printing/costCalculator";
-import { getPdfPageCount } from "../printing/pdfPageCount";
 import { defaultPrintOptions } from "../printing/types";
 import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
@@ -94,7 +97,7 @@ function FileCard({
   const cost = calculateFileCost(pf.detectedPages, pf.options);
 
   return (
-    <article className="upload-file-card">
+    <article className="upload-file-card review-file-card">
       <div className="upload-file-head">
         <button
           ref={titleRef}
@@ -125,6 +128,11 @@ function FileCard({
             <SlidersHorizontal size={12} />
             Edit details
           </button>
+          {pf.url && (
+            <a href={pf.url} target="_blank" rel="noreferrer">
+              View File
+            </a>
+          )}
           <button
             type="button"
             className="icon-btn remove-file-btn"
@@ -268,13 +276,18 @@ export default function HomePage({
   const [uploadStage, setUploadStage] = useState<"uploading" | "creating">(
     "uploading",
   );
-  const totalBytes = printFiles.reduce((sum, file) => sum + file.file.size, 0);
+  const [draftJobId, setDraftJobId] = useState<string | null>(null);
+  const totalBytes = printFiles.reduce((sum, file) => sum + (file.file?.size ?? 0), 0);
   const overallProgress = uploadProgress.length
     ? Math.round(
         uploadProgress.reduce((sum, value) => sum + value, 0) /
           uploadProgress.length,
       )
     : 0;
+
+  const debounceSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPersistedOptionsRef = useRef<Record<string, PrintOptions>>({});
+  const lastSaveErrorRef = useRef(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previousFileCount = useRef(0);
@@ -352,18 +365,119 @@ export default function HomePage({
   }, [userId]);
 
   useEffect(() => {
-    if (!isSubmitting) return;
+    if (!userId) return;
+    getWebDraftJob()
+      .then((job) => {
+        if (job) {
+          setDraftJobId(job.id);
+          setPrintFiles(
+            job.files.map((f) => {
+              const options = f.option ? { ...f.option, customRange: f.option.customRange || "" } : defaultPrintOptions();
+              lastPersistedOptionsRef.current[f.id] = options;
+              return {
+                id: f.id,
+                url: f.url,
+                name: f.name,
+                detectedPages: f.pages,
+                options,
+                pageRangeError: "",
+              };
+            })
+          );
+        }
+      })
+      .catch(console.error);
+  }, [userId]);
 
+  const getPendingFiles = useCallback(() =>
+    printFiles.filter((file) => {
+      if (!file.id) return false;
+      if (file.pageRangeError) return false;
+      if (
+        file.options.pageRange === "CUSTOM" &&
+        !file.options.customRange?.trim()
+      ) {
+        return false;
+      }
+      const lastSaved = lastPersistedOptionsRef.current[file.id];
+      if (!lastSaved) return true;
+      return JSON.stringify(lastSaved) !== JSON.stringify(file.options);
+    }), [printFiles]);
+
+  const persistCurrentOptionsNow = useCallback(async (useKeepAlive: boolean) => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const pendingFiles = getPendingFiles();
+    if (!pendingFiles.length) return;
+
+    await Promise.all(
+      pendingFiles.map(async (file) => {
+        if (!file.id) return;
+        try {
+          if (useKeepAlive) {
+            await fetch(`${import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in"}/api/v1/files/printOptions/${file.id}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                ...file.options,
+                customRange: file.options.customRange ?? "",
+              }),
+              keepalive: true,
+            });
+          } else {
+            await updateUserFilePrintOptions(file.id, {
+              ...file.options,
+              customRange: file.options.customRange ?? "",
+            });
+          }
+          lastPersistedOptionsRef.current[file.id] = file.options;
+        } catch (error) {
+          console.error("Failed to persist print options.", error);
+          if (Date.now() - lastSaveErrorRef.current > 5000) {
+            lastSaveErrorRef.current = Date.now();
+            setError("Failed to save print options. Try again in a moment.");
+          }
+        }
+      }),
+    );
+  }, [getPendingFiles]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceSaveRef.current) {
+        clearTimeout(debounceSaveRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!printFiles.length || isPreparingFiles || isSubmitting) return;
+    if (debounceSaveRef.current) {
+      clearTimeout(debounceSaveRef.current);
+    }
+    debounceSaveRef.current = setTimeout(() => {
+      void persistCurrentOptionsNow(false);
+    }, 1500);
+  }, [printFiles, isPreparingFiles, isSubmitting, persistCurrentOptionsNow]);
+
+  useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
+      void persistCurrentOptionsNow(true);
+      if (isSubmitting) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [isSubmitting]);
+  }, [isSubmitting, persistCurrentOptionsNow]);
 
   useEffect(() => {
     if (walkthroughStep === "upload" && printFiles.length > 0) {
@@ -484,23 +598,54 @@ export default function HomePage({
 
       setError(null);
       setIsPreparingFiles(true);
-      try {
-        const newEntries: PrintFileState[] = await Promise.all(
-          files.map(async (file) => ({
-            file,
-            name: file.name,
-            detectedPages: await getPdfPageCount(file),
-            options: { ...defaultPrintOptions(), colorMode: globalColorMode },
-            pageRangeError: "",
-          })),
-        );
+      setUploadProgress(files.map(() => 0));
 
-        setPrintFiles((prev) => [...prev, ...newEntries]);
+      try {
+        const uploads = await requestPresignedUploads(files);
+        for (let index = 0; index < files.length; index += 1) {
+          await uploadFileToR2(uploads[index]!.uploadUrl, files[index]!);
+          setUploadProgress((prev) =>
+            prev.map((value, i) => (i === index ? 100 : value)),
+          );
+        }
+
+        setUploadStage("creating");
+        setUploadProgress((prev) => prev.map(() => 100));
+
+        const urlFiles = files.map((file, index) => ({
+          name: file.name,
+          url: uploads[index]!.publicUrl,
+        }));
+
+        const { job } = await addFilesToWebDraft(urlFiles);
+        setDraftJobId(job.id);
+        
+        setPrintFiles(
+          job.files.map((f) => {
+            const options = f.option ? { ...f.option, customRange: f.option.customRange || "" } : defaultPrintOptions();
+            lastPersistedOptionsRef.current[f.id] = options;
+            return {
+              id: f.id,
+              url: f.url,
+              name: f.name,
+              detectedPages: f.pages,
+              options,
+              pageRangeError: "",
+            };
+          })
+        );
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Something went wrong. Please try again.",
+        );
       } finally {
         setIsPreparingFiles(false);
+        setUploadProgress([]);
       }
     },
-    [globalColorMode, totalBytes],
+    [totalBytes],
   );
 
   const applyGlobalColorMode = useCallback(
@@ -566,10 +711,18 @@ export default function HomePage({
     [],
   );
 
-  const removeFile = useCallback((idx: number) => {
+  const removeFile = useCallback(async (idx: number) => {
+    const target = printFiles[idx];
+    if (target?.id) {
+      try {
+        await deleteUserFile(target.id);
+      } catch (err) {
+        console.error("Failed to delete user file", err);
+      }
+    }
     setPrintFiles((prev) => prev.filter((_, i) => i !== idx));
     setExpandedIdx((prev) => (prev === idx ? null : prev));
-  }, []);
+  }, [printFiles]);
 
   const handleFileToggle = useCallback(
     (idx: number) => {
@@ -585,7 +738,7 @@ export default function HomePage({
   );
 
   const onSubmit = async () => {
-    if (!userId || !printFiles.length || isSubmitting) return;
+    if (!userId || !printFiles.length || isSubmitting || !draftJobId) return;
 
     if (walkthroughStep === "submit") {
       setWalkthroughStep(null);
@@ -604,44 +757,23 @@ export default function HomePage({
       return;
     }
 
-    setUploadStage("uploading");
+    setUploadStage("creating");
     setIsSubmitting(true);
     setError(null);
     setUploadProgress(printFiles.map(() => 0));
 
     try {
-      const files = printFiles.map((pf) => pf.file);
-      const fileOptions = printFiles.map((pf) => ({
-        ...pf.options,
-      }));
-
-      const uploads = await requestPresignedUploads(files);
-      if (uploads.length !== files.length) {
-        throw new Error("Failed to prepare uploads for all files.");
-      }
-
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index]!;
-        const upload = uploads[index]!;
-        await uploadFileToR2(upload.uploadUrl, file);
-        setUploadProgress((prev) =>
-          prev.map((value, i) => (i === index ? 100 : value)),
-        );
-      }
-
-      setUploadStage("creating");
-      setUploadProgress((prev) => prev.map(() => 100));
-
-      const urlFiles = files.map((file, index) => ({
-        name: file.name,
-        url: uploads[index]!.publicUrl,
-        options: fileOptions[index]!,
-      }));
-
-      const result = await createPrintJobFromUrls(urlFiles, captchaToken);
+      const result = await submitWhatsappJobReview({
+        jobId: draftJobId,
+        files: printFiles.map((pf) => ({
+          id: pf.id!,
+          options: pf.options,
+        })),
+      });
 
       setVerificationCode(String(result.verificationCode));
       setPrintFiles([]);
+      setDraftJobId(null);
       setExpandedIdx(null);
       setCaptchaToken(null);
       setRefreshTrigger((t) => t + 1);
@@ -992,7 +1124,7 @@ export default function HomePage({
                 </button>
                 <p>
                   {isPreparingFiles
-                    ? "Preparing files. Please wait..."
+                    ? "Uploading files. Please wait..."
                     : "Drag and drop or tap to browse."}
                 </p>
                 {isPreparingFiles && (
@@ -1005,7 +1137,7 @@ export default function HomePage({
                       className="upload-inline-loader-dot"
                       aria-hidden="true"
                     />
-                    Reading file pages...
+                    Uploading file(s)...
                   </div>
                 )}
               </div>

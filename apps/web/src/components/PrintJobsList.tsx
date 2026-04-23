@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   deleteUserPrintJob,
   getUserPrintJobById,
@@ -11,7 +12,7 @@ import type { UserPrintJob, UserPrintJobFile } from "../api/api";
 import { getSocket } from "../services/getSocket";
 import { useNotifications } from "./NotificationCenter";
 
-type JobsTab = "ALL" | "ACTIVE" | "COMPLETED" | "REJECTED" | "CANCELED";
+type JobsTab = "ALL" | "ACTIVE" | "DRAFT" | "COMPLETED" | "REJECTED" | "CANCELED";
 
 const ACTIVE_STATUSES = ["PENDING", "PROCESSING"];
 const COMPLETED_STATUSES = ["COMPLETED"];
@@ -331,9 +332,11 @@ export default function PrintJobsList({
   const [loading, setLoading] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [showLinkWhatsappModal, setShowLinkWhatsappModal] = useState(false);
   const [activeTab, setActiveTab] = useState<JobsTab>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
   const { notify } = useNotifications();
+  const navigate = useNavigate();
 
   const handleJobUpdated = useCallback((updatedJob: UserPrintJob) => {
     setJobs((prev) =>
@@ -395,12 +398,19 @@ export default function PrintJobsList({
     };
   }, [load, selectedJobId]);
 
+  const draftJobs = useMemo(() => 
+    jobs.filter((job) => job.status === "DRAFT" && (job.source === "WHATSAPP" || !!job.userMetadataId || !!job.userMetadata?.phoneNumber)),
+  [jobs]);
+  const allJobs = useMemo(() => jobs.filter(job => job.status !== "DRAFT"), [jobs]);
+
   const filteredJobs = useMemo(() => {
-    if (activeTab === "ALL") return jobs;
+    if (activeTab === "ALL") return allJobs;
 
     if (activeTab === "ACTIVE") {
       return jobs.filter((job) => ACTIVE_STATUSES.includes(job.status));
     }
+
+    if (activeTab === "DRAFT") return draftJobs;
 
     if (activeTab === "COMPLETED") {
       return jobs.filter((job) => COMPLETED_STATUSES.includes(job.status));
@@ -411,7 +421,7 @@ export default function PrintJobsList({
     }
 
     return jobs.filter((job) => CANCELED_STATUSES.includes(job.status));
-  }, [activeTab, jobs]);
+  }, [activeTab, jobs, allJobs, draftJobs]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -433,10 +443,11 @@ export default function PrintJobsList({
     return filteredJobs.slice(start, start + JOBS_PER_PAGE);
   }, [currentPage, filteredJobs]);
 
-  const allCount = jobs.length;
+  const allCount = allJobs.length;
   const activeCount = jobs.filter((job) =>
     ACTIVE_STATUSES.includes(job.status),
   ).length;
+  const draftCount = draftJobs.length;
   const completedCount = jobs.filter((job) =>
     COMPLETED_STATUSES.includes(job.status),
   ).length;
@@ -460,18 +471,30 @@ export default function PrintJobsList({
                 if (isResyncing) return;
                 setIsResyncing(true);
                 try {
-                  await resyncWhatsappJobs();
+                  const result = await resyncWhatsappJobs();
                   await load({ notification: false });
-                  notify(`Synced WhatsApp job(s).`, {
-                    variant: "success",
-                  });
+                  if (result.updatedCount > 0) {
+                    notify(`Synced ${result.updatedCount} WhatsApp job(s).`, {
+                      variant: "success",
+                    });
+                  } else {
+                    notify(`WhatsApp jobs are up to date.`, {
+                      variant: "info",
+                    });
+                  }
                 } catch (err) {
-                  notify(
+                  const errorMsg =
                     err instanceof Error
                       ? err.message
-                      : "Failed to sync WhatsApp jobs.",
-                    { variant: "error" },
-                  );
+                      : "Failed to sync WhatsApp jobs.";
+                  if (
+                    errorMsg ===
+                    "Please link your WhatsApp account before syncing jobs."
+                  ) {
+                    setShowLinkWhatsappModal(true);
+                  } else {
+                    notify(errorMsg, { variant: "error" });
+                  }
                 } finally {
                   setIsResyncing(false);
                 }
@@ -513,6 +536,17 @@ export default function PrintJobsList({
           >
             Active ({activeCount})
           </button>
+          {draftCount > 0 && (
+            <button
+              type="button"
+              className={`jobs-tab ${activeTab === "DRAFT" ? "active" : ""}`}
+              onClick={() => setActiveTab("DRAFT")}
+              role="tab"
+              aria-selected={activeTab === "DRAFT"}
+            >
+              Draft ({draftCount})
+            </button>
+          )}
           <button
             type="button"
             className={`jobs-tab ${activeTab === "COMPLETED" ? "active" : ""}`}
@@ -554,7 +588,13 @@ export default function PrintJobsList({
                   key={job.id}
                   type="button"
                   className="job-row"
-                  onClick={() => setSelectedJobId(job.id)}
+                  onClick={() => {
+                    if (job.status === "DRAFT") {
+                      navigate(`/review/${job.id}`);
+                    } else {
+                      setSelectedJobId(job.id);
+                    }
+                  }}
                 >
                   <div className="job-row-top">
                     <span className="job-file-icon" aria-hidden="true">
@@ -622,6 +662,52 @@ export default function PrintJobsList({
           onJobUpdated={handleJobUpdated}
           onJobDeleted={handleJobDeleted}
         />
+      )}
+
+      {showLinkWhatsappModal && (
+        <div className="modal-shell" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <div className="modal-head">
+              <div>
+                <h2>Link WhatsApp</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setShowLinkWhatsappModal(false)}
+              >
+                x
+              </button>
+            </div>
+            <p className="modal-helper" style={{ marginTop: "16px", marginBottom: "24px" }}>
+              You are not synced with WhatsApp. Click the login button below, then send the "login" text to us and click on the link to login.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowLinkWhatsappModal(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const digits = "918369757906";
+                  window.open(
+                    `https://wa.me/${digits}?text=login`,
+                    "_blank",
+                    "noopener,noreferrer"
+                  );
+                  setShowLinkWhatsappModal(false);
+                }}
+              >
+                Login
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

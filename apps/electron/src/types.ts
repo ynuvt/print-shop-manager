@@ -22,6 +22,30 @@ export interface PrintJob extends PrintJobSummary {
 
 export type PrinterInfo = { name: string; isDefault: boolean };
 
+/** Per-file download progress entry */
+export interface FileDownloadEntry {
+  fileIndex: number;
+  fileName: string;
+  percent: number;
+}
+
+/** State of a print job executing in the background */
+export interface ActivePrintJobState {
+  printRunId: string;
+  jobId: string;
+  verificationCode: string;
+  job: PrintJob;
+  phase: "downloading" | "printing" | "completed" | "failed";
+  fileProgressMap: Record<string, FileDownloadEntry>;
+  printProgress: {
+    fileIndex: number;
+    totalFiles: number;
+    percent: number;
+    fileName?: string;
+  } | null;
+  error: string | null;
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -30,7 +54,7 @@ declare global {
       ) => Promise<string[]>;
       downloadFile: (
         file: { url: string; name: string },
-        meta?: { fileIndex?: number; totalFiles?: number },
+        meta?: { fileIndex?: number; totalFiles?: number; printRunId?: string },
       ) => Promise<string>;
       deleteFiles: (paths: string[]) => Promise<void>;
       listPrinters: () => Promise<PrinterInfo[]>;
@@ -38,7 +62,7 @@ declare global {
         filePath: string,
         printer: string,
         options: any,
-        meta?: { fileIndex: number; totalFiles: number },
+        meta?: { fileIndex: number; totalFiles: number; printRunId?: string },
       ) => Promise<void>;
       onDownloadProgress: (
         listener: (payload: {
@@ -46,6 +70,8 @@ declare global {
           totalFiles: number;
           percent: number;
           fileName?: string;
+          fileId?: string;
+          printRunId?: string;
         }) => void,
       ) => () => void;
       onPrintProgress: (
@@ -54,6 +80,7 @@ declare global {
           totalFiles: number;
           percent: number;
           fileName?: string;
+          printRunId?: string;
         }) => void,
       ) => () => void;
     };

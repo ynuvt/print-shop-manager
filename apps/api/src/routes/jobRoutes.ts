@@ -152,8 +152,16 @@ function mapScaleMode(scaleMode: "FIT" | "SHRINK" | "NOSCALE") {
   return scaleMode;
 }
 
+function mapSource(source: "WEB" | "WHATSAPP") {
+  return source;
+}
+
 function mapColorModeToEnum(colorMode: "BW" | "COLOR") {
   return colorMode === "COLOR" ? ColorMode.COLOR : ColorMode.BW;
+}
+
+function mapPaperSizeToEnum(paperSize: string) {
+  return "A4"; // Since PaperSize enum is imported or just use "A4" as it's the only supported one for now
 }
 
 function mapOrientationToEnum(orientation: "PORTRAIT" | "LANDSCAPE") {
@@ -763,6 +771,210 @@ app.post(
   },
 );
 
+app.get(
+  "/web-draft",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    try {
+      const job = await prisma.printJob.findFirst({
+        where: {
+          userId: req.user.uid,
+          status: PrintJobStatus.DRAFT,
+          source: "WEB",
+        },
+        include: {
+          files: {
+            include: {
+              option: true,
+            },
+          },
+        },
+      });
+
+      return res.status(200).json(job);
+    } catch (error) {
+      return res.status(500).json({ error: "Failed to fetch web draft." });
+    }
+  },
+);
+
+app.post(
+  "/web-draft/add-files",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    let incomingFiles: UrlFileForAppend[] = [];
+
+    try {
+      incomingFiles = parseUrlFilesForAppend(req.body.files);
+      if (!incomingFiles.length) {
+        return res
+          .status(400)
+          .json({ error: "At least one PDF file is required." });
+      }
+
+      let job = await prisma.printJob.findFirst({
+        where: {
+          userId: req.user.uid,
+          status: PrintJobStatus.DRAFT,
+          source: "WEB",
+        },
+      });
+
+      if (!job) {
+        job = await prisma.printJob.create({
+          data: {
+            userId: req.user.uid,
+            status: PrintJobStatus.DRAFT,
+            source: "WEB",
+            totalCost: 0, 
+            totalPages: 0,
+            estimatedTime: 0,
+          },
+        });
+      }
+
+      const defaultOptions = optionsSchema.parse({
+        paperSize: "A4",
+        colorMode: "BW",
+        orientation: "PORTRAIT",
+        scaleMode: "FIT",
+        pageRange: "ALL",
+        customRange: "",
+        duplex: "ONE",
+        copies: 1,
+      });
+
+      const processedFiles: UploadedFileForCreate[] = [];
+      let totalBytes = 0;
+
+      for (const file of incomingFiles) {
+        const response = await fetch(file.url);
+        if (!response.ok) {
+          throw new PrintJobAnalysisError(
+            `Unable to fetch ${file.name} from storage. Please re-upload and try again.`,
+            502,
+          );
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        totalBytes += buffer.byteLength;
+
+        if (totalBytes > CREATE_WITH_URLS_MAX_TOTAL_BYTES) {
+          throw new PrintJobAnalysisError(
+            `Total upload too large. Max combined size is ${CREATE_WITH_URLS_MAX_TOTAL_MB} MB.`,
+            413,
+          );
+        }
+
+        let pages: number;
+        try {
+          pages = await getPdfPageCountFromBuffer(buffer);
+        } catch {
+          throw new PrintJobAnalysisError(
+            `Unable to inspect ${file.name}. Only valid PDF files can be submitted.`,
+            400,
+          );
+        }
+
+        const cost = calculateFileCost(pages, {
+          ...defaultOptions,
+        });
+
+        processedFiles.push({
+          name: file.name,
+          url: file.url,
+          pages,
+          cost,
+          option: defaultOptions,
+        });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        for (const file of processedFiles) {
+          await tx.file.create({
+            data: {
+              name: file.name,
+              pages: file.pages,
+              url: file.url,
+              printJob: {
+                connect: { id: job!.id },
+              },
+              option: {
+                create: {
+                  paperSize: mapPaperSizeToEnum(file.option.paperSize),
+                  colorMode: mapColorModeToEnum(file.option.colorMode),
+                  orientation: mapOrientationToEnum(file.option.orientation),
+                  scaleMode: mapScaleModeToEnum(file.option.scaleMode),
+                  duplex: mapDuplexToEnum(file.option.duplex),
+                  pageRange: mapPageRange(file.option.pageRange),
+                  customRange: file.option.customRange,
+                  copies: file.option.copies,
+                },
+              },
+            },
+          });
+        }
+
+        const allFiles = await tx.file.findMany({
+          where: { printJobId: job!.id },
+          include: { option: true },
+        });
+
+        const newTotalPages = allFiles.reduce((sum, f) => sum + f.pages, 0);
+        const newTotalCost = allFiles.reduce((sum, f) => {
+          const opt = f.option!;
+          return sum + calculateFileCost(f.pages, {
+            paperSize: "A4",
+            colorMode: opt.colorMode === "COLOR" ? "COLOR" : "BW",
+            orientation: opt.orientation === "LANDSCAPE" ? "LANDSCAPE" : "PORTRAIT",
+            scaleMode: opt.scaleMode === "SHRINK" ? "SHRINK" : opt.scaleMode === "NOSCALE" ? "NOSCALE" : "FIT",
+            pageRange: opt.pageRange === "CUSTOM" ? "CUSTOM" : "ALL",
+            customRange: opt.customRange || "",
+            duplex: opt.duplex === "BOTH" ? "BOTH" : "ONE",
+            copies: opt.copies,
+          });
+        }, 0);
+
+        await tx.printJob.update({
+          where: { id: job!.id },
+          data: {
+            totalPages: newTotalPages,
+            totalCost: newTotalCost,
+            estimatedTime: calculateEstimatedTime(newTotalPages),
+          },
+        });
+      });
+
+      const updatedJob = await prisma.printJob.findUnique({
+        where: { id: job.id },
+        include: {
+          files: {
+            include: {
+              option: true,
+            },
+          },
+        },
+      });
+
+      return res.status(200).json({ job: updatedJob });
+    } catch (error) {
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      return res.status(500).json({ error: "Failed to append files." });
+    }
+  },
+);
+
 app.post(
   "/:jobId/add-files-from-urls",
   authMiddleware(["customer", "admin"]),
@@ -770,7 +982,7 @@ app.post(
     const { jobId } = req.params;
     if (!jobId || typeof jobId !== "string") {
       return res.status(400).json({ error: "Job ID is required." });
-    }
+    } 
 
     if (!req.user?.uid) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -812,6 +1024,7 @@ app.post(
           .status(403)
           .json({ error: "You do not have access to this job." });
       }
+      
 
       const defaultOptions = optionsSchema.parse({
         paperSize: "A4",
@@ -1065,6 +1278,7 @@ app.post(
   "/resync-whatsapp",
   authMiddleware(["customer", "admin"]),
   async (req: ExtendedRequest, res) => {
+    try {
     if (!req.user?.uid) {
       return res.status(401).json({ error: "Unauthorized" });
     }
@@ -1089,6 +1303,10 @@ app.post(
     });
 
     return res.status(200).json({ updatedCount: result.count });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: "Failed to sync jobs." });
+  } 
   },
 );
 
