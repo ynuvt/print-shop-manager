@@ -27,6 +27,7 @@ import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import {
   ColorMode,
+  PaperSize,
   duplex,
   orientation as orientationEnum,
   scaleMode as scaleModeEnum,
@@ -161,7 +162,8 @@ function mapColorModeToEnum(colorMode: "BW" | "COLOR") {
 }
 
 function mapPaperSizeToEnum(paperSize: string) {
-  return "A4"; // Since PaperSize enum is imported or just use "A4" as it's the only supported one for now
+  void paperSize;
+  return PaperSize.A4;
 }
 
 function mapOrientationToEnum(orientation: "PORTRAIT" | "LANDSCAPE") {
@@ -1015,9 +1017,10 @@ app.post(
           .json({ error: "This job is not available for review." });
       }
 
+      const viewerId = req.user!.uid;
       const isOwner =
-        job.userId === req.user.uid ||
-        job.owners.some((owner) => owner.userId === req.user.uid);
+        job.userId === viewerId ||
+        job.owners.some((owner) => owner.userId === viewerId);
 
       if (!isOwner) {
         return res
@@ -1326,6 +1329,7 @@ app.get("/review/:id", async (req, res) => {
           },
         },
         userMetadata: true,
+        owners: { select: { userId: true } },
       },
     });
 
@@ -1334,24 +1338,75 @@ app.get("/review/:id", async (req, res) => {
     }
 
     const optionalUser = getOptionalUserFromRequest(req);
-    if (optionalUser?.uid) {
-      await prisma.printJobOwner.upsert({
-        where: {
-          userId_printJobId: {
-            userId: optionalUser.uid,
-            printJobId: job.id,
-          },
-        },
-        update: {},
-        create: {
-          userId: optionalUser.uid,
-          printJobId: job.id,
-        },
+    if (!optionalUser?.uid) {
+      return res.status(401).json({
+        error: "Authentication required to review this job.",
+        requiresAuth: true,
       });
     }
 
-    console.log("Fetched job for review:", job);
-    return res.status(200).json(job);
+    // Ensure viewer is recorded as collaborator for link-based flows.
+    await prisma.printJobOwner.upsert({
+      where: {
+        userId_printJobId: {
+          userId: optionalUser.uid,
+          printJobId: job.id,
+        },
+      },
+      update: {},
+      create: {
+        userId: optionalUser.uid,
+        printJobId: job.id,
+      },
+    });
+
+    const linked = await prisma.whatsAppUser.findFirst({
+      where: { userId: optionalUser.uid },
+      select: { phoneNumber: true },
+    });
+    const viewerPhone = linked?.phoneNumber ?? null;
+
+    const isOwner = job.userId === optionalUser.uid;
+    const viewerRole = isOwner ? "OWNER" : "COLLABORATOR";
+
+    const visibleFiles = isOwner
+      ? job.files
+      : job.files.filter((file) => {
+          if (file.uploadedByUserId && file.uploadedByUserId === optionalUser.uid) {
+            return true;
+          }
+          if (
+            viewerPhone &&
+            file.uploadedByPhoneNumber &&
+            file.uploadedByPhoneNumber === viewerPhone
+          ) {
+            return true;
+          }
+          return false;
+        });
+
+    const permissions = isOwner
+      ? {
+          canViewAllFiles: true,
+          canEditAllFiles: true,
+          canDeleteAllFiles: true,
+          canAddFiles: true,
+          canSubmit: true,
+        }
+      : {
+          canViewAllFiles: false,
+          canEditAllFiles: false,
+          canDeleteAllFiles: false,
+          canAddFiles: true,
+          canSubmit: false,
+        };
+
+    return res.status(200).json({
+      ...job,
+      files: visibleFiles,
+      viewerRole,
+      permissions,
+    });
   } catch (error) {
     return res.status(500).json({ error: "Failed to fetch job." });
   }
@@ -1653,7 +1708,11 @@ app.delete(
             select: {
               id: true,
               url: true,
-              optionId: true,
+              option: {
+                select: {
+                  id: true,
+                },
+              },
             },
           },
         },
@@ -1674,7 +1733,9 @@ app.delete(
           await deleteObjectFromR2ByUrl(file.url);
         }
 
-        const optionIds = existingJob.files.map((file) => file.optionId);
+        const optionIds = existingJob.files
+          .map((file) => file.option?.id)
+          .filter((id): id is string => !!id);
 
         await prisma.$transaction(async (tx) => {
           await tx.file.deleteMany({

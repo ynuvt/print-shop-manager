@@ -17,19 +17,20 @@
   --shadow: 0 20px 45px rgba(5, 12, 23, 0.08);
 }
 
+/* ─── Yellow-Black Dark Theme (matches Zopy desktop) ─── */
 [data-theme="dark"] {
-  --bg: #0a0b0e;
-  --panel: #101319;
-  --panel-muted: #181d25;
-  --text: #ecf0f8;
-  --text-muted: #97a3b6;
-  --border: #252b36;
-  --brand: #2f9bff;
-  --brand-strong: #1280e7;
-  --accent: #edf2fb;
-  --error: #ff7c7c;
-  --success: #5fd49a;
-  --shadow: 0 25px 55px rgba(0, 0, 0, 0.35);
+  --bg: #0f0f0f;
+  --panel: #1a1a1a;
+  --panel-muted: #141414;
+  --text: #fafafa;
+  --text-muted: #9ca3af;
+  --border: #2a2a2a;
+  --brand: #FACC15;
+  --brand-strong: #EAB308;
+  --accent: #FACC15;
+  --error: #ef4444;
+  --success: #4ade80;
+  --shadow: 0 25px 55px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -49,6 +50,17 @@ body {
     var(--bg);
   color: var(--text);
   overflow-x: hidden;
+}
+
+[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(250, 204, 21, 0.06), transparent 36%),
+    radial-gradient(
+      circle at 100% 20%,
+      rgba(250, 204, 21, 0.03),
+      transparent 30%
+    ),
+    var(--bg);
 }
 
 .notification-stack {
@@ -353,6 +365,13 @@ body {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 24%, transparent);
 }
 
+[data-theme="dark"] .toggle-item.active {
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
 .upload-dropzone {
   margin-top: 14px;
   border: 1px dashed var(--border);
@@ -446,12 +465,28 @@ body {
     filter 0.15s ease;
 }
 
+[data-theme="dark"] .upload-circle {
+  background: radial-gradient(circle at 35% 30%, #2a2a2a, #1a1a1a 70%);
+  color: #fafafa;
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+  box-shadow:
+    0 10px 28px rgba(250, 204, 21, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
 .upload-circle:hover {
   transform: translateY(-1px);
   filter: brightness(1.02);
   box-shadow:
     0 14px 36px rgba(26, 122, 248, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+[data-theme="dark"] .upload-circle:hover {
+  filter: brightness(1.08);
+  box-shadow:
+    0 14px 36px rgba(250, 204, 21, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .upload-circle:active {
@@ -462,12 +497,20 @@ body {
   color: #13161b;
 }
 
+[data-theme="dark"] .upload-circle-icon {
+  color: var(--brand);
+}
+
 .upload-circle-label {
   font-family: "Sora", "Plus Jakarta Sans", sans-serif;
   font-size: 11px;
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: 0.01em;
+}
+
+[data-theme="dark"] .upload-circle-label {
+  color: var(--brand);
 }
 
 .upload-dropzone p {
@@ -1153,6 +1196,12 @@ body {
   background: linear-gradient(150deg, var(--brand), var(--brand-strong));
 }
 
+[data-theme="dark"] .btn-primary {
+  color: #0f0f0f;
+  background: linear-gradient(150deg, var(--brand), var(--brand-strong));
+  font-weight: 700;
+}
+
 .btn-disabled {
   color: var(--text-muted);
   cursor: not-allowed;
@@ -1408,6 +1457,10 @@ body {
   justify-content: center;
   background: rgba(1, 2, 4, 0.55);
   padding: 8px;
+}
+
+[data-theme="dark"] .modal-shell {
+  background: rgba(0, 0, 0, 0.72);
 }
 
 .modal-card {
@@ -1743,6 +1796,10 @@ body {
   color: #fff;
 }
 
+[data-theme="dark"] .modal-actions .btn-primary {
+  color: #0f0f0f;
+}
+
 .modal-files-list {
   max-height: none;
   overflow: visible;
@@ -2072,4 +2129,140 @@ body {
     height: 62px;
     font-size: 34px;
   }
+}
+
+/* ─── Comprehensive Dark Mode Overrides ────────────── */
+
+[data-theme="dark"] .jobs-tab.active {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+}
+
+[data-theme="dark"] .otp-digit {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+  color: var(--brand);
+}
+
+[data-theme="dark"] .highlight-text {
+  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  color: var(--text);
+}
+
+[data-theme="dark"] .job-file-icon {
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+  border-color: var(--border);
+  color: var(--brand);
+}
+
+[data-theme="dark"] .file-icon {
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+  color: var(--brand);
+}
+
+[data-theme="dark"] .steps-badge {
+  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  color: var(--brand);
+}
+
+[data-theme="dark"] .walkthrough-target {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--brand) 40%, transparent),
+    0 0 20px color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+[data-theme="dark"] .walkthrough-callout {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .status-pill-active {
+  border-color: color-mix(in srgb, var(--brand) 50%, transparent);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+}
+
+[data-theme="dark"] .upload-overlay {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+}
+
+[data-theme="dark"] .upload-card {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .upload-spinner {
+  border-color: color-mix(in srgb, var(--brand) 25%, transparent);
+  border-top-color: var(--brand);
+}
+
+[data-theme="dark"] .feedback-card {
+  border-color: color-mix(in srgb, var(--brand) 25%, var(--border));
+  background: color-mix(in srgb, var(--brand) 6%, var(--panel));
+}
+
+[data-theme="dark"] .feedback-btn {
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--border));
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+  color: var(--brand);
+}
+
+[data-theme="dark"] .add-more-btn {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+}
+
+[data-theme="dark"] .add-more-btn:hover {
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--border));
+  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
+}
+
+[data-theme="dark"] .review-action-btn {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+}
+
+[data-theme="dark"] .review-action-btn:hover {
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--border));
+  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
+}
+
+[data-theme="dark"] .file-edit-hint {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+}
+
+[data-theme="dark"] .file-edit-hint svg {
+  color: var(--brand);
+}
+
+[data-theme="dark"] .file-edit-hint--action:hover {
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--border));
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+}
+
+[data-theme="dark"] .progress-track span {
+  background: linear-gradient(90deg, var(--brand), var(--brand-strong));
+}
+
+[data-theme="dark"] .upload-progress-fill {
+  background: linear-gradient(90deg, var(--brand), var(--brand-strong));
+}
+
+[data-theme="dark"] .ghost-link:hover {
+  color: var(--brand);
+}
+
+[data-theme="dark"] .footer-link:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+}
+
+[data-theme="dark"] .steps-modal {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
 }

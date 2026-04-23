@@ -20,6 +20,9 @@ coverage
 
 # Vercel
 .vercel
+dist-electron/
+native/
+resources/
 
 # Build Outputs
 .next/
@@ -44,3 +47,12 @@ apps/electron/dist-electron/
 apps/electron/native/
 apps/electron/resources/
 *.exe
+
+# Native C# build outputs
+apps/electron/resources/ZopyPrinter/*.exe
+apps/electron/resources/ZopyPrinter/*.dll
+apps/electron/resources/ZopyPrinter/*.pdb
+apps/electron/native/ZopyPrinter/bin/
+apps/electron/native/ZopyPrinter/obj/
+apps/electron/native/ZopyPrinter/pdfium.dll
+apps/electron/native/ZopyPrinter/pdfium-win-x64.tgz

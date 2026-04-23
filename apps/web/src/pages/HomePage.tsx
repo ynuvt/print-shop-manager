@@ -1272,7 +1272,7 @@ export default function HomePage({
                           "CAPTCHA verification failed. Please try again.",
                         );
                       }}
-                      theme="light"
+                      theme={theme === "dark" ? "dark" : "light"}
                     />
                   </div>
 
