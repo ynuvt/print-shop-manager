@@ -18,10 +18,10 @@ export default function PrintNotification({
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
 
   const accent = useMemo(() => {
-    if (variant === "success") return "#1f9d57";
-    if (variant === "error") return "#c43636";
-    return "#1a7af8";
-  }, [variant]);
+    if (variant === "success") return isDark ? "#4ade80" : "#1f9d57";
+    if (variant === "error") return isDark ? "#ef4444" : "#c43636";
+    return isDark ? "#FACC15" : "#1a7af8";
+  }, [variant, isDark]);
 
   useEffect(() => {
     const frameRate = 30;
@@ -58,11 +58,11 @@ export default function PrintNotification({
         borderRadius: 14,
         overflow: "hidden",
         boxShadow: isDark
-          ? "0 16px 44px rgba(0,0,0,0.45)"
+          ? "0 16px 44px rgba(0,0,0,0.55)"
           : "0 16px 44px rgba(15, 23, 42, 0.16)",
-        background: isDark ? "#11151d" : "#ffffff",
+        background: isDark ? "#1a1a1a" : "#ffffff",
         border: isDark
-          ? "1px solid rgba(151,163,182,0.2)"
+          ? "1px solid #2a2a2a"
           : "1px solid rgba(15,23,42,0.12)",
         position: "relative",
       }}
@@ -74,7 +74,9 @@ export default function PrintNotification({
               width: 40,
               height: 40,
               borderRadius: 12,
-              background: `linear-gradient(140deg, ${accent}, #2f9bff)`,
+              background: isDark
+                ? `linear-gradient(140deg, ${accent}, #EAB308)`
+                : `linear-gradient(140deg, ${accent}, #2f9bff)`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -99,7 +101,7 @@ export default function PrintNotification({
                 margin: 0,
                 fontSize: 14,
                 fontWeight: 600,
-                color: isDark ? "#eaf0f8" : "#111827",
+                color: isDark ? "#fafafa" : "#111827",
                 lineHeight: 1.35,
               }}
             >
@@ -109,7 +111,7 @@ export default function PrintNotification({
               style={{
                 margin: "3px 0 0",
                 fontSize: 12,
-                color: isDark ? "#97a3b6" : "#6b7280",
+                color: isDark ? "#9ca3af" : "#6b7280",
               }}
             >
               Dismisses automatically
@@ -120,9 +122,9 @@ export default function PrintNotification({
             onClick={handleDismiss}
             style={{
               flexShrink: 0,
-              background: isDark ? "#1b2432" : "#eef3fb",
+              background: isDark ? "#141414" : "#eef3fb",
               border: isDark
-                ? "1px solid rgba(151,163,182,0.28)"
+                ? "1px solid #2a2a2a"
                 : "1px solid rgba(15,23,42,0.12)",
               borderRadius: 10,
               width: 36,
@@ -131,7 +133,7 @@ export default function PrintNotification({
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
-              color: isDark ? "#eaf0f8" : "#253347",
+              color: isDark ? "#fafafa" : "#253347",
               transition: "transform 0.15s",
             }}
             onMouseEnter={(e) => {
@@ -162,7 +164,7 @@ export default function PrintNotification({
             height: 4,
             borderRadius: 99,
             background: isDark
-              ? "rgba(151,163,182,0.24)"
+              ? "rgba(250,204,21,0.15)"
               : "rgba(15,23,42,0.08)",
             overflow: "hidden",
           }}
@@ -172,7 +174,9 @@ export default function PrintNotification({
               height: "100%",
               width: `${progress}%`,
               borderRadius: 99,
-              background: `linear-gradient(90deg, ${accent}, #2f9bff)`,
+              background: isDark
+                ? `linear-gradient(90deg, ${accent}, #EAB308)`
+                : `linear-gradient(90deg, ${accent}, #2f9bff)`,
               transition: "width 0.05s linear",
             }}
           />

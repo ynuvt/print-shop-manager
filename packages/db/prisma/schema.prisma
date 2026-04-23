@@ -92,6 +92,10 @@ enum Source {
   WHATSAPP
 }
 
+enum FileOwnerRole {
+  OWNER
+  COLLABORATOR
+}
 
 
 
@@ -118,9 +122,19 @@ model file {
   createdAt DateTime @default(now())
   pages    Int
   url      String
+  fileCost Float    @default(0)
+  uploadedByUserId String?
+  uploadedByUser   User?        @relation("UserUploadedFiles", fields: [uploadedByUserId], references: [id], map: "file_uploadedByUserId_fkey")
+  uploadedByPhoneNumber String?
+  uploadedByWhatsAppUser WhatsAppUser? @relation("WhatsAppUserUploadedFiles", fields: [uploadedByPhoneNumber], references: [phoneNumber], map: "file_uploadedByPhoneNumber_fkey")
+  uploadedByDisplayName String?
+  uploadedByRole FileOwnerRole  @default(OWNER)
   option   printOption?
   printJobId String
   printJob PrintJob    @relation(fields: [printJobId], references: [id], onDelete: Cascade, map: "file_printJobId_fkey")
+
+  @@index([printJobId, uploadedByUserId])
+  @@index([printJobId, uploadedByPhoneNumber])
 }
 
 model WhatsAppUser {
@@ -130,6 +144,7 @@ model WhatsAppUser {
   userId             String?  @unique
   user               User?    @relation(fields: [userId], references: [id], map: "whatsappuser_userId_fkey")
   printJobs          PrintJob[]
+  uploadedFiles      file[]   @relation("WhatsAppUserUploadedFiles")
   loginOtps          WhatsAppLoginOtp[]
 }
 
@@ -166,6 +181,7 @@ model User {
   onboardingCompleted  Boolean     @default(false)
   printJobs            PrintJob[]
   printJobOwners       PrintJobOwner[]
+  uploadedFiles        file[]      @relation("UserUploadedFiles")
   events               UserEvent[]
   whatsAppUser         WhatsAppUser?
   name                  String?
