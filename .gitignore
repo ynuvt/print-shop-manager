@@ -40,4 +40,7 @@ yarn-error.log*
 # Build artifacts and release files
 apps/electron/release/
 apps/electron/release.zip
+apps/electron/dist-electron/
+apps/electron/native/
+apps/electron/resources/
 *.exe

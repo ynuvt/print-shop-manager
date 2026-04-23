@@ -76,7 +76,7 @@ export default function Header({
       {/* Brand */}
       <div className="brand-row">
         <div className="brand-mark">
-          <img src="/zopy.png" alt="Zopy" />
+          <img src="./zopy.png" alt="Zopy" />
         </div>
         <div>
           <p className="brand-title">Zopy Print Manager</p>

@@ -1,0 +1,2 @@
+/Users/aryanrathore/Documents/printowl/printowl/apps/electron/resources/ZopyPrinter/ZopyPrinter.pdb
+/Users/aryanrathore/Documents/printowl/printowl/apps/electron/resources/ZopyPrinter/ZopyPrinter.exe
