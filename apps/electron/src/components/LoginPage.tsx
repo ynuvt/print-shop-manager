@@ -31,7 +31,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       <div className="w-full max-w-sm">
         {/* Logo + branding */}
         <div className="mb-8 flex flex-col items-center">
-          <img src="/zopy.png" alt="Zopy" className="h-14 w-14 rounded-2xl shadow-lg mb-4" />
+          <img src="./zopy.png" alt="Zopy" className="h-14 w-14 rounded-2xl shadow-lg mb-4" />
           <h1 className="text-2xl font-bold text-[var(--text)] tracking-tight">Zopy Print Manager</h1>
           <p className="mt-1 text-sm text-[var(--text-muted)]">Sign in to your admin console</p>
         </div>
