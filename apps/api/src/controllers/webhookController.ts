@@ -38,6 +38,40 @@ function buildReviewUrl(jobId: string): string | null {
   return `${FRONTEND_BASE_URL}/review/${jobId}`;
 }
 
+async function generateWhatsAppSyncLink(phoneNumber: string): Promise<string | null> {
+  if (!FRONTEND_BASE_URL) {
+    return null;
+  }
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresAt = new Date(Date.now() + 2 * 60_000);
+  await prisma.whatsAppLoginOtp.deleteMany({ where: { phoneNumber } });
+  await prisma.whatsAppLoginOtp.create({
+    data: { code, phoneNumber, expiresAt },
+  });
+  return `${FRONTEND_BASE_URL}/auth/otp?code=${code}`;
+}
+
+async function getOrCreateWhatsAppSyncLink(
+  phoneNumber: string,
+): Promise<string | null> {
+  if (!FRONTEND_BASE_URL) {
+    return null;
+  }
+  const active = await prisma.whatsAppLoginOtp.findFirst({
+    where: {
+      phoneNumber,
+      usedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { code: true },
+  });
+  if (active?.code) {
+    return `${FRONTEND_BASE_URL}/auth/otp?code=${active.code}`;
+  }
+  return generateWhatsAppSyncLink(phoneNumber);
+}
+
 const STICKER_FILE_PATH = fileURLToPath(
   new URL("../resource/stickerzopy.webp", import.meta.url),
 );
@@ -428,6 +462,69 @@ Please try again.`,
               continue;
             }
 
+            if (userData.displayPhoneNumber) {
+              await prisma.whatsAppUser.upsert({
+                where: { phoneNumber: userData.displayPhoneNumber },
+                create: {
+                  phoneNumber: userData.displayPhoneNumber,
+                  name: userData.displayName || null,
+                },
+                update: {
+                  name: userData.displayName || null,
+                },
+                select: { phoneNumber: true },
+              });
+            }
+
+            const waUser = userData.displayPhoneNumber
+              ? await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { userId: true },
+                })
+              : null;
+            const isAuthenticated = !!waUser?.userId;
+
+            if (!isAuthenticated && messageText !== "sync") {
+              if (phoneNumberId && userData.displayPhoneNumber) {
+                const syncLink = await getOrCreateWhatsAppSyncLink(
+                  userData.displayPhoneNumber,
+                );
+                if (
+                  messageText === "help" ||
+                  messageText === "menu" ||
+                  messageText === "command" ||
+                  messageText === "commands"
+                ) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    message: [
+                      `${waBold("To use this, sync first:")}`,
+                      syncLink ?? "Link unavailable",
+                      "",
+                      "_Link valid for 2 minutes._",
+                    ].join("\n"),
+                  });
+                } else {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    message: [
+                      `${waBold("Welcome to Zopy!")} 🚀`,
+                      "",
+                      `Send your ${waBold("PDF, Word, or other files")} here.`,
+                      "",
+                      `${waBold("To use this, click the link below and sync first:")}`,
+                      syncLink ?? "Link unavailable",
+                      "",
+                      "_Link valid for 2 minutes._",
+                    ].join("\n"),
+                  });
+                }
+              }
+              continue;
+            }
+
             if (
               messageText === "hi" ||
               messageText === "hello" ||
@@ -488,7 +585,7 @@ Please try again.`,
                     `\u2022 ${waBold("STEPS")} \u2014 How it works`,
                     `\u2022 ${waBold("CURRENT")} \u2014 View documents`,
                     `\u2022 ${waBold("EDIT")} \u2014 Review & customize`,
-                    `\u2022 ${waBold("LOGIN")} \u2014 Link to web`,
+                    `\u2022 ${waBold("SYNC")} \u2014 Sync WhatsApp with web`,
                     `\u2022 ${waBold("CLEAR")} \u2014 Delete draft`,
                     "",
                     `Start sending files, then type ${waBold('"EDIT"')} when done.`,
@@ -753,13 +850,13 @@ Please try again.`,
                   });
                 }
               }
-            } else if (messageText === "login") {
+            } else if (messageText === "sync") {
               if (!FRONTEND_BASE_URL) {
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Login link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
+                      "*Sync link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
                     phoneNumberId,
                   });
                 }
@@ -767,44 +864,19 @@ Please try again.`,
               }
 
               if (userData.displayPhoneNumber) {
-                await prisma.whatsAppUser.upsert({
-                  where: { phoneNumber: userData.displayPhoneNumber },
-                  create: {
-                    phoneNumber: userData.displayPhoneNumber,
-                    name: userData.displayName || null,
-                  },
-                  update: {
-                    name: userData.displayName || null,
-                  },
-                });
-
-                const code = String(
-                  Math.floor(100000 + Math.random() * 900000),
+                const loginUrl = await getOrCreateWhatsAppSyncLink(
+                  userData.displayPhoneNumber,
                 );
-                const expiresAt = new Date(Date.now() + 60_000);
-
-                await prisma.whatsAppLoginOtp.deleteMany({
-                  where: { phoneNumber: userData.displayPhoneNumber },
-                });
-
-                await prisma.whatsAppLoginOtp.create({
-                  data: {
-                    code,
-                    phoneNumber: userData.displayPhoneNumber,
-                    expiresAt,
-                  },
-                });
-
-                const loginUrl = `${FRONTEND_BASE_URL}/auth/otp?code=${code}`;
                 if (phoneNumberId) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     message: [
-                      `${waBold("Login using the link below:")}`,
-                      loginUrl,
+                      `${waBold("Sync using the link below:")}`,
+                      loginUrl ?? "Link unavailable",
                       "",
                       "You can sync your WhatsApp files and manage them on https://zopy.co.in.",
+                      "_Link valid for 2 minutes._",
                       "",
                       `Type ${waBold('"HELP"')} to view options.`,
                     ].join("\n"),

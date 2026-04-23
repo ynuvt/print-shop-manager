@@ -1,10 +1,11 @@
 import express from "express";
+import jwt from "jsonwebtoken";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { prisma } from "@printowl/db";
 import {
   authMiddleware,
-  type ExtendedRequest,
 } from "../middleware/authMiddleware.js";
+import { sendWhatsAppTextMessage } from "../modules/whatsappServices.js";
 
 const router = express.Router();
 
@@ -34,6 +35,33 @@ router.get("/register", async (req, res) => {
 const supportedAdminEmail = process.env.ADMIN_EMAIL || "admin@example.com";
 const supportedAdminPassword = process.env.ADMIN_PASSWORD || "admin123";
 
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "JWT_SECRET is missing. Add it to apps/api/.env before starting the API.",
+    );
+  }
+  return secret;
+}
+
+function getOptionalTokenUserId(req: express.Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  const token = authHeader.split(" ")[1];
+  if (!token) return null;
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as {
+      uid: string;
+      role: string;
+      createdAt: number;
+    };
+    return decoded?.uid ?? null;
+  } catch {
+    return null;
+  }
+}
+
 router.post("/admin-login", (req, res) => {
   const { email, password } = req.body;
   if (email === supportedAdminEmail && password === supportedAdminPassword) {
@@ -49,16 +77,16 @@ router.post("/admin-login", (req, res) => {
 
 router.post(
   "/whatsapp-login",
-  authMiddleware(["customer", "admin"]),
-  async (req: ExtendedRequest, res) => {
+  async (req, res) => {
     const code = String(req.body?.code ?? "").trim();
     if (!code) {
       return res.status(400).json({ error: "Missing login code." });
     }
 
-    const tokenUserId = req.user?.uid;
+    let tokenUserId = getOptionalTokenUserId(req);
     if (!tokenUserId) {
-      return res.status(401).json({ error: "Unauthorized." });
+      const generated = generateUserToken();
+      tokenUserId = generated.userId;
     }
 
     const otp = await prisma.whatsAppLoginOtp.findUnique({
@@ -75,11 +103,13 @@ router.post(
       return res.status(400).json({ error: "Invalid or expired code." });
     }
 
-    await prisma.user.upsert({
-      where: { id: tokenUserId },
-      create: { id: tokenUserId },
-      update: {},
-    });
+    if (tokenUserId) {
+      await prisma.user.upsert({
+        where: { id: tokenUserId },
+        create: { id: tokenUserId },
+        update: {},
+      });
+    }
 
     const whatsAppUser = otp.whatsAppUser;
     if (!whatsAppUser) {
@@ -91,7 +121,7 @@ router.post(
       select: { phoneNumber: true },
     });
 
-    let resolvedUserId = tokenUserId;
+    let resolvedUserId = tokenUserId!;
     if (!whatsAppUser.userId) {
       if (
         tokenUserLink &&
@@ -165,6 +195,21 @@ router.post(
     });
 
     const { token, userId } = generateTokenForUser(resolvedUserId, "customer");
+
+    const senderPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (senderPhoneNumberId) {
+      try {
+        await sendWhatsAppTextMessage({
+          to: whatsAppUser.phoneNumber,
+          phoneNumberId: senderPhoneNumberId,
+          message:
+            "*Synced with WhatsApp successfully* ✅\n\nYou can use Zopy now.",
+        });
+      } catch (error) {
+        console.error("Failed to send WhatsApp login success message:", error);
+      }
+    }
+
     return res.status(200).json({ token, userId });
   },
 );

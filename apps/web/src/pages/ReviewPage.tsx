@@ -6,7 +6,9 @@ import type { PrintFileOption } from "@printowl/types";
 import {
   addFilesToJobFromUrls,
   getPrintJobByIdPublic,
+  getUserSession,
   registerUser,
+  confirmReviewJob,
   requestPresignedUploads,
   submitWhatsappJobReview,
   uploadFileToR2,
@@ -60,6 +62,8 @@ type ReviewFileState = {
   url: string;
   options: PrintFileOption;
   pageRangeError: string;
+  uploadedByDisplayName?: string | null;
+  uploadedByRole?: "OWNER" | "COLLABORATOR";
 };
 
 type GlobalColorMode = "BW" | "COLOR" | "MIXED";
@@ -128,6 +132,8 @@ function buildReviewFiles(
       url: file.url,
       options: mergedOptions,
       pageRangeError,
+      uploadedByDisplayName: file.uploadedByDisplayName ?? null,
+      uploadedByRole: file.uploadedByRole,
     };
   });
 }
@@ -137,12 +143,20 @@ export default function ReviewPage() {
   const navigate = useNavigate();
   const [jobTitle, setJobTitle] = useState<string>("");
   const [files, setFiles] = useState<ReviewFileState[]>([]);
+  const [viewerRole, setViewerRole] = useState<"OWNER" | "COLLABORATOR" | null>(
+    null,
+  );
+  const [costBreakdown, setCostBreakdown] = useState<
+    UserPrintJob["costBreakdown"] | null
+  >(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAddingFiles, setIsAddingFiles] = useState(false);
+  const [whatsappSynced, setWhatsappSynced] = useState<boolean>(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const { notify } = useNotifications();
   const [userId, setUserId] = useState<string | null>(() =>
@@ -250,7 +264,15 @@ export default function ReviewPage() {
     }
 
     try {
+      const session = await getUserSession();
+      setWhatsappSynced(!!session.whatsappSynced);
       const job = await getPrintJobByIdPublic(jobId);
+      setViewerRole((job as UserPrintJob).viewerRole ?? null);
+      setCostBreakdown((job as UserPrintJob).costBreakdown ?? null);
+      if ((job as UserPrintJob).viewerRole === "OWNER") {
+        navigate("/", { replace: true });
+        return;
+      }
       const whatsAppLabel = job.userMetadata?.name?.trim()
         ? `${job.userMetadata.name}`
         : (job.userMetadata?.phoneNumber ?? "");
@@ -269,11 +291,22 @@ export default function ReviewPage() {
         setExpandedIdx(0);
       }
     } catch (err) {
-      if (mode === "initial") {
+      const isSyncGateError =
+        err instanceof Error &&
+        /sync your whatsapp|authentication required/i.test(err.message);
+      if (
+        isSyncGateError
+      ) {
+        setShowSyncModal(true);
+        if (mode === "initial") {
+          setError(null);
+        }
+      }
+      if (mode === "initial" && !isSyncGateError) {
         setError(
           err instanceof Error ? err.message : "Unable to load this job.",
         );
-      } else {
+      } else if (!isSyncGateError) {
         notify("Failed to refresh job details.", { variant: "error" });
       }
     } finally {
@@ -298,10 +331,21 @@ export default function ReviewPage() {
       void persistCurrentOptionsNow(false).then(() => refreshJob("socket"));
     };
 
+    const handleCollaboratorConfirmed = (
+      updatedJobId: string,
+      _payload: unknown,
+    ) => {
+      if (updatedJobId !== jobId) return;
+      // Owner refreshes to get updated cost breakdown / confirmations.
+      void refreshJob("socket");
+    };
+
     getSocket().on("job-file-added", handleJobFileAdded);
+    getSocket().on("job-collaborator-confirmed", handleCollaboratorConfirmed);
 
     return () => {
       getSocket().off("job-file-added", handleJobFileAdded);
+      getSocket().off("job-collaborator-confirmed", handleCollaboratorConfirmed);
     };
   }, [userId, jobId]);
 
@@ -434,6 +478,15 @@ export default function ReviewPage() {
     setIsSubmitting(true);
     setError(null);
     try {
+      if (viewerRole === "COLLABORATOR") {
+        const result = await confirmReviewJob(jobId ?? "");
+        notify(`Confirmed. Your current files total: ₹${result.userCost}`, {
+          variant: "success",
+        });
+        navigate("/");
+        return;
+      }
+
       const payload = {
         jobId: jobId ?? "",
         files: files.map((file) => ({
@@ -502,11 +555,6 @@ export default function ReviewPage() {
     } finally {
       setIsAddingFiles(false);
     }
-  };
-
-  const forwardMoreFilesOnWhatsapp = () => {
-    const digits = "918369757906";
-    window.open(`https://wa.me/${digits}`, "_blank", "noopener,noreferrer");
   };
 
   const toggleFileExpanded = (idx: number) => {
@@ -611,13 +659,6 @@ export default function ReviewPage() {
               </button>
               <button
                 type="button"
-                className="btn review-action-btn"
-                onClick={forwardMoreFilesOnWhatsapp}
-              >
-                Forward more files on WhatsApp
-              </button>
-              <button
-                type="button"
                 className="btn review-action-btn review-action-btn--subtle"
                 onClick={() => void refreshJob("manual")}
                 disabled={isRefreshing}
@@ -681,6 +722,14 @@ export default function ReviewPage() {
                         {file.pages} pages • Rs{" "}
                         {calculateFileCost(file.pages, file.options)}
                       </span>
+                      {viewerRole === "OWNER" && file.uploadedByDisplayName ? (
+                        <span className="summary-meta">
+                          Uploaded by {file.uploadedByDisplayName}{" "}
+                          {file.uploadedByRole === "COLLABORATOR"
+                            ? "(Collaborator)"
+                            : "(Owner)"}
+                        </span>
+                      ) : null}
                     </div>
                   </button>
                   <div className="review-file-actions">
@@ -833,6 +882,18 @@ export default function ReviewPage() {
               {files.length} file(s) • {totals.totalPages} pages •{" "}
               {totals.estimatedTime} min
             </span>
+            {viewerRole === "OWNER" && costBreakdown?.perUser?.length ? (
+              <div className="summary-meta" style={{ marginTop: 10 }}>
+                {costBreakdown.perUser.map((u) => (
+                  <div key={u.key}>
+                    <strong>{u.displayName}</strong>: Rs {u.cost}
+                  </div>
+                ))}
+                <div style={{ marginTop: 6 }}>
+                  <strong>Total</strong>: Rs {costBreakdown.totalCost}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {verificationCode ? (
@@ -888,6 +949,52 @@ export default function ReviewPage() {
           }}
         />
       </main>
+
+      {showSyncModal && !whatsappSynced && (
+        <div className="modal-shell" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <div className="modal-head">
+              <h2>Sync WhatsApp</h2>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => {
+                  setShowSyncModal(false);
+                  navigate("/");
+                }}
+              >
+                x
+              </button>
+            </div>
+            <p className="modal-helper" style={{ marginTop: "16px" }}>
+              You need to sync WhatsApp before accessing collaborator review links.
+            </p>
+            <div className="modal-actions" style={{ marginTop: "20px" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => navigate("/")}
+              >
+                Go Home
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const digits = "918369757906";
+                  window.open(
+                    `https://wa.me/${digits}?text=sync`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
+              >
+                Sync on WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="site-footer">
         <div className="site-footer-inner">

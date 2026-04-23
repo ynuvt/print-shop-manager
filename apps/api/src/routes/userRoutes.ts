@@ -19,6 +19,10 @@ router.get("/session", authMiddleware(), async (req: ExtendedRequest, res) => {
       create: { id: userId },
       update: {},
     });
+    const whatsAppLink = await prisma.whatsAppUser.findFirst({
+      where: { userId },
+      select: { phoneNumber: true },
+    });
 
     const skippedEvent = await prisma.userEvent.findFirst({
       where: {
@@ -32,6 +36,7 @@ router.get("/session", authMiddleware(), async (req: ExtendedRequest, res) => {
       userId,
       onboardingCompleted: user.onboardingCompleted,
       onboardingSkipped: !!skippedEvent,
+      whatsappSynced: !!whatsAppLink?.phoneNumber,
     });
   } catch (error) {
     console.error("Failed to load session", error);

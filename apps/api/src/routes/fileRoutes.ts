@@ -5,6 +5,7 @@ import {
 } from "../middleware/authMiddleware.js";
 import { prisma } from "@printowl/db";
 import { fileSchema } from "@printowl/types";
+import socket from "../config/socket.js";
 import {
   ColorMode,
   duplex,
@@ -15,6 +16,21 @@ import { optionsSchema } from "@printowl/types/dist/validators/fileValidator.js"
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 
 const app = express.Router();
+
+async function recomputeJobTotals(tx: typeof prisma, printJobId: string) {
+  const job = await tx.printJob.findUnique({
+    where: { id: printJobId },
+    select: { id: true, files: { select: { pages: true, fileCost: true } } },
+  });
+  if (!job) return;
+  const totalPages = job.files.reduce((sum, f) => sum + (f.pages ?? 0), 0);
+  const totalCost = job.files.reduce((sum, f) => sum + (f.fileCost ?? 0), 0);
+  const { calculateEstimatedTime } = await import("@printowl/shared-utils");
+  await tx.printJob.update({
+    where: { id: printJobId },
+    data: { totalPages, totalCost, estimatedTime: calculateEstimatedTime(totalPages) },
+  });
+}
 
 async function resolveLinkedWhatsAppPhone(userId: string): Promise<string | null> {
   const linked = await prisma.whatsAppUser.findFirst({
@@ -118,9 +134,11 @@ app.delete(
       if (!access.ok) {
         return res.status(access.status).json({ error: access.error });
       }
-      await prisma.file.delete({
-        where: { id: id },
+      await prisma.$transaction(async (tx) => {
+        await tx.file.delete({ where: { id } });
+        await recomputeJobTotals(tx, access.printJobId);
       });
+      socket.emit("job-file-added", access.printJobId);
       res.status(200).json({ message: "File removed successfully." });
     } catch (error) {
       res.status(500).json({ error: "Failed to remove file." });
@@ -165,42 +183,65 @@ app.post(
       if (!isMember) {
         return res.status(403).json({ error: "You do not have access to this job." });
       }
-      const file = await prisma.file.create({
-        data: {
-          printJob: {
-            connect: {
-              id: jobId,
-            },
-          },
-          name: fileData.name,
-          pages: fileData.pages,
-          url: fileData.url,
-          uploadedByUserId: req.user.uid,
-          uploadedByRole: job.userId === req.user.uid ? "OWNER" : "COLLABORATOR",
-          option: {
-            create: {
-              copies: fileData.option.copies,
-              colorMode:
-                fileData.option.colorMode == "COLOR"
-                  ? ColorMode.COLOR
-                  : ColorMode.BW,
-              orientation:
-                fileData.option.orientation === "LANDSCAPE"
-                  ? orientationEnum.LANDSCAPE
-                  : orientationEnum.PORTRAIT,
-              scaleMode:
-                fileData.option.scaleMode === "NOSCALE"
-                  ? scaleModeEnum.NOSCALE
-                  : fileData.option.scaleMode === "SHRINK"
-                    ? scaleModeEnum.SHRINK
-                    : scaleModeEnum.FIT,
-              duplex:
-                fileData.option.duplex === "ONE" ? duplex.ONE : duplex.BOTH,
-              paperSize: fileData.option.paperSize,
-            },
-          },
-        },
+      const linkedPhone = await resolveLinkedWhatsAppPhone(req.user.uid);
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.uid },
+        select: { name: true },
       });
+      const { calculateFileCost } = await import("@printowl/shared-utils");
+      const fileCost = calculateFileCost(fileData.pages, {
+        paperSize: "A4",
+        colorMode: fileData.option.colorMode,
+        orientation: fileData.option.orientation,
+        scaleMode: fileData.option.scaleMode,
+        pageRange: fileData.option.pageRange,
+        customRange: fileData.option.customRange,
+        duplex: fileData.option.duplex,
+        copies: fileData.option.copies,
+      });
+
+      const file = await prisma.$transaction(async (tx) => {
+        const created = await tx.file.create({
+          data: {
+            printJob: { connect: { id: jobId } },
+            name: fileData.name,
+            pages: fileData.pages,
+            url: fileData.url,
+            fileCost,
+            uploadedByUserId: req.user.uid,
+            uploadedByPhoneNumber: linkedPhone,
+            uploadedByDisplayName: user?.name ?? null,
+            uploadedByRole: job.userId === req.user.uid ? "OWNER" : "COLLABORATOR",
+            option: {
+              create: {
+                copies: fileData.option.copies,
+                colorMode:
+                  fileData.option.colorMode == "COLOR"
+                    ? ColorMode.COLOR
+                    : ColorMode.BW,
+                orientation:
+                  fileData.option.orientation === "LANDSCAPE"
+                    ? orientationEnum.LANDSCAPE
+                    : orientationEnum.PORTRAIT,
+                scaleMode:
+                  fileData.option.scaleMode === "NOSCALE"
+                    ? scaleModeEnum.NOSCALE
+                    : fileData.option.scaleMode === "SHRINK"
+                      ? scaleModeEnum.SHRINK
+                      : scaleModeEnum.FIT,
+                duplex: fileData.option.duplex === "ONE" ? duplex.ONE : duplex.BOTH,
+                paperSize: fileData.option.paperSize,
+                pageRange: fileData.option.pageRange,
+                customRange: fileData.option.customRange,
+              },
+            },
+          },
+          include: { option: true },
+        });
+        await recomputeJobTotals(tx, jobId);
+        return created;
+      });
+      socket.emit("job-file-added", jobId);
       res.status(201).json({ message: "File added successfully.", file });
     } catch (error) {
       console.log(error);
@@ -300,6 +341,11 @@ app.put(
         where: { id: fileId },
         data: { fileCost },
       });
+
+      await prisma.$transaction(async (tx) => {
+        await recomputeJobTotals(tx, access.printJobId);
+      });
+      socket.emit("job-file-added", access.printJobId);
 
       res.status(200).json({
         message: "Print options updated successfully.",

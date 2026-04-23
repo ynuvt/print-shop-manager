@@ -12,19 +12,42 @@ export type UserPrintJobFile = {
   pages: number;
   url: string;
   option: PrintFileOption | null;
+  uploadedByUserId?: string | null;
+  uploadedByPhoneNumber?: string | null;
+  uploadedByDisplayName?: string | null;
+  uploadedByRole?: "OWNER" | "COLLABORATOR";
+  fileCost?: number;
 };
 
 export type UserPrintJob = {
   id: string;
-  totalCost: number;
-  totalPages: number;
-  estimatedTime: number;
+  totalCost?: number;
+  totalPages?: number;
+  estimatedTime?: number;
   status: string;
   verificationCode: string | null;
   createdAt: string;
   source?: string;
   userMetadataId?: string | null;
   files: UserPrintJobFile[];
+  viewerRole?: "OWNER" | "COLLABORATOR";
+  permissions?: {
+    canViewAllFiles: boolean;
+    canEditAllFiles: boolean;
+    canDeleteAllFiles: boolean;
+    canAddFiles: boolean;
+    canSubmit: boolean;
+  };
+  viewerCost?: number;
+  costBreakdown?: {
+    perUser: Array<{
+      key: string;
+      displayName: string;
+      role: string;
+      cost: number;
+    }>;
+    totalCost: number;
+  };
   userMetadata?: {
     phoneNumber: string;
     name?: string | null;
@@ -35,6 +58,7 @@ export type UserSession = {
   userId: string;
   onboardingCompleted: boolean;
   onboardingSkipped: boolean;
+  whatsappSynced?: boolean;
 };
 
 // Helper to get token from localStorage
@@ -57,21 +81,11 @@ export async function loginWithWhatsappOtp(code: string): Promise<{
   userId: string;
 }> {
   const token = getToken();
-  if (!token) {
-    throw new Error("Missing session token. Please open the link again.");
-  }
+  const res = await axios.post(`${BASE_URL}/auth/whatsapp-login`, { code }, {
+    headers: token ? { authorization: `Bearer ${token}` } : undefined,
+  });
 
-  const res = await axios.post(
-    `${BASE_URL}/auth/whatsapp-login`,
-    { code },
-    {
-      headers: {
-        authorization: `Bearer ${token}`,
-      },
-    },
-  );
-
-  if (!res.data) throw new Error("Failed to login with WhatsApp.");
+  if (!res.data) throw new Error("Failed to sync with WhatsApp.");
   return res.data as { token: string; userId: string };
 }
 
@@ -352,12 +366,37 @@ export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
 
 export async function getPrintJobByIdPublic(id: string): Promise<UserPrintJob> {
   const token = getToken();
-  const res = await axios.get(`${BASE_URL}/jobs/review/${id}`, {
-    headers: token ? { authorization: `Bearer ${token}` } : undefined,
-  });
+  let res;
+  try {
+    res = await axios.get(`${BASE_URL}/jobs/review/${id}`, {
+      headers: token ? { authorization: `Bearer ${token}` } : undefined,
+    });
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const serverError = error.response?.data?.error;
+      if (typeof serverError === "string" && serverError.trim()) {
+        throw new Error(serverError);
+      }
+    }
+    throw error;
+  }
 
   if (!res.data) throw new Error("Failed to fetch job");
   return res.data as UserPrintJob;
+}
+
+export async function confirmReviewJob(jobId: string): Promise<{ userCost: number }> {
+  const token = getToken();
+  if (!token) {
+    throw new Error("Missing session token. Please open the link again.");
+  }
+  const res = await axios.post(
+    `${BASE_URL}/jobs/review/${jobId}/confirm`,
+    {},
+    { headers: { authorization: `Bearer ${token}` } },
+  );
+  if (!res.data) throw new Error("Failed to confirm files");
+  return res.data as { userCost: number };
 }
 
 export async function addFilesToJobFromUrls(

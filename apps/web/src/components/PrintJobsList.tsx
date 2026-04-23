@@ -268,13 +268,13 @@ function JobDetailModal({
         <div className="modal-summary">
           <div>
             <p className="modal-label">Total Price</p>
-            <h3>{formatPrice(job.totalCost)}</h3>
+            <h3>{formatPrice(job.totalCost ?? 0)}</h3>
           </div>
           <span className={getStatusBadgeClass(job.status)}>{job.status}</span>
         </div>
 
         <p className="modal-helper summary-meta">
-          {job.files.length} file(s) • {job.totalPages} pages
+          {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
         </p>
 
         <div className="modal-actions">
@@ -489,7 +489,7 @@ export default function PrintJobsList({
                       : "Failed to sync WhatsApp jobs.";
                   if (
                     errorMsg ===
-                    "Please link your WhatsApp account before syncing jobs."
+                    "Please sync your WhatsApp account before syncing jobs."
                   ) {
                     setShowLinkWhatsappModal(true);
                   } else {
@@ -603,7 +603,7 @@ export default function PrintJobsList({
                     <div className="job-row-details">
                       <p className="job-row-code">#{job.verificationCode}</p>
                       <p className="job-row-meta">
-                        {job.files.length} file(s) • {job.totalPages} pages
+                        {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
                       </p>
                       <p className="job-row-time">
                         {new Date(job.createdAt).toLocaleString()}
@@ -615,7 +615,7 @@ export default function PrintJobsList({
                     <div>
                       <p className="job-row-price-label">Total Price</p>
                       <p className="job-row-price">
-                        {formatPrice(job.totalCost)}
+                        {formatPrice(job.totalCost ?? 0)}
                       </p>
                     </div>
                     <span className={getStatusBadgeClass(job.status)}>
@@ -669,7 +669,7 @@ export default function PrintJobsList({
           <div className="modal-card">
             <div className="modal-head">
               <div>
-                <h2>Link WhatsApp</h2>
+                <h2>Sync WhatsApp</h2>
               </div>
               <button
                 type="button"
@@ -680,7 +680,7 @@ export default function PrintJobsList({
               </button>
             </div>
             <p className="modal-helper" style={{ marginTop: "16px", marginBottom: "24px" }}>
-              You are not synced with WhatsApp. Click the login button below, then send the "login" text to us and click on the link to login.
+              You are not synced with WhatsApp. Click sync below and send "sync" on WhatsApp to continue.
             </p>
             <div className="modal-actions">
               <button
@@ -696,14 +696,14 @@ export default function PrintJobsList({
                 onClick={() => {
                   const digits = "918369757906";
                   window.open(
-                    `https://wa.me/${digits}?text=login`,
+                    `https://wa.me/${digits}?text=sync`,
                     "_blank",
                     "noopener,noreferrer"
                   );
                   setShowLinkWhatsappModal(false);
                 }}
               >
-                Login
+                Sync
               </button>
             </div>
           </div>

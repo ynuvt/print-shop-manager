@@ -26,4 +26,11 @@ export function jobEvents(socket: Socket, io: Server) {
   socket.on("job-file-added", (jobId: string) => {
     io.to(jobId).emit("job-file-added", jobId);
   });
+
+  socket.on(
+    "job-collaborator-confirmed",
+    (jobId: string, payload: { userId: string; displayName?: string; userCost: number }) => {
+      io.to(jobId).emit("job-collaborator-confirmed", jobId, payload);
+    },
+  );
 }

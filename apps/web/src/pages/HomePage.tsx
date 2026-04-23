@@ -269,6 +269,8 @@ export default function HomePage({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isWhatsappSynced, setIsWhatsappSynced] = useState(false);
+  const [showSyncWhatsappModal, setShowSyncWhatsappModal] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
@@ -323,6 +325,7 @@ export default function HomePage({
 
     getUserSession()
       .then((session) => {
+        setIsWhatsappSynced(!!session.whatsappSynced);
         if (session.onboardingCompleted) {
           setOnboardingEligible(false);
           setWalkthroughStep(null);
@@ -332,9 +335,19 @@ export default function HomePage({
         setOnboardingEligible(true);
       })
       .catch(() => {
+        setIsWhatsappSynced(false);
         setOnboardingEligible(true);
       });
   }, [userId]);
+
+  const handleForwardFromWhatsapp = useCallback(() => {
+    const digits = "918369757906";
+    if (isWhatsappSynced) {
+      window.open(`https://wa.me/${digits}?text=hi`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    setShowSyncWhatsappModal(true);
+  }, [isWhatsappSynced]);
 
   useEffect(() => {
     const stored = localStorage.getItem("lastReviewVerificationCode");
@@ -549,8 +562,6 @@ export default function HomePage({
           return fileTitleRef.current;
         case "add-more":
           return addMoreRef.current;
-        case "summary":
-          return summaryCardRef.current;
         case "summary":
           return summaryCardRef.current;
         case "submit":
@@ -1046,6 +1057,15 @@ export default function HomePage({
           <div className="hero-header">
             <h1>Upload Documents</h1>
             <p>Choose Color or B/W once, then set options per file.</p>
+            <div className="review-actions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn review-action-btn"
+                onClick={handleForwardFromWhatsapp}
+              >
+                Forward from WhatsApp
+              </button>
+            </div>
           </div>
 
           {verificationCode ? (
@@ -1318,6 +1338,51 @@ export default function HomePage({
           </Link>
         </div>
       </footer>
+      {showSyncWhatsappModal && (
+        <div className="modal-shell" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <div className="modal-head">
+              <div>
+                <h2>Sync WhatsApp</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setShowSyncWhatsappModal(false)}
+              >
+                x
+              </button>
+            </div>
+            <p className="modal-helper" style={{ marginTop: "16px", marginBottom: "24px" }}>
+              You have to sync WhatsApp to access this feature.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowSyncWhatsappModal(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const digits = "918369757906";
+                  window.open(
+                    `https://wa.me/${digits}?text=sync`,
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                  setShowSyncWhatsappModal(false);
+                }}
+              >
+                Sync
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,7 +10,7 @@ export default function AuthOtpPage() {
   const [status, setStatus] = useState<"loading" | "success" | "error">(
     "loading",
   );
-  const [message, setMessage] = useState<string>("Linking your account...");
+  const [message, setMessage] = useState<string>("Syncing your account...");
 
   const code = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -20,7 +20,7 @@ export default function AuthOtpPage() {
   useEffect(() => {
     if (!code) {
       setStatus("error");
-      setMessage("Missing login code. Please request a new link.");
+      setMessage("Missing sync code. Please request a new link.");
       return;
     }
 
@@ -29,10 +29,10 @@ export default function AuthOtpPage() {
         localStorage.setItem("token", token);
         localStorage.setItem("userId", userId);
         setStatus("success");
-        setMessage("Linked! Redirecting you now...");
-        notify("WhatsApp linked successfully.", { variant: "success" });
+        setMessage("Synced! Redirecting you now...");
+        notify("WhatsApp synced successfully.", { variant: "success" });
         setTimeout(() => {
-          navigate("/");
+          window.location.href = "https://wa.me/918369757906?text=hi";
         }, 1000);
       })
       .catch((err) => {
@@ -40,7 +40,7 @@ export default function AuthOtpPage() {
         setMessage(
           err instanceof Error
             ? err.message
-            : "Failed to link WhatsApp. Please try again.",
+            : "Failed to sync WhatsApp. Please try again.",
         );
       });
   }, [code, navigate, notify]);
@@ -50,7 +50,7 @@ export default function AuthOtpPage() {
       <main className="main-wrap">
         <section className="hero-panel">
           <div className="hero-header">
-            <h1>WhatsApp Login</h1>
+            <h1>WhatsApp Sync</h1>
             <p>
               {status === "loading"
                 ? "Verifying your link"
