@@ -1254,6 +1254,12 @@ app.get(
   async (req: ExtendedRequest, res) => {
     console.log("Fetching jobs for user:", req.user!.uid);
     try {
+      const linked = await prisma.whatsAppUser.findFirst({
+        where: { userId: req.user!.uid },
+        select: { phoneNumber: true },
+      });
+      const viewerPhone = linked?.phoneNumber ?? null;
+
       const jobs = await prisma.printJob.findMany({
         where: {
           OR: [
@@ -1267,9 +1273,39 @@ app.get(
               option: true,
             },
           },
+          owners: { select: { userId: true } },
         },
       });
-      res.status(200).json(jobs);
+
+      const scoped = jobs.map((job) => {
+        const isOwner = job.userId === req.user!.uid;
+        if (isOwner || job.status !== PrintJobStatus.DRAFT) {
+          return job;
+        }
+
+        const visibleFiles = job.files.filter((file) => {
+          if (file.uploadedByUserId && file.uploadedByUserId === req.user!.uid) {
+            return true;
+          }
+          if (
+            viewerPhone &&
+            file.uploadedByPhoneNumber &&
+            file.uploadedByPhoneNumber === viewerPhone
+          ) {
+            return true;
+          }
+          return false;
+        });
+
+        const { totalCost: _tc, totalPages: _tp, estimatedTime: _et, ...safeJob } =
+          job as any;
+        return {
+          ...safeJob,
+          files: visibleFiles,
+        };
+      });
+
+      res.status(200).json(scoped);
     } catch (error) {
       console.log(error);
       res.status(500).json({ error: "Failed to fetch user jobs." });
@@ -1293,7 +1329,7 @@ app.post(
 
     if (!linked?.phoneNumber) {
       return res.status(400).json({
-        error: "Please link your WhatsApp account before syncing jobs.",
+        error: "Please sync your WhatsApp account before syncing jobs.",
       });
     }
 
@@ -1367,6 +1403,12 @@ app.get("/review/:id", async (req, res) => {
     const viewerPhone = linked?.phoneNumber ?? null;
 
     const isOwner = job.userId === optionalUser.uid;
+    if (!isOwner && !viewerPhone) {
+      return res.status(403).json({
+        error: "Please sync your WhatsApp account to review collaborator drafts.",
+        requiresWhatsappSync: true,
+      });
+    }
     const viewerRole = isOwner ? "OWNER" : "COLLABORATOR";
 
     const visibleFiles = isOwner
@@ -1398,19 +1440,141 @@ app.get("/review/:id", async (req, res) => {
           canEditAllFiles: false,
           canDeleteAllFiles: false,
           canAddFiles: true,
-          canSubmit: false,
+          canSubmit: true,
         };
+
+    const viewerCost = visibleFiles.reduce(
+      (sum, f) => sum + (typeof f.fileCost === "number" ? f.fileCost : 0),
+      0,
+    );
+
+    if (!isOwner) {
+      // Collaborators must not see aggregate totals across other users.
+      const { totalCost: _tc, totalPages: _tp, estimatedTime: _et, ...safeJob } =
+        job as any;
+      return res.status(200).json({
+        ...safeJob,
+        files: visibleFiles,
+        viewerRole,
+        permissions,
+        viewerCost,
+      });
+    }
+
+    const perUserMap = new Map<
+      string,
+      {
+        key: string;
+        displayName: string;
+        role: string;
+        cost: number;
+      }
+    >();
+
+    for (const f of job.files) {
+      const key =
+        f.uploadedByUserId ||
+        f.uploadedByPhoneNumber ||
+        f.uploadedByDisplayName ||
+        "unknown";
+      const displayName =
+        f.uploadedByDisplayName || f.uploadedByPhoneNumber || "Unknown";
+      const existing = perUserMap.get(key) ?? {
+        key,
+        displayName,
+        role: f.uploadedByRole,
+        cost: 0,
+      };
+      existing.cost += typeof f.fileCost === "number" ? f.fileCost : 0;
+      perUserMap.set(key, existing);
+    }
+
+    const perUserCosts = [...perUserMap.values()].sort((a, b) => b.cost - a.cost);
+    const totalCost = perUserCosts.reduce((sum, u) => sum + u.cost, 0);
 
     return res.status(200).json({
       ...job,
       files: visibleFiles,
       viewerRole,
       permissions,
+      viewerCost,
+      costBreakdown: {
+        perUser: perUserCosts,
+        totalCost,
+      },
     });
   } catch (error) {
     return res.status(500).json({ error: "Failed to fetch job." });
   }
 });
+
+app.post(
+  "/review/:id/confirm",
+  authMiddleware(["customer"]),
+  async (req: ExtendedRequest, res) => {
+    const { id } = req.params;
+    if (!id || typeof id !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const viewerId = req.user.uid;
+
+    try {
+      const job = await prisma.printJob.findFirst({
+        where: { id, status: PrintJobStatus.DRAFT },
+        include: {
+          files: true,
+          owners: { select: { userId: true } },
+        },
+      });
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      const isMember =
+        job.userId === viewerId || job.owners.some((o) => o.userId === viewerId);
+      if (!isMember) {
+        return res.status(403).json({ error: "You do not have access to this job." });
+      }
+
+      const linked = await prisma.whatsAppUser.findFirst({
+        where: { userId: req.user.uid },
+        select: { phoneNumber: true },
+      });
+      const viewerPhone = linked?.phoneNumber ?? null;
+
+      const myFiles = job.files.filter((file) => {
+        if (file.uploadedByUserId && file.uploadedByUserId === viewerId) return true;
+        if (viewerPhone && file.uploadedByPhoneNumber === viewerPhone) return true;
+        return false;
+      });
+
+      const userCost = myFiles.reduce(
+        (sum, f) => sum + (typeof f.fileCost === "number" ? f.fileCost : 0),
+        0,
+      );
+
+      const user = await prisma.user.findUnique({
+        where: { id: viewerId },
+        select: { name: true },
+      });
+
+      socket.emit("job-collaborator-confirmed", id, {
+        userId: viewerId,
+        displayName: user?.name ?? undefined,
+        userCost,
+      });
+
+      return res.status(200).json({ message: "Confirmed.", userCost });
+    } catch (error) {
+      console.error("review confirm failed:", error);
+      return res.status(500).json({ error: "Failed to confirm files." });
+    }
+  },
+);
 
 app.post(
   "/submit-whatsapp-job",
