@@ -9,6 +9,119 @@ import { getPrinters, print } from "pdf-to-printer";
 // On Windows, real printing is used.
 const DRY_RUN = process.platform !== "win32";
 
+type PrinterInfo = { name: string; isDefault: boolean };
+
+function normalizePrinterName(name: string): string {
+  return name
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizePrinterList(list: any[]): PrinterInfo[] {
+  const map = new Map<string, PrinterInfo>();
+  for (const p of Array.isArray(list) ? list : []) {
+    const name =
+      typeof p?.name === "string"
+        ? p.name
+        : typeof p?.displayName === "string"
+          ? p.displayName
+          : null;
+    if (!name) continue;
+    const isDefault = Boolean(p?.isDefault);
+    const existing = map.get(name);
+    if (!existing) map.set(name, { name, isDefault });
+    else if (isDefault && !existing.isDefault) map.set(name, { name, isDefault });
+  }
+  return [...map.values()];
+}
+
+async function resolvePdfToPrinterName(requestedName: string): Promise<string> {
+  const requestedNorm = normalizePrinterName(requestedName);
+  const pdfPrinters = normalizePrinterList(await getPrinters());
+
+  // Exact match
+  const exact = pdfPrinters.find(
+    (p) => normalizePrinterName(p.name) === requestedNorm,
+  );
+  if (exact) return exact.name;
+
+  // Looser match (substring both ways) to survive odd spacing/casing.
+  const loose = pdfPrinters.find((p) => {
+    const n = normalizePrinterName(p.name);
+    return n.includes(requestedNorm) || requestedNorm.includes(n);
+  });
+  if (loose) return loose.name;
+
+  // If we can't resolve, return the original; caller may fallback.
+  return requestedName;
+}
+
+async function printPdfViaWebContents(
+  filePath: string,
+  printerName: string,
+): Promise<void> {
+  const win = new BrowserWindow({
+    show: false,
+    width: 800,
+    height: 600,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  try {
+    // Electron can render PDFs via its built-in PDF viewer.
+    await win.loadURL(`file://${filePath}`);
+
+    await new Promise<void>((resolve, reject) => {
+      win.webContents.print(
+        { silent: true, deviceName: printerName, printBackground: true },
+        (success, failureReason) => {
+          if (success) resolve();
+          else reject(new Error(failureReason || "webContents.print failed"));
+        },
+      );
+    });
+  } finally {
+    win.destroy();
+  }
+}
+
+async function listPrintersViaWebContents(): Promise<PrinterInfo[]> {
+  // Prefer an existing window (no flicker, no extra lifecycle).
+  const existing = BrowserWindow.getAllWindows()[0];
+  if (existing?.webContents?.getPrintersAsync) {
+    try {
+      const list = await existing.webContents.getPrintersAsync();
+      return normalizePrinterList(list);
+    } catch {
+      // fall through
+    }
+  }
+
+  // Fallback: create a tiny hidden window for printer enumeration.
+  const win = new BrowserWindow({
+    show: false,
+    width: 1,
+    height: 1,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  try {
+    await win.loadURL("about:blank");
+    const list = await win.webContents.getPrintersAsync();
+    return normalizePrinterList(list);
+  } finally {
+    win.destroy();
+  }
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, "..", "resources", "icon.png");
   const window = new BrowserWindow({
@@ -157,10 +270,22 @@ ipcMain.handle("list-printers", async () => {
   }
 
   try {
-    const printers = await getPrinters();
-    return printers;
+    const printers = normalizePrinterList(await getPrinters());
+    if (printers.length > 0) return printers;
+    console.warn(
+      "pdf-to-printer returned no printers; falling back to Electron enumeration",
+    );
   } catch (error) {
-    console.error("Failed to list printers:", error);
+    console.error(
+      "Failed to list printers via pdf-to-printer; falling back to Electron enumeration:",
+      error,
+    );
+  }
+
+  try {
+    return await listPrintersViaWebContents();
+  } catch (error) {
+    console.error("Failed to list printers via Electron webContents:", error);
     return [];
   }
 });
@@ -227,7 +352,23 @@ ipcMain.handle(
         );
         await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
       } else {
-        await print(filePath, { printer, ...normalizedOptions });
+        let resolvedPrinter = printer;
+        try {
+          resolvedPrinter = await resolvePdfToPrinterName(printer);
+        } catch (e) {
+          console.warn("Failed to resolve printer name via pdf-to-printer:", e);
+        }
+
+        try {
+          await print(filePath, { printer: resolvedPrinter, ...normalizedOptions });
+        } catch (error) {
+          console.error(
+            `pdf-to-printer print failed for "${resolvedPrinter}". Falling back to webContents.print...`,
+            error,
+          );
+          // Fallback: use Electron printing directly (survives name mismatches in pdf-to-printer).
+          await printPdfViaWebContents(filePath, printer);
+        }
       }
 
       event.sender.send("print-progress", {
