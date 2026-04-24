@@ -162,7 +162,7 @@ router.post(
               to: whatsAppUser.phoneNumber,
               phoneNumberId,
               message:
-                "*Synced with WhatsApp successfully*\n\nYou can now use Zopy! To get started, send or forward us the documents you want to print.",
+                "*Synced successfully* ✅\n\nYou can now send your *PDF, Word, or image files* directly here on WhatsApp.\n\nTo customize print options (copies, color, page range, etc.), visit:\nhttps://zopy.co.in/\n\n_Start by sending your first document!_",
             });
           } catch (error) {
             console.error("Failed to send WhatsApp login success message:", error);
@@ -220,7 +220,7 @@ router.post(
           to: whatsAppUser.phoneNumber,
           phoneNumberId,
           message:
-            "*Synced with WhatsApp successfully*\n\nYou can now use Zopy! To get started, send or forward us the documents you want to print.",
+            "*Synced successfully* ✅\n\nYou can now send your *PDF, Word, or image files* directly here on WhatsApp.\n\nTo customize print options (copies, color, page range, etc.), visit:\nhttps://zopy.co.in/\n\n_Start by sending your first document!_",
         });
       } catch (error) {
         console.error("Failed to send WhatsApp login success message:", error);

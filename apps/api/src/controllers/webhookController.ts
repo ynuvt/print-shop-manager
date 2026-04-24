@@ -503,21 +503,29 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
 
                   // Additionally send the stale warning as a follow-up
                   if (isStale) {
+                    // Fetch old files (added more than 30 min ago) to list them
+                    const oldFiles = await prisma.file.findMany({
+                      where: {
+                        printJobId: printJobId,
+                        createdAt: { lt: new Date(Date.now() - 30 * 60 * 1000) },
+                      },
+                      select: { name: true },
+                      orderBy: { createdAt: "asc" },
+                    });
+                    const oldFileList = oldFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+
                     await sendWhatsAppButtonMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
                       body: [
                         `${waBold("Existing Files Found")} \u26a0\ufe0f`,
+                        "Your draft contains old files (30+ min ago):",
+                        oldFileList,
                         "",
-                        "Your draft also contains files added more than 30 minutes ago.",
-                        "",
-                        "Options:",
-                        `\u2022 Type ${waBold('"EDIT"')} to visit the website and individually delete files if you want — you can also continue adding more files to this draft.`,
-                        `\u2022 Type ${waBold('"NEW"')} to remove all old files and keep only the file you just sent.`,
+                        `Type ${waBold('"EDIT"')} to visit the website and remove unwanted files using the ${waBold("✕ button")}.`,
                       ].join("\n"),
                       buttons: [
                         { type: "reply", reply: { id: "edit", title: "EDIT" } },
-                        { type: "reply", reply: { id: "new", title: "NEW" } },
                       ],
                     });
                   }
@@ -853,21 +861,29 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
                   });
 
                   if (isStale) {
+                    // Fetch old files (added more than 30 min ago) to list them
+                    const oldFiles = await prisma.file.findMany({
+                      where: {
+                        printJobId: existingJob.id,
+                        createdAt: { lt: new Date(Date.now() - 30 * 60 * 1000) },
+                      },
+                      select: { name: true },
+                      orderBy: { createdAt: "asc" },
+                    });
+                    const oldFileList = oldFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+
                     await sendWhatsAppButtonMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
                       body: [
                         `${waBold("Existing Files Found")} \u26a0\ufe0f`,
+                        "Your draft contains old files (30+ min ago):",
+                        oldFileList,
                         "",
-                        "Your draft also contains files added more than 30 minutes ago.",
-                        "",
-                        "Options:",
-                        `\u2022 Type ${waBold('"EDIT"')} to visit the website and individually delete files if you want — you can also continue adding more files to this draft.`,
-                        `\u2022 Type ${waBold('"NEW"')} to remove all old files and keep only the file you just sent.`,
+                        `Type ${waBold('"EDIT"')} to visit the website and remove unwanted files using the ${waBold("✕ button")}.`,
                       ].join("\n"),
                       buttons: [
                         { type: "reply", reply: { id: "edit", title: "EDIT" } },
-                        { type: "reply", reply: { id: "new", title: "NEW" } },
                       ],
                     });
                   }
