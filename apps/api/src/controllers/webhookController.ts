@@ -1219,7 +1219,7 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
               if (userRecord?.lastFileStartedProcessingAt) {
                 const elapsedMs =
                   Date.now() - userRecord.lastFileStartedProcessingAt.getTime();
-                if (elapsedMs < 15_000) {
+                if (elapsedMs < 7_000) {
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
