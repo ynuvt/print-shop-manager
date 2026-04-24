@@ -275,7 +275,7 @@ export default function HomePage({
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+
   const [uploadStage, setUploadStage] = useState<"uploading" | "converting" | "creating">(
     "uploading",
   );
@@ -809,10 +809,7 @@ export default function HomePage({
       void markOnboardingCompleted();
     }
 
-    if (!captchaToken) {
-      setError("Please complete the CAPTCHA verification");
-      return;
-    }
+
 
     if (totalBytes > MAX_JOB_UPLOAD_BYTES) {
       setError(
@@ -839,7 +836,7 @@ export default function HomePage({
       setPrintFiles([]);
       setDraftJobId(null);
       setExpandedIdx(null);
-      setCaptchaToken(null);
+
       setRefreshTrigger((t) => t + 1);
     } catch (err) {
       setError(
@@ -847,12 +844,7 @@ export default function HomePage({
           ? err.message
           : "Something went wrong. Please try again.",
       );
-      if (
-        err instanceof Error &&
-        /captcha|turnstile|verification/i.test(err.message)
-      ) {
-        setCaptchaToken(null);
-      }
+
     } finally {
       setIsSubmitting(false);
       setUploadProgress([]);
