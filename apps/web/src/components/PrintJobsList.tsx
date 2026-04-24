@@ -399,7 +399,7 @@ export default function PrintJobsList({
   }, [load, selectedJobId]);
 
   const draftJobs = useMemo(() => 
-    jobs.filter((job) => job.status === "DRAFT" && (job.source === "WHATSAPP" || !!job.userMetadataId || !!job.userMetadata?.phoneNumber)),
+    jobs.filter((job) => job.status === "DRAFT"),
   [jobs]);
   const allJobs = useMemo(() => jobs.filter(job => job.status !== "DRAFT"), [jobs]);
 
@@ -601,7 +601,9 @@ export default function PrintJobsList({
                       <FileText size={20} />
                     </span>
                     <div className="job-row-details">
-                      <p className="job-row-code">#{job.verificationCode}</p>
+                      <p className="job-row-code">
+                        {job.status === "DRAFT" ? "Draft Job" : `OTP: ${job.verificationCode ?? "N/A"}`}
+                      </p>
                       <p className="job-row-meta">
                         {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
                       </p>

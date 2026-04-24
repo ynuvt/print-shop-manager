@@ -30,6 +30,7 @@ async function recomputeJobTotals(tx: typeof prisma, printJobId: string) {
     where: { id: printJobId },
     data: { totalPages, totalCost, estimatedTime: calculateEstimatedTime(totalPages) },
   });
+  socket.emit("job-file-added", printJobId);
 }
 
 async function resolveLinkedWhatsAppPhone(userId: string): Promise<string | null> {
@@ -170,6 +171,7 @@ app.post(
           status: true,
           userId: true,
           owners: { select: { userId: true } },
+          _count: { select: { files: true } },
         },
       });
       if (!job) {
@@ -177,6 +179,9 @@ app.post(
       }
       if (job.status !== PrintJobStatus.DRAFT) {
         return res.status(403).json({ error: "This job is not available for review." });
+      }
+      if (job._count.files >= 15) {
+        return res.status(400).json({ error: "You cannot add more than 15 files." });
       }
       const isMember =
         job.userId === req.user.uid || job.owners.some((o) => o.userId === req.user.uid);

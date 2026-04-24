@@ -4,6 +4,7 @@ import type { PrintFileOption as PrintOptions } from "@printowl/types";
 import { Link } from "react-router-dom";
 import {
   FileText,
+  MessageCircle,
   Moon,
   Plus,
   SlidersHorizontal,
@@ -24,6 +25,7 @@ import {
   uploadFileToR2,
   deleteUserFile,
 } from "../api/api";
+// import ReviewPage from "./ReviewPage";
 import PrintJobsList from "../components/PrintJobsList";
 import {
   buildJobTotals,
@@ -275,10 +277,11 @@ export default function HomePage({
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [uploadStage, setUploadStage] = useState<"uploading" | "creating">(
+  const [uploadStage, setUploadStage] = useState<"uploading" | "converting" | "creating">(
     "uploading",
   );
   const [draftJobId, setDraftJobId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const totalBytes = printFiles.reduce((sum, file) => sum + (file.file?.size ?? 0), 0);
   const overallProgress = uploadProgress.length
     ? Math.round(
@@ -368,39 +371,7 @@ export default function HomePage({
     }
   }, [onboardingEligible, showSteps, verificationCode]);
 
-  useEffect(() => {
-    if (!userId) return;
 
-    getSocket().emit("join-room", userId);
-    return () => {
-      getSocket().emit("leave-room", userId);
-    };
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-    getWebDraftJob()
-      .then((job) => {
-        if (job) {
-          setDraftJobId(job.id);
-          setPrintFiles(
-            job.files.map((f) => {
-              const options = f.option ? { ...f.option, customRange: f.option.customRange || "" } : defaultPrintOptions();
-              lastPersistedOptionsRef.current[f.id] = options;
-              return {
-                id: f.id,
-                url: f.url,
-                name: f.name,
-                detectedPages: f.pages,
-                options,
-                pageRangeError: "",
-              };
-            })
-          );
-        }
-      })
-      .catch(console.error);
-  }, [userId]);
 
   const getPendingFiles = useCallback(() =>
     printFiles.filter((file) => {
@@ -491,6 +462,84 @@ export default function HomePage({
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, [isSubmitting, persistCurrentOptionsNow]);
+
+  const fetchWebDraft = useCallback(async () => {
+    if (!userId) return;
+    setIsRefreshing(true);
+    try {
+      const pending = getPendingFiles();
+      if (pending.length > 0) {
+        await persistCurrentOptionsNow(false);
+      }
+      
+      const job = await getWebDraftJob();
+      if (job) {
+        setDraftJobId(job.id);
+        setPrintFiles((prev) => {
+          return job.files.map((f) => {
+            const existing = prev.find((p) => p.id === f.id);
+            const options = existing?.options || (f.option ? { ...f.option, customRange: f.option.customRange || "" } : defaultPrintOptions());
+            lastPersistedOptionsRef.current[f.id] = options;
+            return {
+              id: f.id,
+              url: f.url,
+              name: f.name,
+              detectedPages: f.pages,
+              options,
+              pageRangeError: existing?.pageRangeError || "",
+            };
+          });
+        });
+      } else {
+        setDraftJobId(null);
+        setPrintFiles([]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [userId, getPendingFiles, persistCurrentOptionsNow]);
+
+  useEffect(() => {
+    if (userId) {
+      void fetchWebDraft();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const socket = getSocket();
+    
+    // Join room when connected to receive events
+    socket.emit("join-room", userId);
+    
+    const onConnect = () => {
+      socket.emit("join-room", userId);
+    };
+
+    const handleJobFileAdded = () => {
+      void fetchWebDraft();
+    };
+    
+    const handleJobStatusUpdated = (uid: string, _jobId: string, msg: string) => {
+      if (uid === userId) {
+        setError(msg);
+      }
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("job-file-added", handleJobFileAdded);
+    socket.on("job-status-updated", handleJobStatusUpdated);
+
+    return () => {
+      socket.emit("leave-room", userId);
+      socket.off("connect", onConnect);
+      socket.off("job-file-added", handleJobFileAdded);
+      socket.off("job-status-updated", handleJobStatusUpdated);
+    };
+  }, [userId, fetchWebDraft]);
 
   useEffect(() => {
     if (walkthroughStep === "upload" && printFiles.length > 0) {
@@ -609,6 +658,7 @@ export default function HomePage({
 
       setError(null);
       setIsPreparingFiles(true);
+      setUploadStage("uploading");
       setUploadProgress(files.map(() => 0));
 
       try {
@@ -620,7 +670,11 @@ export default function HomePage({
           );
         }
 
-        setUploadStage("creating");
+        // Check if any files need server-side conversion
+        const hasOfficeFiles = files.some((f) =>
+          /\.(docx?|pptx?)$/i.test(f.name),
+        );
+        setUploadStage(hasOfficeFiles ? "converting" : "creating");
         setUploadProgress((prev) => prev.map(() => 100));
 
         const urlFiles = files.map((file, index) => ({
@@ -829,13 +883,11 @@ export default function HomePage({
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "file-select" ||
-    walkthroughStep === "summary" ||
     walkthroughStep === "submit";
   const showCalloutButton =
     walkthroughStep === "print-type" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
-    walkthroughStep === "summary" ||
     walkthroughStep === "submit";
   const calloutText = (() => {
     switch (walkthroughStep) {
@@ -849,8 +901,6 @@ export default function HomePage({
         return "Use this to add more files, then select Next.";
       case "file-select":
         return "Click the file to change its print options.";
-      case "summary":
-        return "This will be the total payable amount and should be paid on the shopkeeper's QR.";
       case "submit":
         return "You're all set! Submit your job or press Done to finish.";
       default:
@@ -862,7 +912,6 @@ export default function HomePage({
       case "print-type":
       case "customize":
       case "add-more":
-      case "summary":
         return "Next";
       case "submit":
         return "Done";
@@ -878,15 +927,12 @@ export default function HomePage({
       case "customize":
         if (walkthroughAddedExtra) {
           setWalkthroughAddedExtra(false);
-          setWalkthroughStep("summary");
+          setWalkthroughStep("submit");
         } else {
           setWalkthroughStep("add-more");
         }
         break;
       case "add-more":
-        setWalkthroughStep("summary");
-        break;
-      case "summary":
         setWalkthroughStep("submit");
         break;
       case "submit":
@@ -951,7 +997,7 @@ export default function HomePage({
           </div>
         </div>
       )}
-      {isWalkthroughActive && (
+      {isWalkthroughActive && !isPreparingFiles && (
         <div className="walkthrough-layer" aria-hidden="true">
           <div className="walkthrough-dim" />
           {showCallout && calloutText && (
@@ -964,15 +1010,27 @@ export default function HomePage({
               style={calloutStyle}
             >
               <span>{calloutText}</span>
-              {showCalloutButton && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {showCalloutButton && (
+                  <button
+                    type="button"
+                    className="btn btn-primary walkthrough-callout-btn"
+                    onClick={handleCalloutAction}
+                  >
+                    {calloutButtonLabel}
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="btn btn-primary walkthrough-callout-btn"
-                  onClick={handleCalloutAction}
+                  className="walkthrough-skip-btn"
+                  onClick={() => {
+                    setWalkthroughStep(null);
+                    void markOnboardingCompleted();
+                  }}
                 >
-                  {calloutButtonLabel}
+                  Skip
                 </button>
-              )}
+              </div>
             </div>
           )}
         </div>
@@ -1009,24 +1067,12 @@ export default function HomePage({
           </div>
         </div>
       )}
+      
       <header className="top-bar">
-        <div className="brand-row">
-          <div className="brand-mark" aria-hidden="true">
-            <img
-              className="brand-icon brand-icon--light"
-              src="/img/IconBlack.png"
-              alt=""
-            />
-            <img
-              className="brand-icon brand-icon--dark"
-              src="/img/iconWhite.png"
-              alt=""
-            />
-          </div>
+        <div className="brand-row" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
           <div>
-            <p className="brand-title">ZOPY</p>
-            <span className="brand-subtitle">
-              {/* {userId ? "Session active" : "Preparing session..."} */}
+            <p className="brand-title" style={{ margin: 0, fontSize: "1.5rem", fontWeight: "bold" }}>ZOPY</p>
+            <span className="brand-subtitle" style={{ fontSize: "0.85rem", opacity: 0.8 }}>
               PRINT FROM ANYWHERE
             </span>
           </div>
@@ -1053,19 +1099,11 @@ export default function HomePage({
       <main className="main-wrap">
         {error && <div className="banner-error">{error}</div>}
 
-        <section className="hero-panel">
-          <div className="hero-header">
+          <>
+            <section className="hero-panel">
+              <div className="hero-header">
             <h1>Upload Documents</h1>
             <p>Choose Color or B/W once, then set options per file.</p>
-            <div className="review-actions" style={{ marginTop: 10 }}>
-              <button
-                type="button"
-                className="btn review-action-btn"
-                onClick={handleForwardFromWhatsapp}
-              >
-                Forward from WhatsApp
-              </button>
-            </div>
           </div>
 
           {verificationCode ? (
@@ -1140,12 +1178,16 @@ export default function HomePage({
                     strokeWidth={2.2}
                     className="upload-circle-icon"
                   />
-                  <span className="upload-circle-label">Upload PDF</span>
+                  <span className="upload-circle-label">Upload Files</span>
                 </button>
                 <p>
                   {isPreparingFiles
-                    ? "Uploading files. Please wait..."
-                    : "Drag and drop or tap to browse."}
+                    ? uploadStage === "converting"
+                      ? "Converting documents. Please wait..."
+                      : uploadStage === "creating"
+                        ? "Processing files. Please wait..."
+                        : "Uploading files. Please wait..."
+                    : "PDF, Word, PowerPoint, or images."}
                 </p>
                 {isPreparingFiles && (
                   <div
@@ -1157,9 +1199,41 @@ export default function HomePage({
                       className="upload-inline-loader-dot"
                       aria-hidden="true"
                     />
-                    Uploading file(s)...
+                    {uploadStage === "converting"
+                      ? "Converting to PDF..."
+                      : uploadStage === "creating"
+                        ? "Processing..."
+                        : "Uploading file(s)..."}
                   </div>
                 )}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%" }}>
+                <button
+                  type="button"
+                  className="whatsapp-forward-btn"
+                  onClick={handleForwardFromWhatsapp}
+                  style={{ width: "100%" }}
+                >
+                  <MessageCircle size={20} />
+                  Forward from WhatsApp (Beta)
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => fetchWebDraft()}
+                  style={{ width: "100%", justifyContent: "center" }}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span className="upload-inline-loader-dot" aria-hidden="true" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                      Refreshing...
+                    </span>
+                  ) : (
+                    "Refresh Files"
+                  )}
+                </button>
               </div>
 
               {printFiles.length > 0 && (
@@ -1257,11 +1331,7 @@ export default function HomePage({
 
                   <div
                     ref={summaryCardRef}
-                    className={
-                      walkthroughStep === "summary"
-                        ? "summary-card walkthrough-target"
-                        : "summary-card"
-                    }
+                    className="summary-card"
                   >
                     <p>Total</p>
                     <strong>Rs {totals.totalCost}</strong>
@@ -1317,14 +1387,15 @@ export default function HomePage({
           )}
         </section>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf"
-          multiple
-          className="hidden-input"
-          onChange={onFilesSelected}
-        />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/jpeg,image/png,image/gif,image/bmp,image/tiff,image/webp"
+              multiple
+              className="hidden-input"
+              onChange={onFilesSelected}
+            />
+          </>
 
         <PrintJobsList userId={userId} refreshTrigger={refreshTrigger} />
       </main>

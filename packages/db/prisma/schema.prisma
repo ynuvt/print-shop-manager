@@ -193,6 +193,7 @@ model PrintJobOwner {
   userId     String
   printJobId String
   createdAt  DateTime @default(now())
+  isDone     Boolean  @default(false)
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   printJob   PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
 

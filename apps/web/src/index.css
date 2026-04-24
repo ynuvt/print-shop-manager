@@ -1,5 +1,4 @@
 @import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap");
-@import "tailwindcss";
 
 :root {
   --bg: #f5f6f8;
@@ -96,7 +95,7 @@ body {
   padding: 10px 8px;
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
 .brand-row {
@@ -296,7 +295,7 @@ body {
   box-shadow: var(--shadow);
   padding: 12px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .hero-header h1 {
@@ -376,7 +375,7 @@ body {
   margin-top: 14px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);
-  min-height: 240px;
+  min-height: 280px;
   display: grid;
   place-items: center;
   align-content: center;
@@ -439,8 +438,8 @@ body {
 }
 
 .upload-circle {
-  width: clamp(132px, 42vw, 172px);
-  height: clamp(132px, 42vw, 172px);
+  width: clamp(148px, 44vw, 190px);
+  height: clamp(148px, 44vw, 190px);
   max-width: 100%;
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 50%;
@@ -607,6 +606,94 @@ body {
   gap: 10px;
 }
 
+/* ── File Group Folders (owner/collaborator grouping) ──────── */
+.grouped-file-list {
+  gap: 16px;
+}
+
+.file-group-folder {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.file-group-header {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.file-group-header:hover {
+  background: var(--panel-muted);
+}
+
+.file-group-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file-group-icon {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.file-group-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text);
+  margin: 0;
+}
+
+.file-group-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.file-group-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-group-cost {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--brand);
+}
+
+.file-group-chevron {
+  color: var(--text-muted);
+  transition: transform 0.25s ease;
+}
+.file-group-chevron--open {
+  transform: rotate(180deg);
+}
+
+.file-group-body {
+  padding: 0 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.file-group-body .upload-file-card {
+  border-color: var(--border);
+  background: var(--panel-muted);
+}
+
+@media (prefers-color-scheme: dark) {
+  .file-group-folder {
+    border-color: var(--border);
+    background: var(--panel);
+  }
+}
+
 .upload-file-card,
 .job-row,
 .job-file-card {
@@ -620,7 +707,9 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 10px;
-  gap: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .upload-file-title {
@@ -916,7 +1005,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .file-edit-hint--action {
@@ -1211,8 +1301,184 @@ body {
 .submit-btn {
   width: 100%;
   margin-top: 12px;
-  font-size: 15px;
+}
+
+.whatsapp-forward-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 2px dashed var(--border);
+  background: var(--panel-muted);
+  color: var(--text);
   font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.whatsapp-forward-btn:hover {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+}
+
+/* Cost Split Table */
+.cost-split-table {
+  width: 100%;
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.cost-split-header {
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+  color: var(--brand-strong);
+  font-weight: 700;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.cost-split-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cost-split-row:last-child {
+  border-bottom: none;
+}
+
+.cost-split-total-row {
+  background: var(--panel);
+  font-weight: 700;
+  color: var(--text);
+  border-top: 1px solid var(--border);
+}
+
+.cost-split-row span:first-child {
+  color: var(--text-muted);
+}
+
+.cost-split-row span:last-child {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cost-split-total-row span:first-child {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-content {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 440px;
+  padding: 24px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.4);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.modal-content > p {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.confirm-summary {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  margin-bottom: 20px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.confirm-summary-group {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.confirm-summary-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.confirm-group-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--brand-strong);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.confirm-file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  padding: 4px 0;
+  color: var(--text);
+}
+
+.confirm-file-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.confirm-file-item-cost {
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.modal-actions .btn {
+  flex: 1;
 }
 
 .hidden-input {
@@ -1377,6 +1643,7 @@ body {
 .job-row-price {
   margin: 0;
   font-weight: 800;
+  color: var(--text);
 }
 
 .job-row-price-label {
@@ -1535,6 +1802,24 @@ body {
   font-size: 12px;
   font-weight: 700;
   flex-shrink: 0;
+}
+
+.walkthrough-skip-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.walkthrough-skip-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .steps-modal {

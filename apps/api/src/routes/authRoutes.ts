@@ -141,7 +141,7 @@ router.post(
           res.status(500).json({ error: "Failed to create user record" });
           return;
         }
-        await prisma.whatsAppUser.update({
+        const {phoneNumber} =  await prisma.whatsAppUser.update({
           where: { phoneNumber: whatsAppUser.phoneNumber },
           data: { userId },
         });
@@ -153,10 +153,25 @@ router.post(
           where: { id: otp.id },
           data: { usedAt: now },
         });
+        // Send sync success to the user's WhatsApp number
+        const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+        if (phoneNumberId) {
+          try {
+            await sendWhatsAppTextMessage({
+              to: whatsAppUser.phoneNumber,
+              phoneNumberId,
+              message:
+                "*Synced with WhatsApp successfully*\n\nYou can now use Zopy! To get started, send or forward us the documents you want to print.",
+            });
+          } catch (error) {
+            console.error("Failed to send WhatsApp login success message:", error);
+          }
+        }
+
         return res.status(200).json({ token, userId });
       }
 
-      await prisma.whatsAppUser.update({
+      const whatsappUser = await prisma.whatsAppUser.update({
         where: { phoneNumber: whatsAppUser.phoneNumber },
         data: { userId: tokenUserId },
       });
@@ -196,14 +211,15 @@ router.post(
 
     const { token, userId } = generateTokenForUser(resolvedUserId, "customer");
 
-    const senderPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-    if (senderPhoneNumberId) {
+    // Send sync success to the user's WhatsApp number
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (phoneNumberId) {
       try {
         await sendWhatsAppTextMessage({
           to: whatsAppUser.phoneNumber,
-          phoneNumberId: senderPhoneNumberId,
+          phoneNumberId,
           message:
-            "*Synced with WhatsApp successfully* ✅\n\nYou can use Zopy now.",
+            "*Synced with WhatsApp successfully*\n\nYou can now use Zopy! To get started, send or forward us the documents you want to print.",
         });
       } catch (error) {
         console.error("Failed to send WhatsApp login success message:", error);

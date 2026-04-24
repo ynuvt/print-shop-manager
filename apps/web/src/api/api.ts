@@ -17,6 +17,7 @@ export type UserPrintJobFile = {
   uploadedByDisplayName?: string | null;
   uploadedByRole?: "OWNER" | "COLLABORATOR";
   fileCost?: number;
+  uploaderDone?: boolean;
 };
 
 export type UserPrintJob = {
@@ -39,6 +40,7 @@ export type UserPrintJob = {
     canSubmit: boolean;
   };
   viewerCost?: number;
+  isCollabDone?: boolean;
   costBreakdown?: {
     perUser: Array<{
       key: string;
@@ -206,7 +208,7 @@ export async function requestPresignedUploads(
   const payload = {
     files: files.map((file) => ({
       name: file.name,
-      contentType: file.type || "application/pdf",
+      contentType: file.type || "application/octet-stream",
     })),
   };
 
@@ -230,7 +232,7 @@ export async function uploadFileToR2(
   const response = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
-      "Content-Type": file.type || "application/pdf",
+      "Content-Type": file.type || "application/octet-stream",
     },
     body: file,
   });
@@ -261,7 +263,7 @@ export async function createPrintJobFromUrls(
 
 export async function getWebDraftJob(): Promise<UserPrintJob | null> {
   const token = getToken();
-  const res = await axios.get(`${BASE_URL}/jobs/web-draft`, {
+  const res = await axios.get(`${BASE_URL}/jobs/web-draft?t=${Date.now()}`, {
     headers: { authorization: `Bearer ${token}` },
   });
   return res.data ? (res.data as UserPrintJob) : null;

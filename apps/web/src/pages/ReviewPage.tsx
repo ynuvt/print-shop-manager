@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { FileText, SlidersHorizontal, X } from "lucide-react";
+import { FileText, SlidersHorizontal, X, ChevronDown, FolderOpen, Upload } from "lucide-react";
 import type { PrintFileOption } from "@printowl/types";
 import {
   addFilesToJobFromUrls,
@@ -33,20 +33,22 @@ function ToggleGroup<T extends string>({
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   options: { label: string; value: T }[];
   value: T;
   onChange: (v: T) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="toggle-group" role="radiogroup">
+    <div className="toggle-group" role="radiogroup" style={{ opacity: disabled ? 0.6 : 1, pointerEvents: disabled ? "none" : "auto" }}>
       {options.map((opt) => (
         <button
           key={opt.value}
           type="button"
           className={value === opt.value ? "toggle-item active" : "toggle-item"}
           data-value={opt.value}
-          onClick={() => onChange(opt.value)}
+          onClick={() => { if (!disabled) onChange(opt.value); }}
         >
           {opt.label}
         </button>
@@ -64,6 +66,7 @@ type ReviewFileState = {
   pageRangeError: string;
   uploadedByDisplayName?: string | null;
   uploadedByRole?: "OWNER" | "COLLABORATOR";
+  uploaderDone?: boolean;
 };
 
 type GlobalColorMode = "BW" | "COLOR" | "MIXED";
@@ -134,12 +137,285 @@ function buildReviewFiles(
       pageRangeError,
       uploadedByDisplayName: file.uploadedByDisplayName ?? null,
       uploadedByRole: file.uploadedByRole,
+      uploaderDone: file.uploaderDone,
     };
   });
 }
 
-export default function ReviewPage() {
-  const { jobId } = useParams<{ jobId: string }>();
+function FileCard({
+  file,
+  idx,
+  expandedIdx,
+  toggleFileExpanded,
+  handleCardClick,
+  updateFileOptions,
+  removeFile,
+  isReadonly = false,
+}: {
+  file: ReviewFileState;
+  idx: number;
+  expandedIdx: number | null;
+  toggleFileExpanded: (idx: number) => void;
+  handleCardClick: (idx: number, event: MouseEvent) => void;
+  updateFileOptions: (idx: number, patch: Partial<PrintFileOption>) => void;
+  removeFile: (idx: number) => Promise<void>;
+  isReadonly?: boolean;
+}) {
+  return (
+    <article
+      className="upload-file-card review-file-card"
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        handleCardClick(idx, event);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggleFileExpanded(idx);
+        }
+      }}
+      style={{ cursor: "pointer" }}
+    >
+      <div className="upload-file-head">
+        <button
+          type="button"
+          className="upload-file-title"
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleFileExpanded(idx);
+          }}
+          style={{ cursor: "pointer" }}
+        >
+          <div className="file-icon" aria-hidden="true">
+            <FileText size={18} />
+          </div>
+          <div>
+            <p>{file.name}</p>
+            <span>
+              {file.pages} pages • Rs{" "}
+              {calculateFileCost(file.pages, file.options)}
+            </span>
+          </div>
+        </button>
+        <div className="review-file-actions">
+          <button
+            type="button"
+            className="file-edit-hint file-edit-hint--action"
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleFileExpanded(idx);
+            }}
+          >
+            <SlidersHorizontal size={12} />
+            {isReadonly ? "View details" : "Edit details"}
+          </button>
+          <a href={file.url} target="_blank" rel="noreferrer">
+            View File
+          </a>
+          <button
+            type="button"
+            className="icon-btn remove-file-btn"
+            onClick={(event) => {
+              event.stopPropagation();
+              void removeFile(idx);
+            }}
+            aria-label="Remove file"
+          >
+            <X size={16} strokeWidth={2.4} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      {expandedIdx === idx && (
+        <div className="upload-file-body">
+          {isReadonly && (
+            <div style={{ padding: "8px 12px", background: "var(--bg-card)", color: "var(--text-muted)", fontSize: 13, borderTop: "1px solid var(--border-color)", marginBottom: "16px", borderRadius: 8 }}>
+              Options locked. Contact owner if you need to make changes.
+            </div>
+          )}
+          <div>
+            <p className="field-label">Print Sides</p>
+            <ToggleGroup
+              options={[
+                { label: "One Side", value: "ONE" },
+                { label: "Both Sides", value: "BOTH" },
+              ]}
+              value={file.options.duplex}
+              onChange={(v) => updateFileOptions(idx, { duplex: v })}
+              disabled={isReadonly}
+            />
+          </div>
+
+          <div>
+            <p className="field-label">Orientation</p>
+            <ToggleGroup
+              options={[
+                { label: "Vertical", value: "PORTRAIT" },
+                { label: "Horizontal", value: "LANDSCAPE" },
+              ]}
+              value={file.options.orientation}
+              onChange={(v) => updateFileOptions(idx, { orientation: v })}
+              disabled={isReadonly}
+            />
+          </div>
+
+          <div>
+            <p className="field-label">Scale</p>
+            <ToggleGroup
+              options={[
+                { label: "Fit to paper", value: "FIT" },
+                { label: "Original size", value: "NOSCALE" },
+              ]}
+              value={file.options.scaleMode}
+              onChange={(v) => updateFileOptions(idx, { scaleMode: v })}
+              disabled={isReadonly}
+            />
+          </div>
+
+          <div>
+            <p className="field-label">Page Range</p>
+            <ToggleGroup
+              options={[
+                { label: "All Pages", value: "ALL" },
+                { label: "Custom", value: "CUSTOM" },
+              ]}
+              value={file.options.pageRange}
+              onChange={(v) =>
+                updateFileOptions(idx, {
+                  pageRange: v,
+                  customRange: "",
+                })
+              }
+              disabled={isReadonly}
+            />
+
+            {file.options.pageRange === "CUSTOM" && (
+              <div className="field-spacing">
+                <input
+                  type="text"
+                  value={file.options.customRange}
+                  onChange={(e) =>
+                    updateFileOptions(idx, {
+                      customRange: e.target.value,
+                    })
+                  }
+                  disabled={isReadonly}
+                  placeholder={`1-5, 8, 10-12 (total ${file.pages} pages)`}
+                  className={
+                    file.pageRangeError
+                      ? "text-input invalid"
+                      : "text-input"
+                  }
+                />
+                {file.pageRangeError && (
+                  <p className="field-error">{file.pageRangeError}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="field-label">Copies</p>
+            <div className="counter">
+              <button
+                type="button"
+                onClick={() =>
+                  updateFileOptions(idx, {
+                    copies: Math.max(1, file.options.copies - 1),
+                  })
+                }
+                disabled={isReadonly}
+              >
+                -
+              </button>
+              <span>{file.options.copies}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateFileOptions(idx, {
+                    copies: file.options.copies + 1,
+                  })
+                }
+                disabled={isReadonly}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function FileGroupFolder({
+  label,
+  cost,
+  pages,
+  fileCount,
+  defaultOpen,
+  canRemove,
+  onRemoveGroup,
+  children,
+}: {
+  label: string;
+  cost: number;
+  pages: number;
+  fileCount: number;
+  defaultOpen: boolean;
+  canRemove?: boolean;
+  onRemoveGroup?: () => void;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className={`file-group-folder ${open ? "file-group-folder--open" : ""}`}>
+      <button
+        type="button"
+        className="file-group-header"
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <div className="file-group-header-left">
+          <FolderOpen size={18} className="file-group-icon" />
+          <div>
+            <p className="file-group-label">{label}</p>
+            <span className="file-group-meta">
+              {fileCount} file{fileCount !== 1 ? "s" : ""} • {pages} pages
+            </span>
+          </div>
+        </div>
+        <div className="file-group-header-right">
+          <span className="file-group-cost">Rs {cost}</span>
+          <ChevronDown
+            size={18}
+            className={`file-group-chevron ${open ? "file-group-chevron--open" : ""}`}
+          />
+          {canRemove && (
+            <div
+              className="icon-btn remove-file-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onRemoveGroup) onRemoveGroup();
+              }}
+              style={{ marginLeft: 8 }}
+              aria-label="Remove folder"
+            >
+              <X size={16} strokeWidth={2.4} aria-hidden="true" />
+            </div>
+          )}
+        </div>
+      </button>
+      {open && <div className="file-group-body">{children}</div>}
+    </div>
+  );
+}
+
+
+export default function ReviewPage({ draftJobId, onExit }: { draftJobId?: string, onExit?: () => void } = {}) {
+  const params = useParams<{ jobId: string }>();
+  const jobId = draftJobId || params.jobId;
   const navigate = useNavigate();
   const [jobTitle, setJobTitle] = useState<string>("");
   const [files, setFiles] = useState<ReviewFileState[]>([]);
@@ -155,8 +431,13 @@ export default function ReviewPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAddingFiles, setIsAddingFiles] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [whatsappSynced, setWhatsappSynced] = useState<boolean>(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showCollabConfirmModal, setShowCollabConfirmModal] = useState(false);
+  const [isCollabDone, setIsCollabDone] = useState(false);
+  const [jobStatus, setJobStatus] = useState<string>("DRAFT");
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const { notify } = useNotifications();
   const [userId, setUserId] = useState<string | null>(() =>
@@ -267,16 +548,21 @@ export default function ReviewPage() {
       const session = await getUserSession();
       setWhatsappSynced(!!session.whatsappSynced);
       const job = await getPrintJobByIdPublic(jobId);
-      setViewerRole((job as UserPrintJob).viewerRole ?? null);
-      setCostBreakdown((job as UserPrintJob).costBreakdown ?? null);
-      if ((job as UserPrintJob).viewerRole === "OWNER") {
-        navigate("/", { replace: true });
+      const role = (job as UserPrintJob).viewerRole ?? null;
+      setViewerRole(role);
+      
+      if (!draftJobId && role === "OWNER") {
+        navigate("/");
         return;
       }
+      
+      setJobStatus((job as UserPrintJob).status);
+      setCostBreakdown((job as UserPrintJob).costBreakdown ?? null);
       const whatsAppLabel = job.userMetadata?.name?.trim()
         ? `${job.userMetadata.name}`
         : (job.userMetadata?.phoneNumber ?? "");
       setJobTitle(whatsAppLabel ? `WhatsApp: ${whatsAppLabel}` : "Review Job");
+      setIsCollabDone((job as UserPrintJob).isCollabDone ?? false);
       const storedOptions = getStoredOptions(jobId);
       const nextFiles = buildReviewFiles(job, storedOptions);
       setFiles(nextFiles);
@@ -451,8 +737,13 @@ export default function ReviewPage() {
   };
 
   const removeFile = async (idx: number) => {
+    if (jobStatus !== "DRAFT") {
+      notify("This job has already been submitted and files cannot be removed.", { variant: "error" });
+      return;
+    }
+
     const confirmed = window.confirm(
-      "Remove this file? This action cannot be undone. You will need to create a new job to add it back.",
+      "Remove this file? This action cannot be undone.",
     );
     if (!confirmed) return;
     const target = files[idx];
@@ -472,21 +763,64 @@ export default function ReviewPage() {
     }
   };
 
-  const onSubmit = async () => {
+  const removeFileGroup = async (label: string, fileIds: string[]) => {
+    if (jobStatus !== "DRAFT") {
+      notify("This job has already been submitted and files cannot be removed.", { variant: "error" });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to remove all files from ${label}?`,
+    );
+    if (!confirmed) return;
+    try {
+      await Promise.all(fileIds.map((id) => deleteUserFile(id)));
+      setFiles((prev) => prev.filter((f) => !fileIds.includes(f.id)));
+      if (jobId) {
+        void refreshJob("manual");
+      }
+    } catch (err) {
+      notify(
+        err instanceof Error ? err.message : "Failed to remove folder.",
+        { variant: "error" },
+      );
+    }
+  };
+
+  const handleShowConfirm = async () => {
     if (isSubmitting || !files.length || hasErrors) return;
 
+    if (viewerRole === "COLLABORATOR") {
+      setShowCollabConfirmModal(true);
+      return;
+    }
+
+    setShowConfirmModal(true);
+  };
+
+  const confirmCollabDone = async () => {
+    setShowCollabConfirmModal(false);
     setIsSubmitting(true);
     setError(null);
     try {
-      if (viewerRole === "COLLABORATOR") {
-        const result = await confirmReviewJob(jobId ?? "");
-        notify(`Confirmed. Your current files total: ₹${result.userCost}`, {
-          variant: "success",
-        });
-        navigate("/");
-        return;
-      }
+      await persistCurrentOptionsNow(false);
+      const result = await confirmReviewJob(jobId ?? "");
+      notify(`Confirmed! Your files total: ₹${result.userCost}`, {
+        variant: "success",
+      });
+      setIsCollabDone(true);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to confirm.", { variant: "error" });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
+  const confirmAndSubmit = async () => {
+    setShowConfirmModal(false);
+    setIsSubmitting(true);
+    setError(null);
+    try {
       const payload = {
         jobId: jobId ?? "",
         files: files.map((file) => ({
@@ -499,7 +833,9 @@ export default function ReviewPage() {
       };
       const result = await submitWhatsappJobReview(payload);
       setVerificationCode(String(result.verificationCode));
-      notify("Job updated successfully.", { variant: "success" });
+      // Refresh to get cost breakdown
+      await refreshJob("socket");
+      notify("Job submitted successfully!", { variant: "success" });
       localStorage.setItem(
         "lastReviewVerificationCode",
         String(result.verificationCode),
@@ -507,7 +843,6 @@ export default function ReviewPage() {
       if (jobId) {
         clearStoredOptions(jobId);
       }
-      navigate("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit job.");
     } finally {
@@ -613,50 +948,58 @@ export default function ReviewPage() {
     );
   }
 
-  return (
-    <div className="app-shell">
-      <header className="top-bar">
-        <Link to="/" className="brand-row">
-          <div className="brand-mark" aria-hidden="true">
-            <img
-              className="brand-icon brand-icon--light"
-              src="/img/IconBlack.png"
-              alt=""
-            />
-            <img
-              className="brand-icon brand-icon--dark"
-              src="/img/iconWhite.png"
-              alt=""
-            />
-          </div>
-          <div>
-            <p className="brand-title">ZOPY</p>
-            <span className="brand-subtitle">REVIEW & CONFIRM</span>
-          </div>
-        </Link>
-        <Link to="/" className="ghost-link">
-          Back to Upload
-        </Link>
-      </header>
-
+  const content = (
+    <>
       <main className="main-wrap review-grid">
         <section className="hero-panel">
           <div className="hero-header">
-            <h1>{jobTitle || "Review Job"}</h1>
-            <p>Confirm your print options, remove files, and submit.</p>
+            <h1>Upload Documents</h1>
+            <p>Choose Color or B/W once, then set options per file.</p>
+            {jobTitle && jobTitle !== "Review Job" && (
+              <div style={{ marginTop: 10, color: "var(--primary)", fontWeight: 600 }}>{jobTitle}</div>
+            )}
           </div>
 
-          <div className="section-head">
-            <h2>Files in this job</h2>
-            <div className="review-actions">
+          {!isCollabDone && (
+            <div
+              className={isDragActive ? "upload-dropzone active" : "upload-dropzone"}
+              onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
+              onDragLeave={() => setIsDragActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragActive(false);
+                const files = Array.from(e.dataTransfer.files).filter((f) =>
+                  f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
+                );
+                if (files.length) {
+                  void addMoreDocumentsFromDevice(files).finally(() => {
+                    if (addMoreInputRef.current) addMoreInputRef.current.value = "";
+                  });
+                } else {
+                  notify("Please drop only PDF files.", { variant: "error" });
+                }
+              }}
+            >
               <button
                 type="button"
-                className="btn review-action-btn"
+                className="upload-circle"
                 onClick={() => addMoreInputRef.current?.click()}
                 disabled={isAddingFiles || isSubmitting}
               >
-                {isAddingFiles ? "Adding..." : "Add more document from device"}
+                <Upload size={34} strokeWidth={2.2} className="upload-circle-icon" />
+                <span className="upload-circle-label">Upload PDF</span>
               </button>
+              <p>
+                {isAddingFiles
+                  ? "Uploading files. Please wait..."
+                  : "Drag and drop or tap to browse."}
+              </p>
+            </div>
+          )}
+
+          <div className="section-head" style={{ marginTop: 24 }}>
+            <h2>Files in this job</h2>
+            <div className="review-actions">
               <button
                 type="button"
                 className="btn review-action-btn review-action-btn--subtle"
@@ -668,214 +1011,157 @@ export default function ReviewPage() {
             </div>
           </div>
 
-          <div className="print-mode-top">
-            <p className="field-label">Print Type (applies to all files)</p>
-            <ToggleGroup<GlobalColorMode>
-              options={[
-                { label: "Color Print", value: "COLOR" },
-                { label: "B/W Print", value: "BW" },
-              ]}
-              value={globalColorMode}
-              onChange={(v) => {
-                if (v === "MIXED") return;
-                applyGlobalColorMode(v);
-              }}
-            />
-            {globalColorMode === "MIXED" && (
-              <p className="color-mode-note">
-                This job has mixed print types. Pick one to apply it to all
-                files.
-              </p>
-            )}
-          </div>
-
-          <div className="upload-file-list">
-            {files.map((file, idx) => (
-              <article
-                className="upload-file-card review-file-card"
-                key={file.id}
-                role="button"
-                tabIndex={0}
-                onClick={(event) => handleCardClick(idx, event)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    toggleFileExpanded(idx);
-                  }
+          {viewerRole !== "COLLABORATOR" && !isCollabDone && (
+            <div className="print-mode-top">
+              <p className="field-label">Print Type (applies to all files)</p>
+              <ToggleGroup<GlobalColorMode>
+                options={[
+                  { label: "Color Print", value: "COLOR" },
+                  { label: "B/W Print", value: "BW" },
+                ]}
+                value={globalColorMode}
+                onChange={(v) => {
+                  if (v === "MIXED") return;
+                  applyGlobalColorMode(v);
                 }}
-              >
-                <div className="upload-file-head">
-                  <button
-                    type="button"
-                    className="upload-file-title"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleFileExpanded(idx);
-                    }}
-                  >
-                    <div className="file-icon" aria-hidden="true">
-                      <FileText size={18} />
-                    </div>
-                    <div>
-                      <p>{file.name}</p>
-                      <span>
-                        {file.pages} pages • Rs{" "}
-                        {calculateFileCost(file.pages, file.options)}
-                      </span>
-                      {viewerRole === "OWNER" && file.uploadedByDisplayName ? (
-                        <span className="summary-meta">
-                          Uploaded by {file.uploadedByDisplayName}{" "}
-                          {file.uploadedByRole === "COLLABORATOR"
-                            ? "(Collaborator)"
-                            : "(Owner)"}
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
-                  <div className="review-file-actions">
-                    <button
-                      type="button"
-                      className="file-edit-hint file-edit-hint--action"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleFileExpanded(idx);
-                      }}
-                    >
-                      <SlidersHorizontal size={12} />
-                      Edit details
-                    </button>
-                    <a href={file.url} target="_blank" rel="noreferrer">
-                      View File
-                    </a>
-                    <button
-                      type="button"
-                      className="icon-btn remove-file-btn"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void removeFile(idx);
-                      }}
-                      aria-label="Remove file"
-                    >
-                      <X size={16} strokeWidth={2.4} aria-hidden="true" />
-                    </button>
-                  </div>
+              />
+              {globalColorMode === "MIXED" && (
+                <p className="color-mode-note">
+                  This job has mixed print types. Pick one to apply it to all
+                  files.
+                </p>
+              )}
+            </div>
+          )}
+
+          {(() => {
+            // Group files by uploader
+            type FileGroup = {
+              label: string;
+              role: "OWNER" | "COLLABORATOR";
+              files: { file: ReviewFileState; globalIdx: number }[];
+            };
+
+            const groups: FileGroup[] = [];
+            const ownerGroup: FileGroup = { label: "My Documents", role: "OWNER", files: [] };
+            const collabMap = new Map<string, FileGroup>();
+
+            files.forEach((file, idx) => {
+              if (file.uploadedByRole === "COLLABORATOR" && file.uploadedByDisplayName) {
+                const key = file.uploadedByDisplayName;
+                if (!collabMap.has(key)) {
+                  collabMap.set(key, {
+                    label: `${key}'s Documents`,
+                    role: "COLLABORATOR",
+                    files: [],
+                  });
+                }
+                collabMap.get(key)!.files.push({ file, globalIdx: idx });
+              } else {
+                ownerGroup.files.push({ file, globalIdx: idx });
+              }
+            });
+
+            if (ownerGroup.files.length) groups.push(ownerGroup);
+            collabMap.forEach((g) => groups.push(g));
+
+            const hasCollaborators = collabMap.size > 0;
+
+            // Only show folders if there are collaborators AND the viewer is the owner
+            if (viewerRole === "COLLABORATOR" || !hasCollaborators) {
+              return (
+                <div className="upload-file-list">
+                  {files.map((file, idx) => (
+                    <FileCard
+                      key={file.id}
+                      file={file}
+                      idx={idx}
+                      expandedIdx={expandedIdx}
+                      toggleFileExpanded={toggleFileExpanded}
+                      handleCardClick={handleCardClick}
+                      updateFileOptions={updateFileOptions}
+                      removeFile={removeFile}
+                      isReadonly={isCollabDone}
+                    />
+                  ))}
                 </div>
+              );
+            }
 
-                {expandedIdx === idx && (
-                  <div className="upload-file-body">
-                    <div>
-                      <p className="field-label">Print Sides</p>
-                      <ToggleGroup
-                        options={[
-                          { label: "One Side", value: "ONE" },
-                          { label: "Both Sides", value: "BOTH" },
-                        ]}
-                        value={file.options.duplex}
-                        onChange={(v) => updateFileOptions(idx, { duplex: v })}
-                      />
-                    </div>
-
-                    <div>
-                      <p className="field-label">Orientation</p>
-                      <ToggleGroup
-                        options={[
-                          { label: "Vertical", value: "PORTRAIT" },
-                          { label: "Horizontal", value: "LANDSCAPE" },
-                        ]}
-                        value={file.options.orientation}
-                        onChange={(v) =>
-                          updateFileOptions(idx, { orientation: v })
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <p className="field-label">Scale</p>
-                      <ToggleGroup
-                        options={[
-                          { label: "Fit to paper", value: "FIT" },
-                          { label: "Original size", value: "NOSCALE" },
-                        ]}
-                        value={file.options.scaleMode}
-                        onChange={(v) =>
-                          updateFileOptions(idx, { scaleMode: v })
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <p className="field-label">Page Range</p>
-                      <ToggleGroup
-                        options={[
-                          { label: "All Pages", value: "ALL" },
-                          { label: "Custom", value: "CUSTOM" },
-                        ]}
-                        value={file.options.pageRange}
-                        onChange={(v) =>
-                          updateFileOptions(idx, {
-                            pageRange: v,
-                            customRange: "",
-                          })
-                        }
-                      />
-
-                      {file.options.pageRange === "CUSTOM" && (
-                        <div className="field-spacing">
-                          <input
-                            type="text"
-                            value={file.options.customRange}
-                            onChange={(e) =>
-                              updateFileOptions(idx, {
-                                customRange: e.target.value,
-                              })
-                            }
-                            placeholder={`1-5, 8, 10-12 (total ${file.pages} pages)`}
-                            className={
-                              file.pageRangeError
-                                ? "text-input invalid"
-                                : "text-input"
-                            }
-                          />
-                          {file.pageRangeError && (
-                            <p className="field-error">{file.pageRangeError}</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="field-label">Copies</p>
-                      <div className="counter">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateFileOptions(idx, {
-                              copies: Math.max(1, file.options.copies - 1),
-                            })
-                          }
-                        >
-                          -
-                        </button>
-                        <span>{file.options.copies}</span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateFileOptions(idx, {
-                              copies: file.options.copies + 1,
-                            })
-                          }
-                        >
-                          +
-                        </button>
-                      </div>
+            return (
+              <div className="upload-file-list grouped-file-list">
+                {ownerGroup.files.length > 0 && (
+                  <div className="owner-flat-list" style={{ marginBottom: 24 }}>
+                    <h3 style={{ fontSize: 16, marginBottom: 12, fontWeight: 600 }}>My Documents</h3>
+                    <div className="upload-file-list">
+                      {ownerGroup.files.map(({ file, globalIdx }) => (
+                        <FileCard
+                          key={file.id}
+                          file={file}
+                          idx={globalIdx}
+                          expandedIdx={expandedIdx}
+                          toggleFileExpanded={toggleFileExpanded}
+                          handleCardClick={handleCardClick}
+                          updateFileOptions={updateFileOptions}
+                          removeFile={removeFile}
+                        />
+                      ))}
                     </div>
                   </div>
                 )}
-              </article>
-            ))}
-          </div>
+                {Array.from(collabMap.values()).map((group) => {
+                  const groupCost = group.files.reduce(
+                    (sum, { file }) => sum + calculateFileCost(file.pages, file.options),
+                    0,
+                  );
+                  const groupPages = group.files.reduce(
+                    (sum, { file }) => sum + file.pages,
+                    0,
+                  );
+                  const canRemove = true; // Owner can remove any collaborator folder
+                  const fileIds = group.files.map((f) => f.file.id);
 
-          <div className="summary-card">
+                  return (
+                    <FileGroupFolder
+                      key={group.label}
+                      label={group.label}
+                      cost={groupCost}
+                      pages={groupPages}
+                      fileCount={group.files.length}
+                      defaultOpen={false}
+                      canRemove={canRemove}
+                      onRemoveGroup={() => removeFileGroup(group.label, fileIds)}
+                    >
+                      {group.files.map(({ file, globalIdx }) => {
+                        const isUploaderDone = file.uploaderDone ?? false;
+                        return (
+                          <FileCard
+                            key={file.id}
+                            file={file}
+                            idx={globalIdx}
+                            expandedIdx={expandedIdx}
+                            toggleFileExpanded={toggleFileExpanded}
+                            handleCardClick={handleCardClick}
+                            updateFileOptions={updateFileOptions}
+                            removeFile={removeFile}
+                            isReadonly={!isUploaderDone}
+                          />
+                        );
+                      })}
+                      {group.files.length > 0 && !(group.files[0].file.uploaderDone) && (
+                        <div style={{ padding: "8px 12px", background: "var(--bg-card)", color: "var(--text-muted)", fontSize: 13, borderTop: "1px solid var(--border-color)", borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+                          The person hasn't confirmed their print and options. You cannot edit it yet.
+                        </div>
+                      )}
+                    </FileGroupFolder>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {!isCollabDone && (
+            <div className="summary-card">
             <p>Total</p>
             <strong>Rs {totals.totalCost}</strong>
             <span>
@@ -883,22 +1169,41 @@ export default function ReviewPage() {
               {totals.estimatedTime} min
             </span>
             {viewerRole === "OWNER" && costBreakdown?.perUser?.length ? (
-              <div className="summary-meta" style={{ marginTop: 10 }}>
+              <div className="cost-split-table">
+                <div className="cost-split-header">Cost Breakdown</div>
                 {costBreakdown.perUser.map((u) => (
-                  <div key={u.key}>
-                    <strong>{u.displayName}</strong>: Rs {u.cost}
+                  <div key={u.key} className="cost-split-row">
+                    <span>{u.displayName}</span>
+                    <span>Rs {u.cost}</span>
                   </div>
                 ))}
-                <div style={{ marginTop: 6 }}>
-                  <strong>Total</strong>: Rs {costBreakdown.totalCost}
+                <div className="cost-split-row cost-split-total-row">
+                  <span>Total</span>
+                  <span>Rs {costBreakdown.totalCost}</span>
                 </div>
               </div>
             ) : null}
-          </div>
+            </div>
+          )}
 
           {verificationCode ? (
             <div className="success-card">
-              <p>Job submitted successfully</p>
+              <p>Job submitted successfully!</p>
+              {costBreakdown?.perUser?.length ? (
+                <div className="cost-split-table">
+                  <div className="cost-split-header">Cost Breakdown</div>
+                  {costBreakdown.perUser.map((u) => (
+                    <div key={u.key} className="cost-split-row">
+                      <span>{u.displayName}</span>
+                      <span>Rs {u.cost}</span>
+                    </div>
+                  ))}
+                  <div className="cost-split-row cost-split-total-row">
+                    <span>Total</span>
+                    <span>Rs {costBreakdown.totalCost}</span>
+                  </div>
+                </div>
+              ) : null}
               <div
                 className="otp-digits"
                 aria-label={`Verification code ${verificationCode}`}
@@ -910,8 +1215,31 @@ export default function ReviewPage() {
                 ))}
               </div>
               <span className="highlight-text">
-                Share this with the shopkeeper to collect prints.
+                Share this code with the shopkeeper to collect your prints.
               </span>
+              <button
+                type="button"
+                className="btn"
+                style={{ marginTop: 16 }}
+                onClick={() => onExit ? onExit() : navigate("/")}
+              >
+                Go Home
+              </button>
+            </div>
+          ) : isCollabDone ? (
+            <div className="success-card">
+              <p>You're all set!</p>
+              <span className="highlight-text" style={{ marginTop: 12 }}>
+                Your files have been saved. The owner will review and submit the final print job.
+              </span>
+              <button
+                type="button"
+                className="btn"
+                style={{ marginTop: 16 }}
+                onClick={() => onExit ? onExit() : navigate("/")}
+              >
+                Go Home
+              </button>
             </div>
           ) : (
             <button
@@ -921,14 +1249,18 @@ export default function ReviewPage() {
                   ? "btn btn-primary submit-btn"
                   : "btn btn-disabled submit-btn"
               }
-              onClick={() => void onSubmit()}
+              onClick={() => void handleShowConfirm()}
               disabled={isSubmitting || hasErrors || files.length === 0}
             >
-              {isSubmitting ? "Submitting..." : "Confirm and Print"}
+              {isSubmitting
+                ? "Submitting..."
+                : viewerRole === "COLLABORATOR"
+                  ? "I'm Done"
+                  : "Confirm and Print"}
             </button>
           )}
 
-          {hasErrors && (
+          {hasErrors && !isCollabDone && (
             <p className="field-error">
               Fix the highlighted file options before submitting.
             </p>
@@ -973,7 +1305,7 @@ export default function ReviewPage() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => navigate("/")}
+                onClick={() => onExit ? onExit() : navigate("/")}
               >
                 Go Home
               </button>
@@ -996,16 +1328,145 @@ export default function ReviewPage() {
         </div>
       )}
 
-      <footer className="site-footer">
-        <div className="site-footer-inner">
-          <Link to="/terms" className="footer-link">
-            Terms & Conditions
-          </Link>
-          <Link to="/about" className="footer-link">
-            About Us
-          </Link>
+      {showConfirmModal && (
+        <div className="modal-overlay">
+          <div className="modal-content review-confirm-modal">
+            <h2>Confirm Submission</h2>
+            <p>Review the job details before submitting.</p>
+
+            <div className="confirm-summary">
+              {(() => {
+                const groupsMap = new Map<string, { label: string; cost: number; files: ReviewFileState[] }>();
+                
+                files.forEach((file) => {
+                  const key = file.uploadedByDisplayName || "My Documents";
+                  const label = key === "My Documents" ? key : `${key}'s Documents`;
+                  if (!groupsMap.has(key)) {
+                    groupsMap.set(key, { label, cost: 0, files: [] });
+                  }
+                  const group = groupsMap.get(key)!;
+                  group.files.push(file);
+                  group.cost += calculateFileCost(file.pages, file.options);
+                });
+
+                return Array.from(groupsMap.values()).map((group) => (
+                  <div key={group.label} className="confirm-summary-group">
+                    <div className="confirm-group-label">{group.label} (Rs {group.cost})</div>
+                    {group.files.map((file) => (
+                      <div key={file.id} className="confirm-file-item">
+                        <span className="confirm-file-item-name">{file.name}</span>
+                        <span className="confirm-file-item-cost">Rs {calculateFileCost(file.pages, file.options)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()}
+            </div>
+            
+            <div className="cost-split-table" style={{ marginTop: 0, marginBottom: 20 }}>
+              <div className="cost-split-row cost-split-total-row">
+                <span>Total Amount</span>
+                <span>Rs {files.reduce((sum, file) => sum + calculateFileCost(file.pages, file.options), 0)}</span>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn review-action-btn"
+                onClick={() => setShowConfirmModal(false)}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmAndSubmit()}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Submitting..." : "Submit Job"}
+              </button>
+            </div>
+          </div>
         </div>
-      </footer>
+      )}
+
+      {showCollabConfirmModal && (
+        <div className="modal-overlay">
+          <div className="modal-content review-confirm-modal">
+            <h2>Confirm Submission</h2>
+            <p>
+              Are you sure you're done? Once submitted, you cannot change anything. 
+              You'll need to contact the owner if you want to make further changes.
+            </p>
+            <div className="modal-actions" style={{ marginTop: 20 }}>
+              <button
+                type="button"
+                className="btn review-action-btn"
+                onClick={() => setShowCollabConfirmModal(false)}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmCollabDone()}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Confirming..." : "Yes, I'm Done"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!draftJobId && (
+        <footer className="site-footer">
+          <div className="site-footer-inner">
+            <Link to="/terms" className="footer-link">
+              Terms & Conditions
+            </Link>
+            <Link to="/about" className="footer-link">
+              About Us
+            </Link>
+          </div>
+        </footer>
+      )}
+    </>
+  );
+
+  if (draftJobId) {
+    return content;
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="top-bar">
+        <Link to="/" className="brand-row">
+          <div className="brand-mark" aria-hidden="true">
+            <img
+              className="brand-icon brand-icon--light"
+              src="/img/IconBlack.png"
+              alt=""
+            />
+            <img
+              className="brand-icon brand-icon--dark"
+              src="/img/iconWhite.png"
+              alt=""
+            />
+          </div>
+          <div>
+            <p className="brand-title">ZOPY</p>
+            <span className="brand-subtitle">REVIEW & CONFIRM</span>
+          </div>
+        </Link>
+        <Link to="/" className="ghost-link">
+          Back to Upload
+        </Link>
+      </header>
+      {content}
     </div>
   );
 }

@@ -35,7 +35,36 @@ function buildReviewUrl(jobId: string): string | null {
   if (!FRONTEND_BASE_URL) {
     return null;
   }
-  return `${FRONTEND_BASE_URL}/review/${jobId}`;
+  // Review page is commented out for now – redirect to home page
+  return `${FRONTEND_BASE_URL}/`;
+}
+
+/**
+ * Build a unified draft "where" clause: by userId first (if synced), fall back to phone number.
+ * Returns the where clause to use in prisma.printJob.findFirst.
+ */
+async function getUnifiedDraftWhere(phoneNumber: string) {
+  const waUser = await prisma.whatsAppUser.findUnique({
+    where: { phoneNumber },
+    select: { userId: true },
+  });
+
+  if (waUser?.userId) {
+    // Check if a draft exists for this userId
+    const byUser = await prisma.printJob.findFirst({
+      where: { userId: waUser.userId, status: PrintJobStatus.DRAFT },
+      select: { id: true },
+    });
+    if (byUser) {
+      return { userId: waUser.userId, status: PrintJobStatus.DRAFT };
+    }
+  }
+
+  // Fall back to phone-number-based lookup
+  return {
+    userMetadata: { phoneNumber },
+    status: PrintJobStatus.DRAFT,
+  };
 }
 
 async function generateWhatsAppSyncLink(phoneNumber: string): Promise<string | null> {
@@ -281,58 +310,130 @@ Please try again or send a different file.`,
                 };
                 const cost = calculateFileCost(pages, defaultOptions);
 
-                const existingJob = await prisma.printJob.findFirst({
-                  where: {
-                    userMetadata: {
-                      phoneNumber: userData.displayPhoneNumber,
-                    },
-                    status: PrintJobStatus.DRAFT,
-                  },
-                  select: {
-                    id: true,
-                    totalCost: true,
-                    totalPages: true,
-                    files: {
-                      orderBy: { createdAt: "desc" },
-                      take: 1,
-                      select: { createdAt: true },
-                    },
-                  },
+                // Look up the WhatsApp user to check if they're synced (have a userId)
+                const waUser = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { phoneNumber: true, userId: true },
                 });
 
-                let printJobId = existingJob?.id;
-                let isStale = false;
+                if (!waUser) {
+                  throw new Error("WhatsApp user record not found.");
+                }
 
-                if (!printJobId) {
-                  const existingUser = await prisma.whatsAppUser.findUnique({
+                // Find existing draft: prefer userId-based lookup (unified), fall back to userMetadataId
+                let existingJob: {
+                  id: string;
+                  totalCost: number;
+                  totalPages: number;
+                  userId: string | null;
+                  files: { createdAt: Date }[];
+                  _count?: { files: number };
+                } | null = null;
+
+                if (waUser.userId) {
+                  existingJob = await prisma.printJob.findFirst({
                     where: {
-                      phoneNumber: userData.displayPhoneNumber,
+                      userId: waUser.userId,
+                      status: PrintJobStatus.DRAFT,
                     },
                     select: {
-                      phoneNumber: true,
-                    },
-                  });
-                  if (!existingUser) {
-                    throw new Error("WhatsApp user record not found.");
-                  }
-
-                  const newJob = await prisma.printJob.create({
-                    data: {
-                      totalCost: cost,
-                      totalPages: pages,
-                      estimatedTime: 0,
-                      source: "WHATSAPP",
-                      status: PrintJobStatus.DRAFT,
-                      userMetadata: {
-                        connect: {
-                          phoneNumber: existingUser.phoneNumber,
-                        },
+                      id: true,
+                      totalCost: true,
+                      totalPages: true,
+                      userId: true,
+                      _count: { select: { files: true } },
+                      files: {
+                        orderBy: { createdAt: "desc" },
+                        take: 1,
+                        select: { createdAt: true },
                       },
                     },
                   });
+                }
 
+                if (!existingJob) {
+                  existingJob = await prisma.printJob.findFirst({
+                    where: {
+                      userMetadata: { phoneNumber: userData.displayPhoneNumber },
+                      status: PrintJobStatus.DRAFT,
+                    },
+                    select: {
+                      id: true,
+                      totalCost: true,
+                      totalPages: true,
+                      userId: true,
+                      _count: { select: { files: true } },
+                      files: {
+                        orderBy: { createdAt: "desc" },
+                        take: 1,
+                        select: { createdAt: true },
+                      },
+                    },
+                  });
+                }
+
+                if (existingJob && existingJob._count && existingJob._count.files >= 15) {
+                  // Fetch the files to list them
+                  const jobFiles = await prisma.file.findMany({
+                    where: { printJobId: existingJob.id },
+                    select: { name: true, pages: true },
+                    orderBy: { createdAt: "asc" },
+                  });
+
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      message: `${waBold("Limit reached")}
+You cannot add more than 15 files to a single job.
+
+*Current files in your job:*
+${fileListStr}
+
+Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"')} to start a new one.`,
+                      phoneNumberId,
+                    });
+                  }
+                  
+                  // Also emit socket event to show toast on web
+                  if (waUser.userId) {
+                    socket.emit("job-status-updated", waUser.userId, existingJob.id, "Limit reached: Maximum 15 files allowed per job.");
+                  }
+                  continue;
+                }
+
+                let printJobId: string;
+                let isStale = false;
+
+                if (!existingJob) {
+                  // Create a new unified draft
+                  const createData: any = {
+                    totalCost: cost,
+                    totalPages: pages,
+                    estimatedTime: 0,
+                    source: "WHATSAPP",
+                    status: PrintJobStatus.DRAFT,
+                    userMetadata: {
+                      connect: { phoneNumber: waUser.phoneNumber },
+                    },
+                  };
+                  if (waUser.userId) {
+                    createData.user = { connect: { id: waUser.userId } };
+                  }
+
+                  const newJob = await prisma.printJob.create({ data: createData });
                   printJobId = newJob.id;
                 } else {
+                  printJobId = existingJob.id;
+
+                  // If draft exists but doesn't have userId yet, attach it now
+                  if (waUser.userId && !existingJob.userId) {
+                    await prisma.printJob.update({
+                      where: { id: existingJob.id },
+                      data: { userId: waUser.userId },
+                    });
+                  }
+
                   if (existingJob.files.length > 0) {
                     const latestFile = existingJob.files[0];
                     if (latestFile) {
@@ -343,11 +444,11 @@ Please try again or send a different file.`,
                     }
                   }
                   
-                  const nextTotalPages = (existingJob?.totalPages ?? 0) + pages;
-                  const nextTotalCost = (existingJob?.totalCost ?? 0) + cost;
+                  const nextTotalPages = (existingJob.totalPages ?? 0) + pages;
+                  const nextTotalCost = (existingJob.totalCost ?? 0) + cost;
                   await prisma.printJob.update({
                     where: {
-                      id: printJobId,
+                      id: existingJob.id,
                     },
                     data: {
                       totalPages: nextTotalPages,
@@ -364,11 +465,11 @@ Please try again or send a different file.`,
                     messageId: incomingMessage.id,
                     pages,
                     url: uploaded.url,
-                    printJob: {
-                      connect: {
-                        id: printJobId,
-                      },
-                    },
+                    printJobId: printJobId,
+                    uploadedByPhoneNumber: userData.displayPhoneNumber || null,
+                    uploadedByDisplayName: userData.displayName || userData.displayPhoneNumber || null,
+                    uploadedByUserId: waUser.userId ?? null,
+                    uploadedByRole: "OWNER",
                     option: {
                       create: {
                         copies: 1,
@@ -379,13 +480,16 @@ Please try again or send a different file.`,
 
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   socket.emit("job-file-added", printJobId);
+                  if (waUser.userId) {
+                    socket.emit("job-file-added", waUser.userId);
+                  }
 
                   // Always send the file received confirmation first
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     body: [
-                      `${waBold("File received!")} \u2705`,
+                      `${waBold("File received!")}`,
                       "",
                       `${pdfFileName} \u2022 ${pages} page(s)`,
                       "",
@@ -432,6 +536,353 @@ Please try again.`,
               }
 
               // Document handled — skip text/interactive logic below
+              continue;
+            }
+
+            // ─── IMAGE HANDLER ──────────────────────────────────────────────
+            if (incomingMessage.type === "image") {
+              const imageData = incomingMessage.image;
+              const mimeType = imageData?.mime_type || "image/jpeg";
+              const mediaId = imageData?.id;
+              const caption = imageData?.caption || "";
+              console.log("Received image:", { mediaId, mimeType, caption });
+
+              const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+              if (!accessToken || !mediaId) {
+                console.log("Missing WhatsApp access token or image media ID.");
+                continue;
+              }
+
+              try {
+                if (userData.displayPhoneNumber) {
+                  const timestampSeconds = Number(incomingMessage.timestamp);
+                  const startedProcessingAt = Number.isFinite(timestampSeconds)
+                    ? new Date(timestampSeconds * 1000)
+                    : new Date();
+
+                  await prisma.whatsAppUser.upsert({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    create: {
+                      phoneNumber: userData.displayPhoneNumber,
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: startedProcessingAt,
+                    },
+                    update: {
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: startedProcessingAt,
+                    },
+                    select: { phoneNumber: true },
+                  });
+                }
+
+                // Step 1: Get media URL from Graph API
+                const mediaResponse = await fetch(
+                  `https://graph.facebook.com/v21.0/${mediaId}`,
+                  { headers: { Authorization: `Bearer ${accessToken}` } },
+                );
+                if (!mediaResponse.ok) {
+                  console.log("Failed to get image media URL:", mediaResponse.status);
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      message: `${waBold("Upload failed")}\nCouldn't process the image. Please try again.`,
+                      phoneNumberId,
+                    });
+                  }
+                  continue;
+                }
+                const mediaJson = (await mediaResponse.json()) as { url?: string };
+                const mediaUrl = mediaJson.url;
+                if (!mediaUrl) {
+                  console.log("No URL in media response.");
+                  continue;
+                }
+
+                // Step 2: Download the image
+                const imageResponse = await fetch(mediaUrl, {
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                });
+                if (!imageResponse.ok) {
+                  console.log("Failed to download image:", imageResponse.status);
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      message: `${waBold("Upload failed")}\nCouldn't download the image. Please try again.`,
+                      phoneNumberId,
+                    });
+                  }
+                  continue;
+                }
+
+                const imageArrayBuffer = await imageResponse.arrayBuffer();
+                const imageBuffer = Buffer.from(imageArrayBuffer);
+
+                // Determine file extension from mime type
+                const extMap: Record<string, string> = {
+                  "image/jpeg": ".jpg",
+                  "image/png": ".png",
+                  "image/gif": ".gif",
+                  "image/bmp": ".bmp",
+                  "image/tiff": ".tiff",
+                  "image/webp": ".webp",
+                };
+                const ext = extMap[mimeType] || ".jpg";
+                const imageFileName = `whatsapp-image-${Date.now()}${ext}`;
+
+                // Upload to R2 as image (SumatraPDF prints images natively)
+                const key = buildR2ObjectKey(
+                  userData.displayPhoneNumber || "whatsapp",
+                  imageFileName,
+                );
+                const uploaded = await uploadBufferToR2({
+                  key,
+                  buffer: imageBuffer,
+                  contentType: mimeType,
+                });
+
+                const pages = 1; // Images are always 1 page
+                const defaultOptions: PrintOptions = {
+                  paperSize: "A4",
+                  colorMode: "BW",
+                  orientation: "PORTRAIT",
+                  scaleMode: "FIT",
+                  pageRange: "ALL",
+                  customRange: "",
+                  duplex: "ONE",
+                  copies: 1,
+                };
+                const cost = calculateFileCost(pages, defaultOptions);
+
+                const waUser = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { phoneNumber: true, userId: true },
+                });
+
+                if (!waUser) {
+                  throw new Error("WhatsApp user record not found.");
+                }
+
+                // Find or create draft job (same logic as document handler)
+                let existingJob: {
+                  id: string;
+                  totalCost: number;
+                  totalPages: number;
+                  userId: string | null;
+                  files: { createdAt: Date }[];
+                  _count?: { files: number };
+                } | null = null;
+
+                if (waUser.userId) {
+                  existingJob = await prisma.printJob.findFirst({
+                    where: {
+                      userId: waUser.userId,
+                      status: PrintJobStatus.DRAFT,
+                    },
+                    select: {
+                      id: true,
+                      totalCost: true,
+                      totalPages: true,
+                      userId: true,
+                      _count: { select: { files: true } },
+                      files: {
+                        orderBy: { createdAt: "desc" },
+                        take: 1,
+                        select: { createdAt: true },
+                      },
+                    },
+                  });
+                }
+
+                if (!existingJob) {
+                  existingJob = await prisma.printJob.findFirst({
+                    where: {
+                      userMetadataId: userData.displayPhoneNumber,
+                      status: PrintJobStatus.DRAFT,
+                    },
+                    select: {
+                      id: true,
+                      totalCost: true,
+                      totalPages: true,
+                      userId: true,
+                      _count: { select: { files: true } },
+                      files: {
+                        orderBy: { createdAt: "desc" },
+                        take: 1,
+                        select: { createdAt: true },
+                      },
+                    },
+                  });
+                }
+
+                if (existingJob && existingJob._count && existingJob._count.files >= 15) {
+                  const jobFiles = await prisma.file.findMany({
+                    where: { printJobId: existingJob.id },
+                    select: { name: true, pages: true },
+                    orderBy: { createdAt: "asc" },
+                  });
+
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      message: `${waBold("Limit reached")}
+You cannot add more than 15 files to a single job.
+
+*Current files in your job:*
+${fileListStr}
+
+Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"')} to start a new one.`,
+                      phoneNumberId,
+                    });
+                  }
+                  
+                  if (waUser.userId) {
+                    socket.emit("job-status-updated", waUser.userId, existingJob.id, "Limit reached: Maximum 15 files allowed per job.");
+                  }
+                  continue;
+                }
+
+                // Check for stale files
+                let isStale = false;
+                if (existingJob && existingJob.files.length > 0) {
+                  const latestFile = existingJob.files[0]!;
+                  const ageMs = Date.now() - latestFile.createdAt.getTime();
+                  isStale = ageMs > 30 * 60 * 1000;
+                }
+
+                if (existingJob) {
+                  const newTotalPages = existingJob.totalPages + pages;
+                  const newTotalCost = existingJob.totalCost + cost;
+
+                  await prisma.file.create({
+                    data: {
+                      printJobId: existingJob.id,
+                      name: imageFileName,
+                      pages,
+                      url: uploaded.url,
+                      fileCost: cost,
+                      uploadedByPhoneNumber: userData.displayPhoneNumber,
+                      uploadedByDisplayName: userData.displayName || null,
+                      uploadedByRole: "OWNER",
+                      option: {
+                        create: {
+                          paperSize: "A4",
+                          colorMode: "BW",
+                          orientation: "PORTRAIT",
+                          scaleMode: "FIT",
+                          pageRange: "ALL",
+                          customRange: "",
+                          duplex: "ONE",
+                          copies: 1,
+                        },
+                      },
+                    },
+                  });
+
+                  await prisma.printJob.update({
+                    where: { id: existingJob.id },
+                    data: {
+                      totalPages: newTotalPages,
+                      totalCost: newTotalCost,
+                      estimatedTime: calculateEstimatedTime(newTotalPages),
+                    },
+                  });
+                } else {
+                  const newJob = await prisma.printJob.create({
+                    data: {
+                      userId: waUser.userId || undefined,
+                      userMetadataId: userData.displayPhoneNumber,
+                      source: "WHATSAPP",
+                      status: PrintJobStatus.DRAFT,
+                      totalPages: pages,
+                      totalCost: cost,
+                      estimatedTime: calculateEstimatedTime(pages),
+                      files: {
+                        create: {
+                          name: imageFileName,
+                          pages,
+                          url: uploaded.url,
+                          fileCost: cost,
+                          uploadedByPhoneNumber: userData.displayPhoneNumber,
+                          uploadedByDisplayName: userData.displayName || null,
+                          uploadedByRole: "OWNER",
+                          option: {
+                            create: {
+                              paperSize: "A4",
+                              colorMode: "BW",
+                              orientation: "PORTRAIT",
+                              scaleMode: "FIT",
+                              pageRange: "ALL",
+                              customRange: "",
+                              duplex: "ONE",
+                              copies: 1,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  });
+                  existingJob = {
+                    id: newJob.id,
+                    totalCost: newJob.totalCost,
+                    totalPages: newJob.totalPages,
+                    userId: newJob.userId,
+                    files: [],
+                  };
+                }
+
+                if (phoneNumberId && userData.displayPhoneNumber) {
+                  socket.emit("job-file-added", existingJob.id);
+                  if (waUser.userId) {
+                    socket.emit("job-file-added", waUser.userId);
+                  }
+                  await sendWhatsAppButtonMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    body: [
+                      `${waBold("Image received!")}`,
+                      "",
+                      `${imageFileName} \u2022 1 page`,
+                      "",
+                      "What would you like to do next?",
+                    ].join("\n"),
+                    buttons: [
+                      { type: "reply", reply: { id: "edit", title: "EDIT" } },
+                      { type: "reply", reply: { id: "current", title: "STATUS" } },
+                    ],
+                  });
+
+                  if (isStale) {
+                    await sendWhatsAppButtonMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      body: [
+                        `${waBold("Existing Files Found")} \u26a0\ufe0f`,
+                        "",
+                        "Your draft also contains files added more than 30 minutes ago.",
+                        "",
+                        "Options:",
+                        `\u2022 Type ${waBold('"EDIT"')} to visit the website and individually delete files if you want — you can also continue adding more files to this draft.`,
+                        `\u2022 Type ${waBold('"NEW"')} to remove all old files and keep only the file you just sent.`,
+                      ].join("\n"),
+                      buttons: [
+                        { type: "reply", reply: { id: "edit", title: "EDIT" } },
+                        { type: "reply", reply: { id: "new", title: "NEW" } },
+                      ],
+                    });
+                  }
+                }
+              } catch (error) {
+                console.log("Failed to process image:", error);
+                if (phoneNumberId && userData.displayPhoneNumber) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    message: `${waBold("Error")}\nFailed to process the image.\nPlease try again.`,
+                    phoneNumberId,
+                  });
+                }
+              }
+
               continue;
             }
 
@@ -642,13 +1093,9 @@ Please try again.`,
                 }
               }
             } else if (messageText === "current" || messageText === "status" || messageText === "merge") {
+              const draftWhere = await getUnifiedDraftWhere(userData.displayPhoneNumber);
               const draftJob = await prisma.printJob.findFirst({
-                where: {
-                  userMetadata: {
-                    phoneNumber: userData.displayPhoneNumber,
-                  },
-                  status: PrintJobStatus.DRAFT,
-                },
+                where: draftWhere,
                 include: {
                   files: {
                     select: {
@@ -657,9 +1104,6 @@ Please try again.`,
                       option: true,
                     },
                   },
-                },
-                orderBy: {
-                  createdAt: "desc",
                 },
               });
 
@@ -702,13 +1146,9 @@ Please try again.`,
                 }
               }
             } else if (messageText === "clear" || messageText === "discard") {
+              const clearWhere = await getUnifiedDraftWhere(userData.displayPhoneNumber);
               const existingJob = await prisma.printJob.findFirst({
-                where: {
-                  userMetadata: {
-                    phoneNumber: userData.displayPhoneNumber,
-                  },
-                  status: PrintJobStatus.DRAFT,
-                },
+                where: clearWhere,
                 include: {
                   files: {
                     select: {
@@ -792,13 +1232,9 @@ Please try again.`,
                 }
               }
 
+              const editWhere = await getUnifiedDraftWhere(userData.displayPhoneNumber.toString());
               const existingJob = await prisma.printJob.findFirst({
-                where: {
-                  userMetadata: {
-                    phoneNumber: userData.displayPhoneNumber.toString(),
-                  },
-                  status: PrintJobStatus.DRAFT,
-                },
+                where: editWhere,
                 select: {
                   id: true,
                 },
@@ -838,7 +1274,7 @@ Please try again.`,
                       `${waBold("Customize your printout:")}`,
                       reviewUrl,
                       "",
-                      "You can share this link with friends to add files and submit together.",
+                      "You can edit your options, confirm, and print your job.",
                       "",
                       `Type ${waBold('"CURRENT"')} to view your documents.`,
                       "",
@@ -874,11 +1310,6 @@ Please try again.`,
                     message: [
                       `${waBold("Sync using the link below:")}`,
                       loginUrl ?? "Link unavailable",
-                      "",
-                      "You can sync your WhatsApp files and manage them on https://zopy.co.in.",
-                      "_Link valid for 2 minutes._",
-                      "",
-                      `Type ${waBold('"HELP"')} to view options.`,
                     ].join("\n"),
                   });
                 }

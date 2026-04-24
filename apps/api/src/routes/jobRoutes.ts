@@ -24,6 +24,7 @@ import {
   uploadBufferToR2,
 } from "../utils/r2Storage.js";
 import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
+import { sendWhatsAppTextMessage } from "../modules/whatsappServices.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import {
   ColorMode,
@@ -604,14 +605,33 @@ app.post(
       if (!files.length) {
         return res
           .status(400)
-          .json({ error: "At least one PDF file is required." });
+          .json({ error: "At least one file is required." });
       }
+
+      const ALLOWED_CONTENT_TYPES = new Set([
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/bmp",
+        "image/tiff",
+        "image/webp",
+      ]);
+
+      const ALLOWED_EXTENSIONS = /\.(pdf|docx?|pptx?|jpe?g|png|gif|bmp|tiff?|webp)$/i;
 
       const uploads = await Promise.all(
         files.map(async (file) => {
-          if (file.contentType !== "application/pdf") {
+          const nameMatch = ALLOWED_EXTENSIONS.test(file.name);
+          const typeMatch = ALLOWED_CONTENT_TYPES.has(file.contentType);
+
+          if (!nameMatch && !typeMatch) {
             throw new PrintJobAnalysisError(
-              `${file.name} is not a PDF. Only PDF files are allowed.`,
+              `${file.name} is not a supported file type. Supported: PDF, Word, PowerPoint, and images (JPG, PNG, GIF, BMP, TIFF, WebP).`,
               400,
             );
           }
@@ -619,7 +639,7 @@ app.post(
           const key = buildR2ObjectKey(req.user!.uid, file.name);
           const presigned = await createPresignedUploadUrl({
             key,
-            contentType: file.contentType,
+            contentType: file.contentType || "application/octet-stream",
           });
 
           return {
@@ -786,7 +806,6 @@ app.get(
         where: {
           userId: req.user.uid,
           status: PrintJobStatus.DRAFT,
-          source: "WEB",
         },
         include: {
           files: {
@@ -819,16 +838,22 @@ app.post(
       if (!incomingFiles.length) {
         return res
           .status(400)
-          .json({ error: "At least one PDF file is required." });
+          .json({ error: "At least one file is required." });
       }
 
       let job = await prisma.printJob.findFirst({
         where: {
           userId: req.user.uid,
           status: PrintJobStatus.DRAFT,
-          source: "WEB",
         },
+        include: { _count: { select: { files: true } } },
       });
+
+      if (job && job._count.files + incomingFiles.length > 15) {
+        return res.status(400).json({ error: "You cannot add more than 15 files to a job." });
+      } else if (!job && incomingFiles.length > 15) {
+        return res.status(400).json({ error: "You cannot add more than 15 files to a job." });
+      }
 
       if (!job) {
         job = await prisma.printJob.create({
@@ -836,7 +861,7 @@ app.post(
             userId: req.user.uid,
             status: PrintJobStatus.DRAFT,
             source: "WEB",
-            totalCost: 0, 
+            totalCost: 0,
             totalPages: 0,
             estimatedTime: 0,
           },
@@ -853,6 +878,9 @@ app.post(
         duplex: "ONE",
         copies: 1,
       });
+
+      const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|bmp|tiff?|webp)$/i;
+      const OFFICE_EXTENSIONS = /\.(docx?|pptx?)$/i;
 
       const processedFiles: UploadedFileForCreate[] = [];
       let totalBytes = 0;
@@ -877,14 +905,42 @@ app.post(
           );
         }
 
+        const isImage = IMAGE_EXTENSIONS.test(file.name);
+        const isOffice = OFFICE_EXTENSIONS.test(file.name);
+
+        let finalUrl = file.url;
+        let finalName = file.name;
         let pages: number;
-        try {
+
+        if (isImage) {
+          // Images: keep as-is, SumatraPDF can print them directly. 1 page per image.
+          pages = 1;
+        } else if (isOffice) {
+          // Word/PPT: convert to PDF server-side using LibreOffice
+          const { convertToPdfFromBuffer } = await import("../utils/convertToPdf.js");
+          const converted = await convertToPdfFromBuffer(buffer, file.name);
+
+          // Strip office extension and add .pdf
+          let baseName = file.name.replace(/\.(docx?|pptx?)$/i, "");
+          if (!baseName.trim()) baseName = "document";
+          finalName = `${baseName}.pdf`;
+
+          // Upload the converted PDF to R2
+          const key = buildR2ObjectKey(req.user!.uid, finalName);
+          const uploaded = await uploadBufferToR2({
+            key,
+            buffer: converted.pdfBuffer,
+            contentType: "application/pdf",
+          });
+          finalUrl = uploaded.url;
+
+          // Delete the original non-PDF from R2
+          await deleteObjectFromR2ByUrl(file.url).catch(() => {});
+
+          pages = await getPdfPageCountFromBuffer(converted.pdfBuffer);
+        } else {
+          // PDF: existing logic
           pages = await getPdfPageCountFromBuffer(buffer);
-        } catch {
-          throw new PrintJobAnalysisError(
-            `Unable to inspect ${file.name}. Only valid PDF files can be submitted.`,
-            400,
-          );
         }
 
         const cost = calculateFileCost(pages, {
@@ -892,8 +948,8 @@ app.post(
         });
 
         processedFiles.push({
-          name: file.name,
-          url: file.url,
+          name: finalName,
+          url: finalUrl,
           pages,
           cost,
           option: defaultOptions,
@@ -907,9 +963,10 @@ app.post(
               name: file.name,
               pages: file.pages,
               url: file.url,
-              printJob: {
-                connect: { id: job!.id },
-              },
+              fileCost: file.cost,
+              printJobId: job!.id,
+              uploadedByUserId: req.user!.uid,
+              uploadedByRole: "OWNER",
               option: {
                 create: {
                   paperSize: mapPaperSizeToEnum(file.option.paperSize),
@@ -1004,6 +1061,7 @@ app.post(
         where: { id: jobId },
         include: {
           owners: { select: { userId: true } },
+          _count: { select: { files: true } },
         },
       });
 
@@ -1017,17 +1075,32 @@ app.post(
           .json({ error: "This job is not available for review." });
       }
 
-      const viewerId = req.user!.uid;
-      const isOwner =
-        job.userId === viewerId ||
-        job.owners.some((owner) => owner.userId === viewerId);
-
-      if (!isOwner) {
-        return res
-          .status(403)
-          .json({ error: "You do not have access to this job." });
+      if (job._count.files + incomingFiles.length > 15) {
+        return res.status(400).json({ error: "You cannot add more than 15 files to a job." });
       }
+
+      const viewerId = req.user!.uid;
+      const isOwner = job.userId === viewerId;
+
+      // Check if viewer is a known collaborator (has accessed the review link before)
+      const isCollaborator = !isOwner && job.owners.some((o) => o.userId === viewerId);
       
+      if (!isOwner && !isCollaborator) {
+        // Auto-register as collaborator if they have the review link
+        await prisma.printJobOwner.upsert({
+          where: { userId_printJobId: { userId: viewerId, printJobId: job.id } },
+          update: {},
+          create: { userId: viewerId, printJobId: job.id },
+        });
+      }
+
+      // Resolve uploader display info
+      const linkedWa = await prisma.whatsAppUser.findFirst({
+        where: { userId: viewerId },
+        select: { phoneNumber: true, name: true },
+      });
+      const uploaderRole = isOwner ? "OWNER" as const : "COLLABORATOR" as const;
+      const uploaderDisplayName = linkedWa?.name || linkedWa?.phoneNumber || "Collaborator";
 
       const defaultOptions = optionsSchema.parse({
         paperSize: "A4",
@@ -1109,9 +1182,12 @@ app.post(
               name: file.name,
               pages: file.pages,
               url: file.url,
-              printJob: {
-                connect: { id: jobId },
-              },
+              fileCost: file.cost,
+              printJobId: jobId,
+              uploadedByUserId: viewerId,
+              uploadedByPhoneNumber: linkedWa?.phoneNumber ?? null,
+              uploadedByDisplayName: uploaderDisplayName,
+              uploadedByRole: uploaderRole,
               option: {
                 create: {
                   paperSize: file.option.paperSize,
@@ -1365,7 +1441,7 @@ app.get("/review/:id", async (req, res) => {
           },
         },
         userMetadata: true,
-        owners: { select: { userId: true } },
+        owners: { select: { userId: true, isDone: true } },
       },
     });
 
@@ -1405,14 +1481,18 @@ app.get("/review/:id", async (req, res) => {
     const isOwner = job.userId === optionalUser.uid;
     if (!isOwner && !viewerPhone) {
       return res.status(403).json({
-        error: "Please sync your WhatsApp account to review collaborator drafts.",
+        error: "Please sync your WhatsApp account to access this review link.",
         requiresWhatsappSync: true,
       });
     }
     const viewerRole = isOwner ? "OWNER" : "COLLABORATOR";
+    const isCollabDone = job.owners.find((o) => o.userId === optionalUser.uid)?.isDone ?? false;
 
     const visibleFiles = isOwner
-      ? job.files
+      ? job.files.map(f => ({
+          ...f,
+          uploaderDone: job.owners.find(o => o.userId === f.uploadedByUserId)?.isDone ?? false
+        }))
       : job.files.filter((file) => {
           if (file.uploadedByUserId && file.uploadedByUserId === optionalUser.uid) {
             return true;
@@ -1458,6 +1538,7 @@ app.get("/review/:id", async (req, res) => {
         viewerRole,
         permissions,
         viewerCost,
+        isCollabDone,
       });
     }
 
@@ -1477,8 +1558,9 @@ app.get("/review/:id", async (req, res) => {
         f.uploadedByPhoneNumber ||
         f.uploadedByDisplayName ||
         "unknown";
-      const displayName =
-        f.uploadedByDisplayName || f.uploadedByPhoneNumber || "Unknown";
+      const displayName = f.uploadedByRole === "OWNER"
+        ? "Your Files"
+        : (f.uploadedByDisplayName || f.uploadedByPhoneNumber || "Unknown");
       const existing = perUserMap.get(key) ?? {
         key,
         displayName,
@@ -1498,12 +1580,14 @@ app.get("/review/:id", async (req, res) => {
       viewerRole,
       permissions,
       viewerCost,
+      isCollabDone,
       costBreakdown: {
         perUser: perUserCosts,
         totalCost,
       },
     });
   } catch (error) {
+    console.error("Error fetching job review details:", error);
     return res.status(500).json({ error: "Failed to fetch job." });
   }
 });
@@ -1562,11 +1646,55 @@ app.post(
         select: { name: true },
       });
 
+      // Resolve collaborator's WhatsApp display name
+      const linkedWa = await prisma.whatsAppUser.findFirst({
+        where: { userId: viewerId },
+        select: { name: true, phoneNumber: true },
+      });
+      const collabDisplayName = linkedWa?.name || linkedWa?.phoneNumber || user?.name || "A collaborator";
+
       socket.emit("job-collaborator-confirmed", id, {
         userId: viewerId,
-        displayName: user?.name ?? undefined,
+        displayName: collabDisplayName,
         userCost,
       });
+
+      await prisma.printJobOwner.updateMany({
+        where: { printJobId: id, userId: viewerId },
+        data: { isDone: true },
+      });
+
+      // Notify the job owner via WhatsApp
+      if (job.userId) {
+        const ownerWa = await prisma.whatsAppUser.findFirst({
+          where: { userId: job.userId },
+          select: { phoneNumber: true },
+        });
+        if (ownerWa?.phoneNumber) {
+          const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+          if (phoneNumberId) {
+            try {
+              await sendWhatsAppTextMessage({
+                to: ownerWa.phoneNumber,
+                phoneNumberId,
+                message: [
+                  `*${collabDisplayName}* has finished adding files.`,
+                  "",
+                  `Their files total: *Rs ${userCost}*`,
+                  "",
+                  `You can now review and submit the job.`,
+                  "",
+                  `Type *"EDIT"* to open the review link.`,
+                ].join("\n"),
+              });
+            } catch (err) {
+              console.error("Failed to notify owner via WhatsApp:", err);
+            }
+          } else {
+            console.error("Missing WHATSAPP_PHONE_NUMBER_ID in env, cannot send 'I'm done' message.");
+          }
+        }
+      }
 
       return res.status(200).json({ message: "Confirmed.", userCost });
     } catch (error) {
@@ -1668,9 +1796,7 @@ app.post(
           .json({ error: "This job is not available for review." });
       }
 
-      const isOwner =
-        job.userId === userId ||
-        job.owners.some((owner) => owner.userId === userId);
+      const isOwner = job.userId === userId;
 
       if (!isOwner) {
         return res
@@ -1795,6 +1921,67 @@ app.post(
         removedFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
       );
 
+      // --- NEW: Calculate Cost Breakdown for Owner's WhatsApp Message ---
+      const perUserMap = new Map<
+        string,
+        { key: string; displayName: string; role: string; cost: number }
+      >();
+
+      for (const entry of updateEntries) {
+        const f = job.files.find(f => f.id === entry.fileId);
+        if (!f) continue;
+        const key =
+          f.uploadedByUserId ||
+          f.uploadedByPhoneNumber ||
+          f.uploadedByDisplayName ||
+          "unknown";
+        const displayName =
+          f.uploadedByDisplayName || f.uploadedByPhoneNumber || "Unknown";
+        const existing = perUserMap.get(key) ?? {
+          key,
+          displayName,
+          role: f.uploadedByRole,
+          cost: 0,
+        };
+        existing.cost += entry.cost;
+        perUserMap.set(key, existing);
+      }
+      const perUserCosts = [...perUserMap.values()].sort((a, b) => b.cost - a.cost);
+      
+      // Notify owner via WhatsApp with OTP and Cost Breakdown
+      if (userId) {
+        const ownerWa = await prisma.whatsAppUser.findFirst({
+          where: { userId },
+          select: { phoneNumber: true },
+        });
+        if (ownerWa?.phoneNumber) {
+          const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+          if (phoneNumberId) {
+            const message = [
+              `*Job Submitted Successfully!*`,
+              ``,
+              `Your Verification Code (OTP) is: *${verificationCode}*`,
+              `Share this code with the shopkeeper to collect your prints.`,
+              ``,
+              `*Total:* Rs ${totalCost}`
+            ].join("\n");
+            
+            try {
+              const { sendWhatsAppTextMessage } = await import("../modules/whatsappServices.js");
+              await sendWhatsAppTextMessage({
+                to: ownerWa.phoneNumber,
+                phoneNumberId,
+                message,
+              });
+            } catch (err) {
+              console.error("Failed to send OTP whatsapp message", err);
+            }
+          } else {
+            console.error("Missing WHATSAPP_PHONE_NUMBER_ID in env, cannot send OTP message.");
+          }
+        }
+      }
+
       const statusText = PrintJobStatus.PENDING;
       const msg = `Your print job with verification code ${verificationCode} is now ${statusText}.`;
       socket.emit("job-status-updated", userId, job.id, msg);
@@ -1809,8 +1996,8 @@ app.post(
         return res.status(error.statusCode).json({ error: error.message });
       }
 
-      console.error("submit-whatsapp-job failed:", error);
-      return res.status(500).json({ error: "Failed to update job." });
+      console.error("Error submitting whatsapp job review:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   },
 );
