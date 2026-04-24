@@ -12,7 +12,6 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import Turnstile from "react-turnstile";
 import {
   submitWhatsappJobReview,
   getWebDraftJob,
