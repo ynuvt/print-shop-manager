@@ -873,7 +873,6 @@ export default function HomePage({
     printFiles.length > 0 &&
     !hasErrors &&
     !isSubmitting &&
-    !!captchaToken &&
     totalBytes <= MAX_JOB_UPLOAD_BYTES;
   const successDigits = verificationCode ? verificationCode.split("") : [];
   const isWalkthroughActive = walkthroughStep !== null;
@@ -1339,31 +1338,6 @@ export default function HomePage({
                       {printFiles.length} file(s) • {totals.totalPages} pages •{" "}
                       {totals.estimatedTime} min
                     </span>
-                  </div>
-
-                  <div
-                    className="cf-turnstile-wrapper"
-                    style={{
-                      display: "flex",
-                      justifyContent: "center",
-                      marginBottom: "0.2rem",
-                      marginTop: "1.2rem",
-                    }}
-                  >
-                    <Turnstile
-                      sitekey={
-                        import.meta.env.VITE_TURNSTILE_SITE_KEY ||
-                        "0x4AAAAAACuh4ffhEY5SnUoU"
-                      }
-                      onSuccess={(token) => setCaptchaToken(token)}
-                      onError={() => {
-                        setCaptchaToken(null);
-                        setError(
-                          "CAPTCHA verification failed. Please try again.",
-                        );
-                      }}
-                      theme={theme === "dark" ? "dark" : "light"}
-                    />
                   </div>
 
                   <button

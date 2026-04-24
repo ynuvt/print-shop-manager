@@ -670,16 +670,7 @@ app.post(
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Verify CAPTCHA token
-    const captchaToken = req.body.captchaToken;
-    if (captchaToken) {
-      const captchaVerification = await verifyTurnstileToken(captchaToken);
-      if (!captchaVerification.success) {
-        return res.status(400).json({
-          error: captchaVerification.error || "CAPTCHA verification failed",
-        });
-      }
-    }
+
 
     let incomingFiles: UrlFileForCreate[] = [];
 
