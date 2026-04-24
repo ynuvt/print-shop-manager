@@ -52,7 +52,7 @@ if (fs.existsSync(webDistPath)) {
   });
 }
 
-app.listen(process.env.PORT || 4000, () => {
+app.listen((process.env.PORT as unknown as number) || 4000, "0.0.0.0", () => {
   console.log(
     `API server running on http://localhost:${process.env.PORT || 4000}`,
   );
