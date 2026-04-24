@@ -490,9 +490,7 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
                     phoneNumberId,
                     body: [
                       `${waBold("File received!")}`,
-                      "",
                       `${pdfFileName} \u2022 ${pages} page(s)`,
-                      "",
                       "What would you like to do next?",
                     ].join("\n"),
                     buttons: [
@@ -849,9 +847,7 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
                     phoneNumberId,
                     body: [
                       `${waBold("Image received!")}`,
-                      "",
                       `${imageFileName} \u2022 1 page`,
-                      "",
                       "What would you like to do next?",
                     ].join("\n"),
                     buttons: [
@@ -1290,11 +1286,9 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
                       `${waBold("Customize your printout:")}`,
                       reviewUrl,
                       "",
-                      "You can edit your options, confirm, and print your job.",
-                      "",
+                      "Edit your options, confirm, and print your job.",
                       `Type ${waBold('"CURRENT"')} to view your documents.`,
-                      "",
-                      `_Note: You can delete files from the link._`,
+                      `_You can also delete files from the link._`,
                     ].join("\n"),
                     buttons: [
                       { type: "reply", reply: { id: "current", title: "CURRENT" } },

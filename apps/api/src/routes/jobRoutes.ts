@@ -803,6 +803,7 @@ app.get(
             include: {
               option: true,
             },
+            orderBy: { createdAt: "asc" },
           },
         },
       });
@@ -1012,6 +1013,7 @@ app.post(
             include: {
               option: true,
             },
+            orderBy: { createdAt: "asc" },
           },
         },
       });
@@ -1343,6 +1345,7 @@ app.get(
             include: {
               option: true,
             },
+            orderBy: { createdAt: "asc" },
           },
           owners: { select: { userId: true } },
         },
@@ -1434,6 +1437,7 @@ app.get("/review/:id", async (req, res) => {
           include: {
             option: true,
           },
+          orderBy: { createdAt: "asc" },
         },
         userMetadata: true,
         owners: { select: { userId: true, isDone: true } },
