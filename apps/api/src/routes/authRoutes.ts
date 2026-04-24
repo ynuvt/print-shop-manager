@@ -78,6 +78,7 @@ router.post("/admin-login", (req, res) => {
 router.post(
   "/whatsapp-login",
   async (req, res) => {
+    try {
     const code = String(req.body?.code ?? "").trim();
     if (!code) {
       return res.status(400).json({ error: "Missing login code." });
@@ -227,6 +228,10 @@ router.post(
     }
 
     return res.status(200).json({ token, userId });
+    } catch (error) {
+      console.error("[whatsapp-login] Unexpected error:", error);
+      return res.status(500).json({ error: "Login failed. Please try again." });
+    }
   },
 );
 export default router;

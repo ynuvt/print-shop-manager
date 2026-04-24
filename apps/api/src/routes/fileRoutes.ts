@@ -17,7 +17,7 @@ import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/en
 
 const app = express.Router();
 
-async function recomputeJobTotals(tx: typeof prisma, printJobId: string) {
+async function recomputeJobTotals(tx: Pick<typeof prisma, 'printJob' | 'file'>, printJobId: string) {
   const job = await tx.printJob.findUnique({
     where: { id: printJobId },
     select: { id: true, files: { select: { pages: true, fileCost: true } } },
@@ -184,7 +184,7 @@ app.post(
         return res.status(400).json({ error: "You cannot add more than 15 files." });
       }
       const isMember =
-        job.userId === req.user.uid || job.owners.some((o) => o.userId === req.user.uid);
+        job.userId === req.user!.uid || job.owners.some((o) => o.userId === req.user!.uid);
       if (!isMember) {
         return res.status(403).json({ error: "You do not have access to this job." });
       }
@@ -208,15 +208,15 @@ app.post(
       const file = await prisma.$transaction(async (tx) => {
         const created = await tx.file.create({
           data: {
-            printJob: { connect: { id: jobId } },
+            printJobId: jobId,
             name: fileData.name,
             pages: fileData.pages,
             url: fileData.url,
             fileCost,
-            uploadedByUserId: req.user.uid,
+            uploadedByUserId: req.user!.uid,
             uploadedByPhoneNumber: linkedPhone,
             uploadedByDisplayName: user?.name ?? null,
-            uploadedByRole: job.userId === req.user.uid ? "OWNER" : "COLLABORATOR",
+            uploadedByRole: job.userId === req.user!.uid ? "OWNER" : "COLLABORATOR",
             option: {
               create: {
                 copies: fileData.option.copies,

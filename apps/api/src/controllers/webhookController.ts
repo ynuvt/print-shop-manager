@@ -272,7 +272,7 @@ Please try again or send a different file.`,
                 }
                 */
 
-                let pdfBuffer = buffer;
+                let pdfBuffer: Buffer = buffer;
                 let pdfFileName = rawFileName.toLowerCase().endsWith(".pdf")
                   ? rawFileName
                   : `${rawFileName}.pdf`;

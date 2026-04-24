@@ -856,6 +856,7 @@ app.post(
             totalPages: 0,
             estimatedTime: 0,
           },
+          include: { _count: { select: { files: true } } },
         });
       }
 
@@ -1005,7 +1006,7 @@ app.post(
       });
 
       const updatedJob = await prisma.printJob.findUnique({
-        where: { id: job.id },
+        where: { id: job!.id },
         include: {
           files: {
             include: {
@@ -1319,10 +1320,13 @@ app.get(
   "/user-jobs",
   authMiddleware(["customer", "admin"]),
   async (req: ExtendedRequest, res) => {
-    console.log("Fetching jobs for user:", req.user!.uid);
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     try {
+      console.log("Fetching jobs for user:", req.user.uid);
       const linked = await prisma.whatsAppUser.findFirst({
-        where: { userId: req.user!.uid },
+        where: { userId: req.user.uid },
         select: { phoneNumber: true },
       });
       const viewerPhone = linked?.phoneNumber ?? null;
@@ -1330,8 +1334,8 @@ app.get(
       const jobs = await prisma.printJob.findMany({
         where: {
           OR: [
-            { userId: req.user!.uid },
-            { owners: { some: { userId: req.user!.uid } } },
+            { userId: req.user.uid },
+            { owners: { some: { userId: req.user.uid } } },
           ],
         },
         include: {

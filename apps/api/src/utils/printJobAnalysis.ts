@@ -51,9 +51,9 @@ export async function analyzeUploadedPrintFile(
     );
   }
 
-  if (file.options.pageRange === "CUSTOM") {
+  if (file.option.pageRange === "CUSTOM") {
     const rangeError = validateCustomPageRange(
-      file.options.customRange ?? "",
+      file.option.customRange ?? "",
       pages,
     );
 
@@ -63,12 +63,14 @@ export async function analyzeUploadedPrintFile(
   }
 
   const cost = calculateFileCost(pages, {
-    paperSize: file.options.paperSize,
-    colorMode: file.options.colorMode,
-    pageRange: file.options.pageRange,
-    customRange: file.options.customRange,
-    duplex: file.options.duplex,
-    copies: file.options.copies,
+    paperSize: file.option.paperSize,
+    colorMode: file.option.colorMode,
+    orientation: file.option.orientation,
+    scaleMode: file.option.scaleMode,
+    pageRange: file.option.pageRange,
+    customRange: file.option.customRange,
+    duplex: file.option.duplex,
+    copies: file.option.copies,
   });
 
   return {

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import path from "node:path";
@@ -51,6 +51,23 @@ if (fs.existsSync(webDistPath)) {
     res.sendFile(webIndexPath);
   });
 }
+
+// Global Express error handler — catches anything that slips through route-level try/catch
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("[UNHANDLED EXPRESS ERROR]", err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Process-level crash guards — prevent the server from dying on unexpected errors
+process.on("uncaughtException", (err) => {
+  console.error("[UNCAUGHT EXCEPTION]", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[UNHANDLED REJECTION]", reason);
+});
 
 app.listen((process.env.PORT as unknown as number) || 4000, "0.0.0.0", () => {
   console.log(
