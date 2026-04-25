@@ -372,7 +372,7 @@ Please try again or send a different file.`,
                   });
                 }
 
-                if (existingJob && existingJob._count && existingJob._count.files >= 15) {
+                if (existingJob && existingJob._count && existingJob._count.files >= 30) {
                   // Fetch the files to list them
                   const jobFiles = await prisma.file.findMany({
                     where: { printJobId: existingJob.id },
@@ -385,7 +385,7 @@ Please try again or send a different file.`,
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
                       message: `${waBold("Limit reached")}
-You cannot add more than 15 files to a single job.
+You cannot add more than 30 files to a single job.
 
 *Current files in your job:*
 ${fileListStr}
@@ -397,7 +397,7 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
                   
                   // Also emit socket event to show toast on web
                   if (waUser.userId) {
-                    socket.emit("job-status-updated", waUser.userId, existingJob.id, "Limit reached: Maximum 15 files allowed per job.");
+                    socket.emit("job-status-updated", waUser.userId, existingJob.id, "Limit reached: Maximum 30 files allowed per job.");
                   }
                   continue;
                 }
@@ -547,14 +547,246 @@ Please try again.`,
 
             // ─── IMAGE HANDLER ──────────────────────────────────────────────
             if (incomingMessage.type === "image") {
-              console.log("Received image — rejecting (images not supported for printing).");
-              if (phoneNumberId && userData.displayPhoneNumber) {
-                await sendWhatsAppTextMessage({
-                  to: userData.displayPhoneNumber,
-                  message: `${waBold("Images can't be printed")}
-Please send your file as a ${waBold("PDF")} or ${waBold("Word document")} instead.`,
-                  phoneNumberId,
+              const imageData = incomingMessage.image;
+              if (!imageData?.id) {
+                console.log("Received image without ID, skipping.");
+                continue;
+              }
+
+              const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+              if (!accessToken) {
+                console.log("Missing WhatsApp access token for image.");
+                continue;
+              }
+
+              console.log("Received image:", imageData);
+
+              try {
+                // Step 1: Get the media URL from the image ID
+                const mediaUrlRes = await fetch(
+                  `https://graph.facebook.com/v21.0/${imageData.id}`,
+                  { headers: { Authorization: `Bearer ${accessToken}` } },
+                );
+                if (!mediaUrlRes.ok) {
+                  console.log("Failed to get media URL for image:", mediaUrlRes.status);
+                  continue;
+                }
+                const mediaUrlData = await mediaUrlRes.json() as { url?: string };
+                const imageUrl = mediaUrlData.url;
+                if (!imageUrl) {
+                  console.log("No URL in media response for image.");
+                  continue;
+                }
+
+                // Step 2: Download the image binary
+                const imageResponse = await fetch(imageUrl, {
+                  headers: { Authorization: `Bearer ${accessToken}` },
                 });
+                if (!imageResponse.ok) {
+                  console.log("Failed to download WhatsApp image:", imageResponse.status);
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      message: `${waBold("Upload failed")}\nCouldn't download the image. Please try sending it again.`,
+                      phoneNumberId,
+                    });
+                  }
+                  continue;
+                }
+
+                const imageArrayBuffer = await imageResponse.arrayBuffer();
+                const imageBuffer = Buffer.from(imageArrayBuffer);
+
+                // Step 3: Generate a filename based on mime type
+                const mimeToExt: Record<string, string> = {
+                  "image/png": ".png",
+                  "image/jpeg": ".jpg",
+                  "image/jpg": ".jpg",
+                  "image/bmp": ".bmp",
+                  "image/tiff": ".tiff",
+                  "image/webp": ".webp",
+                  "image/gif": ".gif",
+                };
+                const ext = mimeToExt[imageData.mime_type || ""] || ".jpg";
+                const rawFileName = `whatsapp-image-${Date.now()}${ext}`;
+
+                // Step 4: Convert image to PDF
+                const converted = await convertToPdfFromBuffer(imageBuffer, rawFileName);
+                const pdfBuffer = converted.pdfBuffer;
+                const pdfFileName = converted.pdfFileName;
+
+                console.log(`Image converted to PDF: ${rawFileName} → ${pdfFileName}`);
+
+                // Step 5: Feed into the existing document processing pipeline
+                const pages = await getPdfPageCountFromBuffer(pdfBuffer);
+
+                const startedProcessingAt = new Date();
+                if (userData.displayPhoneNumber) {
+                  await prisma.whatsAppUser.upsert({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    create: {
+                      phoneNumber: userData.displayPhoneNumber,
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: startedProcessingAt,
+                    },
+                    update: {
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: startedProcessingAt,
+                    },
+                    select: { phoneNumber: true },
+                  });
+                }
+
+                const key = buildR2ObjectKey(
+                  userData.displayPhoneNumber || "whatsapp",
+                  pdfFileName,
+                );
+                const uploaded = await uploadBufferToR2({
+                  key,
+                  buffer: pdfBuffer,
+                  contentType: "application/pdf",
+                });
+
+                const defaultOptions: PrintOptions = {
+                  paperSize: "A4",
+                  colorMode: "BW",
+                  orientation: "PORTRAIT",
+                  scaleMode: "FIT",
+                  pageRange: "ALL",
+                  customRange: "",
+                  duplex: "ONE",
+                  copies: 1,
+                };
+                const cost = calculateFileCost(pages, defaultOptions);
+
+                const waUser = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { phoneNumber: true, userId: true },
+                });
+
+                if (!waUser) {
+                  throw new Error("WhatsApp user record not found.");
+                }
+
+                let existingJob: {
+                  id: string;
+                  totalCost: number;
+                  totalPages: number;
+                  userId: string | null;
+                  files: { createdAt: Date }[];
+                  _count?: { files: number };
+                } | null = null;
+
+                if (waUser.userId) {
+                  existingJob = await prisma.printJob.findFirst({
+                    where: {
+                      userId: waUser.userId,
+                      status: PrintJobStatus.DRAFT,
+                    },
+                    select: {
+                      id: true,
+                      totalCost: true,
+                      totalPages: true,
+                      userId: true,
+                      _count: { select: { files: true } },
+                      files: {
+                        orderBy: { createdAt: "desc" },
+                        take: 1,
+                        select: { createdAt: true },
+                      },
+                    },
+                  });
+                }
+
+                if (existingJob && existingJob._count && existingJob._count.files >= 30) {
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      message: `${waBold("Limit reached")}\nYou cannot add more than 30 files to a single job.`,
+                      phoneNumberId,
+                    });
+                  }
+                  continue;
+                }
+
+                if (existingJob) {
+                  await prisma.printJob.update({
+                    where: { id: existingJob.id },
+                    data: {
+                      totalCost: existingJob.totalCost + cost,
+                      totalPages: existingJob.totalPages + pages,
+                      files: {
+                        create: {
+                          name: pdfFileName,
+                          url: uploaded.url,
+                          pages,
+                          cost,
+                          uploadedByPhoneNumber: userData.displayPhoneNumber,
+                          uploadedByUserId: waUser.userId,
+                          option: { create: defaultOptions },
+                        },
+                      },
+                    },
+                  });
+
+                  if (waUser.userId) {
+                    socket.emit("files-added", waUser.userId, existingJob.id);
+                  }
+                } else if (waUser.userId) {
+                  const verificationCode = Math.floor(
+                    1000 + Math.random() * 9000,
+                  ).toString();
+                  existingJob = await prisma.printJob.create({
+                    data: {
+                      userId: waUser.userId,
+                      verificationCode,
+                      totalCost: cost,
+                      totalPages: pages,
+                      estimatedTime: 1,
+                      files: {
+                        create: {
+                          name: pdfFileName,
+                          url: uploaded.url,
+                          pages,
+                          cost,
+                          uploadedByPhoneNumber: userData.displayPhoneNumber,
+                          uploadedByUserId: waUser.userId,
+                          option: { create: defaultOptions },
+                        },
+                      },
+                    },
+                    select: {
+                      id: true,
+                      totalCost: true,
+                      totalPages: true,
+                      userId: true,
+                      files: {
+                        orderBy: { createdAt: "desc" },
+                        take: 1,
+                        select: { createdAt: true },
+                      },
+                    },
+                  });
+                  socket.emit("files-added", waUser.userId, existingJob.id);
+                }
+
+                // Send confirmation
+                if (phoneNumberId && userData.displayPhoneNumber) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    message: `${waBold("✓ Image received")}\n${waBold(pdfFileName)} (${pages} page${pages !== 1 ? "s" : ""})\nConverted to PDF and added to your draft.\n\nSend more files or visit ${waBold("zopy.in")} to customize and submit.`,
+                    phoneNumberId,
+                  });
+                }
+              } catch (imageError) {
+                console.error("Image processing failed:", imageError);
+                if (phoneNumberId && userData.displayPhoneNumber) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    message: `${waBold("Image processing failed")}\nCouldn't convert the image. Please try again or send as a PDF.`,
+                    phoneNumberId,
+                  });
+                }
               }
               continue;
             }

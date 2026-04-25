@@ -614,9 +614,16 @@ app.post(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.ms-powerpoint",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/bmp",
+        "image/tiff",
+        "image/webp",
+        "image/gif",
       ]);
 
-      const ALLOWED_EXTENSIONS = /\.(pdf|docx?|pptx?)$/i;
+      const ALLOWED_EXTENSIONS = /\.(pdf|docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i;
 
       const uploads = await Promise.all(
         files.map(async (file) => {
@@ -625,7 +632,7 @@ app.post(
 
           if (!nameMatch && !typeMatch) {
             throw new PrintJobAnalysisError(
-              `${file.name} is not a supported file type. Supported: PDF, Word, and PowerPoint.`,
+              `${file.name} is not a supported file type. Supported: PDF, Word, PowerPoint, and Images.`,
               400,
             );
           }
@@ -835,10 +842,10 @@ app.post(
         include: { _count: { select: { files: true } } },
       });
 
-      if (job && job._count.files + incomingFiles.length > 15) {
-        return res.status(400).json({ error: "You cannot add more than 15 files to a job." });
-      } else if (!job && incomingFiles.length > 15) {
-        return res.status(400).json({ error: "You cannot add more than 15 files to a job." });
+      if (job && job._count.files + incomingFiles.length > 30) {
+        return res.status(400).json({ error: "You cannot add more than 30 files to a job." });
+      } else if (!job && incomingFiles.length > 30) {
+        return res.status(400).json({ error: "You cannot add more than 30 files to a job." });
       }
 
       if (!job) {
@@ -867,6 +874,7 @@ app.post(
       });
 
       const OFFICE_EXTENSIONS = /\.(docx?|pptx?)$/i;
+      const IMAGE_EXTENSIONS = /\.(png|jpe?g|bmp|tiff?|webp|gif)$/i;
 
       const processedFiles: UploadedFileForCreate[] = [];
       let totalBytes = 0;
@@ -892,18 +900,19 @@ app.post(
         }
 
         const isOffice = OFFICE_EXTENSIONS.test(file.name);
+        const isImage = IMAGE_EXTENSIONS.test(file.name);
 
         let finalUrl = file.url;
         let finalName = file.name;
         let pages: number;
 
-        if (isOffice) {
-          // Word/PPT: convert to PDF server-side using LibreOffice
+        if (isOffice || isImage) {
+          // Office/Image files: convert to PDF server-side using LibreOffice
           const { convertToPdfFromBuffer } = await import("../utils/convertToPdf.js");
           const converted = await convertToPdfFromBuffer(buffer, file.name);
 
-          // Strip office extension and add .pdf
-          let baseName = file.name.replace(/\.(docx?|pptx?)$/i, "");
+          // Strip original extension and add .pdf
+          let baseName = file.name.replace(/\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i, "");
           if (!baseName.trim()) baseName = "document";
           finalName = `${baseName}.pdf`;
 
@@ -1058,8 +1067,8 @@ app.post(
           .json({ error: "This job is not available for review." });
       }
 
-      if (job._count.files + incomingFiles.length > 15) {
-        return res.status(400).json({ error: "You cannot add more than 15 files to a job." });
+      if (job._count.files + incomingFiles.length > 30) {
+        return res.status(400).json({ error: "You cannot add more than 30 files to a job." });
       }
 
       const viewerId = req.user!.uid;
@@ -1119,14 +1128,43 @@ app.post(
           );
         }
 
+        const IMAGE_EXTENSIONS_CHECK = /\.(png|jpe?g|bmp|tiff?|webp|gif)$/i;
+        const OFFICE_EXTENSIONS_CHECK = /\.(docx?|pptx?)$/i;
+        const needsConversion = IMAGE_EXTENSIONS_CHECK.test(file.name) || OFFICE_EXTENSIONS_CHECK.test(file.name);
+
+        let finalUrl = file.url;
+        let finalName = file.name;
         let pages: number;
-        try {
-          pages = await getPdfPageCountFromBuffer(buffer);
-        } catch {
-          throw new PrintJobAnalysisError(
-            `Unable to inspect ${file.name}. Only valid PDF files can be submitted.`,
-            400,
-          );
+
+        if (needsConversion) {
+          // Image/Office file: convert to PDF server-side
+          const { convertToPdfFromBuffer } = await import("../utils/convertToPdf.js");
+          const converted = await convertToPdfFromBuffer(buffer, file.name);
+
+          let baseName = file.name.replace(/\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i, "");
+          if (!baseName.trim()) baseName = "document";
+          finalName = `${baseName}.pdf`;
+
+          const key = buildR2ObjectKey(req.user!.uid, finalName);
+          const uploaded = await uploadBufferToR2({
+            key,
+            buffer: converted.pdfBuffer,
+            contentType: "application/pdf",
+          });
+          finalUrl = uploaded.url;
+
+          await deleteObjectFromR2ByUrl(file.url).catch(() => {});
+
+          pages = await getPdfPageCountFromBuffer(converted.pdfBuffer);
+        } else {
+          try {
+            pages = await getPdfPageCountFromBuffer(buffer);
+          } catch {
+            throw new PrintJobAnalysisError(
+              `Unable to inspect ${file.name}. Only valid PDF files can be submitted.`,
+              400,
+            );
+          }
         }
 
         const cost = calculateFileCost(pages, {
@@ -1141,8 +1179,8 @@ app.post(
         });
 
         processedFiles.push({
-          name: file.name,
-          url: file.url,
+          name: finalName,
+          url: finalUrl,
           pages,
           cost,
           option: defaultOptions,
@@ -1300,10 +1338,13 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
 
     res.status(200).json(job);
   } catch (error) {
+    console.error("Failed to update job status:", error);
     res.status(500).json({ error: "Failed to update job status." });
   } finally {
-    const msg = `Your print job with verification code ${job?.verificationCode} is now ${schema.data.status}.`;
-    socket.emit("job-status-updated", schema.data.userId, schema.data.id, msg);
+    if (job) {
+      const msg = `Your print job with verification code ${job?.verificationCode} is now ${schema.data.status}.`;
+      socket.emit("job-status-updated", schema.data.userId, schema.data.id, msg);
+    }
   }
 });
 

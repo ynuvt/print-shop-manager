@@ -12,7 +12,7 @@ export type ThemeMode = "dark" | "light";
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("themeMode");
-    return saved === "light" ? "light" : "dark";
+    return saved === "dark" ? "dark" : "light";
   });
 
   useEffect(() => {

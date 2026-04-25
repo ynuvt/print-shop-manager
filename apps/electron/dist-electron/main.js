@@ -55,7 +55,98 @@ async function resolvePdfToPrinterName(requestedName) {
     // If we can't resolve, return the original; caller may fallback.
     return requestedName;
 }
-async function printPdfViaWebContents(filePath, printerName) {
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".gif"]);
+function isImageFile(filePath) {
+    const ext = node_path_1.default.extname(filePath).toLowerCase();
+    return IMAGE_EXTENSIONS.has(ext);
+}
+/** Print an image file by wrapping it in HTML so it fills the page properly. */
+async function printImageViaWebContents(filePath, printerName, normalizedOptions) {
+    const win = new electron_1.BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+        },
+    });
+    try {
+        // Wrap image in HTML that fills the printed page
+        const imageUrl = `file://${filePath}`;
+        const html = `
+      <html>
+        <head>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            @page { margin: 0; }
+            html, body { width: 100%; height: 100%; }
+            body {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              background: #fff;
+            }
+            img {
+              max-width: 100%;
+              max-height: 100%;
+              object-fit: contain;
+            }
+          </style>
+        </head>
+        <body>
+          <img src="${imageUrl}" />
+        </body>
+      </html>
+    `;
+        await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        // Wait for the image to finish loading
+        await win.webContents.executeJavaScript(`
+      new Promise((resolve) => {
+        const img = document.querySelector('img');
+        if (img.complete) return resolve();
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
+    `);
+        const electronPrintOpts = {
+            silent: true,
+            deviceName: printerName,
+            printBackground: true,
+        };
+        if (normalizedOptions) {
+            if (normalizedOptions.copies) {
+                electronPrintOpts.copies = Math.max(1, Number(normalizedOptions.copies) || 1);
+            }
+            if (normalizedOptions.orientation === "landscape") {
+                electronPrintOpts.landscape = true;
+            }
+            const side = normalizedOptions.side?.toLowerCase();
+            if (side === "duplexlong") {
+                electronPrintOpts.duplexMode = "longEdge";
+            }
+            else if (side === "duplexshort") {
+                electronPrintOpts.duplexMode = "shortEdge";
+            }
+            else {
+                electronPrintOpts.duplexMode = "simplex";
+            }
+        }
+        console.log(`[IMAGE PRINT] webContents.print → ${printerName}`, electronPrintOpts);
+        await new Promise((resolve, reject) => {
+            win.webContents.print(electronPrintOpts, (success, failureReason) => {
+                if (success)
+                    resolve();
+                else
+                    reject(new Error(failureReason || "Image print failed"));
+            });
+        });
+    }
+    finally {
+        win.destroy();
+    }
+}
+async function printPdfViaWebContents(filePath, printerName, normalizedOptions) {
     const win = new electron_1.BrowserWindow({
         show: false,
         width: 800,
@@ -68,8 +159,38 @@ async function printPdfViaWebContents(filePath, printerName) {
     try {
         // Electron can render PDFs via its built-in PDF viewer.
         await win.loadURL(`file://${filePath}`);
+        // Map our normalizedOptions to Electron's webContents.print() format
+        const electronPrintOpts = {
+            silent: true,
+            deviceName: printerName,
+            printBackground: true,
+        };
+        if (normalizedOptions) {
+            if (normalizedOptions.copies) {
+                electronPrintOpts.copies = Math.max(1, Number(normalizedOptions.copies) || 1);
+            }
+            if (normalizedOptions.orientation === "landscape") {
+                electronPrintOpts.landscape = true;
+            }
+            // Map side/duplex to Electron's duplexMode
+            const side = normalizedOptions.side?.toLowerCase();
+            if (side === "duplexlong") {
+                electronPrintOpts.duplexMode = "longEdge";
+            }
+            else if (side === "duplexshort") {
+                electronPrintOpts.duplexMode = "shortEdge";
+            }
+            else {
+                electronPrintOpts.duplexMode = "simplex";
+            }
+            // Page ranges (e.g. "1-3,5")
+            if (normalizedOptions.pages) {
+                electronPrintOpts.pageRanges = normalizedOptions.pages;
+            }
+        }
+        console.log(`[FALLBACK] webContents.print → ${printerName}`, electronPrintOpts);
         await new Promise((resolve, reject) => {
-            win.webContents.print({ silent: true, deviceName: printerName, printBackground: true }, (success, failureReason) => {
+            win.webContents.print(electronPrintOpts, (success, failureReason) => {
                 if (success)
                     resolve();
                 else
@@ -172,11 +293,23 @@ electron_1.app.on("window-all-closed", () => {
     }
 });
 // IPC handlers for file operations
+/** Sanitize temp filenames to prevent SumatraPDF command-line failures from overly long names. */
+function sanitizeTempFileName(name) {
+    const ext = node_path_1.default.extname(name);
+    let base = node_path_1.default.basename(name, ext);
+    // Replace spaces and special chars with underscores
+    base = base.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/_+/g, "_");
+    // Truncate to max 80 chars
+    if (base.length > 80)
+        base = base.substring(0, 80);
+    return `${base}${ext}`;
+}
 electron_1.ipcMain.handle("download-files", async (event, files) => {
     const tempDir = node_os_1.default.tmpdir();
     const downloadedPaths = [];
     for (const [idx, file] of files.entries()) {
-        const fileName = `printowl_${Date.now()}_${file.name}`;
+        const safeName = sanitizeTempFileName(file.name);
+        const fileName = `printowl_${Date.now()}_${safeName}`;
         const filePath = node_path_1.default.join(tempDir, fileName);
         try {
             await downloadFile(event, file.url, filePath, idx, files.length, file.name);
@@ -191,7 +324,8 @@ electron_1.ipcMain.handle("download-files", async (event, files) => {
 });
 electron_1.ipcMain.handle("download-file", async (event, file, meta) => {
     const tempDir = node_os_1.default.tmpdir();
-    const fileName = `printowl_${Date.now()}_${file.name}`;
+    const safeName = sanitizeTempFileName(file.name);
+    const fileName = `printowl_${Date.now()}_${safeName}`;
     const filePath = node_path_1.default.join(tempDir, fileName);
     await downloadFile(event, file.url, filePath, meta?.fileIndex ?? 0, meta?.totalFiles ?? 1, file.name, meta?.printRunId);
     return filePath;
@@ -273,6 +407,13 @@ electron_1.ipcMain.handle("print-pdf", async (event, filePath, printer, options,
             console.log(`[DRY RUN] Would print: ${node_path_1.default.basename(filePath)} → ${printer}`, normalizedOptions);
             await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
         }
+        else if (isImageFile(filePath)) {
+            // Images: pdf-to-printer can't handle them (prints blank pages).
+            // Route directly to webContents with HTML wrapper.
+            console.log(`[IMAGE] Detected image file: ${node_path_1.default.basename(filePath)} — using webContents.print directly`);
+            await printImageViaWebContents(filePath, printer, normalizedOptions);
+            console.log(`[IMAGE] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
+        }
         else {
             let resolvedPrinter = printer;
             try {
@@ -281,13 +422,17 @@ electron_1.ipcMain.handle("print-pdf", async (event, filePath, printer, options,
             catch (e) {
                 console.warn("Failed to resolve printer name via pdf-to-printer:", e);
             }
+            // PRIMARY: pdf-to-printer — always first priority for PDFs
             try {
+                console.log(`[PRIMARY] pdf-to-printer: ${node_path_1.default.basename(filePath)} → ${resolvedPrinter}`, normalizedOptions);
                 await (0, pdf_to_printer_1.print)(filePath, { printer: resolvedPrinter, ...normalizedOptions });
+                console.log(`[PRIMARY] pdf-to-printer succeeded for ${node_path_1.default.basename(filePath)}`);
             }
             catch (error) {
-                console.error(`pdf-to-printer print failed for "${resolvedPrinter}". Falling back to webContents.print...`, error);
-                // Fallback: use Electron printing directly (survives name mismatches in pdf-to-printer).
-                await printPdfViaWebContents(filePath, printer);
+                console.error(`[PRIMARY] pdf-to-printer FAILED for "${resolvedPrinter}". Falling back to webContents.print (loadContent)...`, error);
+                // FALLBACK: use Electron webContents.print (loadContent) — only when pdf-to-printer fails
+                await printPdfViaWebContents(filePath, printer, normalizedOptions);
+                console.log(`[FALLBACK] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
             }
         }
         event.sender.send("print-progress", {

@@ -9,6 +9,7 @@ import {
   Plus,
   SlidersHorizontal,
   Sun,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
   requestPresignedUploads,
   uploadFileToR2,
   deleteUserFile,
+  deleteUserPrintJob,
 } from "../api/api";
 // import ReviewPage from "./ReviewPage";
 import PrintJobsList from "../components/PrintJobsList";
@@ -646,7 +648,17 @@ export default function HomePage({
     async (files: File[]) => {
       if (!files.length) return;
 
-      const incomingBytes = files.reduce((sum, file) => sum + file.size, 0);
+      // Cap at 30 files — take first 30, warn user
+      const MAX_FILES = 30;
+      let filesToUpload = files;
+      if (files.length > MAX_FILES) {
+        filesToUpload = files.slice(0, MAX_FILES);
+        setError(
+          `Only the first ${MAX_FILES} files were added. Maximum ${MAX_FILES} files per job.`,
+        );
+      }
+
+      const incomingBytes = filesToUpload.reduce((sum, file) => sum + file.size, 0);
 
       if (totalBytes + incomingBytes > MAX_JOB_UPLOAD_BYTES) {
         setError(
@@ -655,28 +667,32 @@ export default function HomePage({
         return;
       }
 
-      setError(null);
+      if (filesToUpload.length < files.length) {
+        // Keep the warning but don't block — proceed below
+      } else {
+        setError(null);
+      }
       setIsPreparingFiles(true);
       setUploadStage("uploading");
-      setUploadProgress(files.map(() => 0));
+      setUploadProgress(filesToUpload.map(() => 0));
 
       try {
-        const uploads = await requestPresignedUploads(files);
-        for (let index = 0; index < files.length; index += 1) {
-          await uploadFileToR2(uploads[index]!.uploadUrl, files[index]!);
+        const uploads = await requestPresignedUploads(filesToUpload);
+        for (let index = 0; index < filesToUpload.length; index += 1) {
+          await uploadFileToR2(uploads[index]!.uploadUrl, filesToUpload[index]!);
           setUploadProgress((prev) =>
             prev.map((value, i) => (i === index ? 100 : value)),
           );
         }
 
         // Check if any files need server-side conversion
-        const hasOfficeFiles = files.some((f) =>
-          /\.(docx?|pptx?)$/i.test(f.name),
+        const hasConvertibleFiles = filesToUpload.some((f) =>
+          /\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i.test(f.name),
         );
-        setUploadStage(hasOfficeFiles ? "converting" : "creating");
+        setUploadStage(hasConvertibleFiles ? "converting" : "creating");
         setUploadProgress((prev) => prev.map(() => 100));
 
-        const urlFiles = files.map((file, index) => ({
+        const urlFiles = filesToUpload.map((file, index) => ({
           name: file.name,
           url: uploads[index]!.publicUrl,
         }));
@@ -739,9 +755,17 @@ export default function HomePage({
       event.preventDefault();
       setIsDragActive(false);
 
-      const dropped = Array.from(event.dataTransfer.files).filter((file) =>
-        file.name.toLowerCase().endsWith(".pdf"),
-      );
+      const dropped = Array.from(event.dataTransfer.files).filter((file) => {
+        const name = file.name.toLowerCase();
+        return (
+          name.endsWith(".pdf") ||
+          name.endsWith(".doc") || name.endsWith(".docx") ||
+          name.endsWith(".ppt") || name.endsWith(".pptx") ||
+          name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") ||
+          name.endsWith(".bmp") || name.endsWith(".tiff") || name.endsWith(".tif") ||
+          name.endsWith(".webp") || name.endsWith(".gif")
+        );
+      });
       await processFiles(dropped);
     },
     [processFiles],
@@ -787,6 +811,28 @@ export default function HomePage({
     setPrintFiles((prev) => prev.filter((_, i) => i !== idx));
     setExpandedIdx((prev) => (prev === idx ? null : prev));
   }, [printFiles]);
+
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+
+  const clearDraft = useCallback(async () => {
+    setIsClearing(true);
+    try {
+      if (draftJobId) {
+        await deleteUserPrintJob(draftJobId);
+      }
+      setPrintFiles([]);
+      setDraftJobId(null);
+      setExpandedIdx(null);
+      setError(null);
+      setShowClearConfirm(false);
+    } catch (err) {
+      console.error("Failed to clear draft", err);
+      setError("Failed to clear draft. Please try again.");
+    } finally {
+      setIsClearing(false);
+    }
+  }, [draftJobId]);
 
   const handleFileToggle = useCallback(
     (idx: number) => {
@@ -1177,7 +1223,7 @@ export default function HomePage({
                       : uploadStage === "creating"
                         ? "Processing files. Please wait..."
                         : "Uploading files. Please wait..."
-                    : "PDF, Word, or PowerPoint."}
+                    : "PDF, Word, PowerPoint, or Images."}
                 </p>
                 {isPreparingFiles && (
                   <div
@@ -1288,7 +1334,7 @@ export default function HomePage({
                     ))}
                   </div>
 
-                  <div className="section-foot">
+                  <div className="section-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <button
                       type="button"
                       ref={addMoreRef}
@@ -1301,6 +1347,15 @@ export default function HomePage({
                     >
                       <Plus size={16} aria-hidden="true" />
                       Add More
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost-link"
+                      style={{ color: "var(--error)", fontSize: "13px", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}
+                      onClick={() => setShowClearConfirm(true)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      Clear Draft
                     </button>
                   </div>
 
@@ -1355,7 +1410,7 @@ export default function HomePage({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.doc,.docx,.ppt,.pptx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.bmp,.tiff,.tif,.webp,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/bmp,image/tiff,image/webp,image/gif"
               multiple
               className="hidden-input"
               onChange={onFilesSelected}
@@ -1414,6 +1469,47 @@ export default function HomePage({
                 }}
               >
                 Sync
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showClearConfirm && (
+        <div className="modal-shell" role="dialog" aria-modal="true" onClick={() => setShowClearConfirm(false)}>
+          <div className="modal-card" style={{ maxWidth: "400px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <h2 style={{ fontSize: "18px" }}>Clear Draft?</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setShowClearConfirm(false)}
+              >
+                x
+              </button>
+            </div>
+            <p className="modal-helper" style={{ marginTop: "12px", marginBottom: "20px" }}>
+              This will permanently delete all {printFiles.length} file{printFiles.length !== 1 ? "s" : ""} from your current draft. This action cannot be undone.
+            </p>
+            <div className="modal-actions" style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setShowClearConfirm(false)}
+                disabled={isClearing}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={clearDraft}
+                disabled={isClearing}
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <Trash2 size={14} />
+                {isClearing ? "Clearing..." : "Delete All"}
               </button>
             </div>
           </div>

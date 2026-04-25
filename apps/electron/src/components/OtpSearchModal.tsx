@@ -60,16 +60,23 @@ export default function OtpSearchModal({
       aria-labelledby="otp-modal-title"
       onClick={handleBackdropClick}
     >
-      <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
+      <div
+        className="w-full max-w-sm rounded-2xl p-6 shadow-2xl"
+        style={{
+          background: "var(--panel)",
+          border: "1px solid var(--border)",
+        }}
+      >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <h2
               id="otp-modal-title"
-              className="text-base font-semibold text-gray-900"
+              className="text-base font-semibold"
+              style={{ color: "var(--text)" }}
             >
               Find Job by Code
             </h2>
-            <p className="mt-0.5 text-xs text-gray-500">
+            <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
               Enter the verification code shown to the customer.
             </p>
           </div>
@@ -77,7 +84,8 @@ export default function OtpSearchModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="shrink-0 rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            className="shrink-0 rounded-lg p-1 transition-colors hover:opacity-80"
+            style={{ color: "var(--text-muted)" }}
           >
             <svg
               width="16"
@@ -98,7 +106,8 @@ export default function OtpSearchModal({
         <div className="mb-4">
           <label
             htmlFor="otp-input"
-            className="mb-1.5 block text-xs font-medium text-gray-500"
+            className="mb-1.5 block text-xs font-medium"
+            style={{ color: "var(--text-muted)" }}
           >
             Verification Code
           </label>
@@ -115,7 +124,12 @@ export default function OtpSearchModal({
             }}
             onKeyDown={handleKeyDown}
             placeholder="2041"
-            className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-center font-mono text-2xl tracking-[0.35em] text-gray-900 placeholder:text-gray-300 placeholder:tracking-normal outline-none ring-blue-500/30 transition focus:ring-2"
+            className="w-full rounded-xl px-4 py-3 text-center font-mono text-2xl tracking-[0.35em] outline-none transition"
+            style={{
+              background: "var(--panel-muted)",
+              color: "var(--text)",
+              border: "1px solid var(--border)",
+            }}
           />
         </div>
 
@@ -145,7 +159,12 @@ export default function OtpSearchModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100"
+            className="flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors hover:opacity-80"
+            style={{
+              border: "1px solid var(--border)",
+              color: "var(--text-muted)",
+              background: "var(--panel)",
+            }}
           >
             Cancel
           </button>
@@ -153,7 +172,8 @@ export default function OtpSearchModal({
             type="button"
             onClick={() => void handleSearch()}
             disabled={loading}
-            className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500 active:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 active:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "var(--brand)" }}
           >
             {loading ? "Searching..." : "Search"}
           </button>

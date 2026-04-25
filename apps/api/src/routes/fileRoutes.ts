@@ -180,8 +180,8 @@ app.post(
       if (job.status !== PrintJobStatus.DRAFT) {
         return res.status(403).json({ error: "This job is not available for review." });
       }
-      if (job._count.files >= 15) {
-        return res.status(400).json({ error: "You cannot add more than 15 files." });
+      if (job._count.files >= 30) {
+        return res.status(400).json({ error: "You cannot add more than 30 files." });
       }
       const isMember =
         job.userId === req.user!.uid || job.owners.some((o) => o.userId === req.user!.uid);

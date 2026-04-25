@@ -39,11 +39,11 @@ function sortJobsNewestFirst(items: PrintJobSummary[]): PrintJobSummary[] {
   );
 }
 
-/** Cap total indicators to 3 with a sliding window (FIFO).
- *  When a 4th job arrives, the oldest drops: [1,2,3] → add 4 → [2,3,4] */
+/** Cap total indicators to 5 with a sliding window (FIFO).
+ *  When a 6th job arrives, the oldest drops: [1,2,3,4,5] → add 6 → [2,3,4,5,6] */
 function capPrintJobs(jobs: ActivePrintJobState[]): ActivePrintJobState[] {
-  if (jobs.length <= 3) return jobs;
-  return jobs.slice(-3);
+  if (jobs.length <= 5) return jobs;
+  return jobs.slice(-5);
 }
 
 function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
@@ -420,7 +420,7 @@ export default function App() {
         error: null,
       };
 
-      // Remove old runs of the same job, add new, cap to 3 total
+      // Remove old runs of the same job, add new, cap to 5 total
       setActivePrintJobs((prev) => {
         const withoutOld = prev.filter((j) => j.jobId !== job.id);
         return capPrintJobs([...withoutOld, newEntry]);
@@ -513,7 +513,7 @@ export default function App() {
         );
         await handleStatusUpdate(job.id, job.userId, "COMPLETED");
 
-        // Mark completed — cap to 3 total
+        // Mark completed — cap to 5 total
         setActivePrintJobs((prev) =>
           capPrintJobs(
             prev.map((j) =>
@@ -653,13 +653,14 @@ export default function App() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative w-full max-w-xs">
-              <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by job code…"
-                className="search-input pl-9"
+                className="search-input"
+                style={{ paddingLeft: "32px" }}
               />
             </div>
             <button
@@ -746,6 +747,7 @@ export default function App() {
           printers={printers}
           selectedPrinter={selectedPrinter}
           selectedColorPrinter={selectedColorPrinter}
+          hasActiveIndicators={activePrintJobs.length > 0}
         />
       )}
 

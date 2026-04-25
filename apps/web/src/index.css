@@ -2006,19 +2006,20 @@ body {
 }
 
 .otp-digit {
-  min-width: 48px;
-  height: 56px;
+  min-width: 52px;
+  height: 62px;
   padding: 0 8px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--border));
-  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
+  border-radius: 14px;
+  border: 2px solid var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, #ffffff);
   font-family: "IBM Plex Mono", "Menlo", monospace;
-  font-size: 30px;
-  font-weight: 700;
+  font-size: 34px;
+  font-weight: 800;
   line-height: 1;
-  color: var(--text);
+  color: var(--brand-strong, var(--brand));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--brand) 20%, transparent);
 }
 
 .otp-helper {

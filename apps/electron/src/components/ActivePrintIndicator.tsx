@@ -84,7 +84,7 @@ function JobPill({
         </div>
 
         {/* Text content */}
-        <div className="min-w-0 text-left">
+        <div className="min-w-0 flex-1 text-left">
           <p className="text-sm font-bold leading-tight tracking-wide">
             #{verificationCode}
           </p>
@@ -92,6 +92,11 @@ function JobPill({
             {statusText}
           </p>
         </div>
+
+        {/* Cost — right-aligned */}
+        <span className="shrink-0 text-base font-extrabold tabular-nums tracking-tight" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.2)" }}>
+          ₹{(printJob?.totalCost ?? 0).toFixed(0)}
+        </span>
 
         {/* Mini progress bar for downloading */}
         {phase === "downloading" && (
@@ -138,7 +143,7 @@ export default function ActivePrintIndicator({
     return null;
 
   return (
-    <div className="fixed bottom-5 left-5 z-[60] flex flex-col-reverse gap-2">
+    <div className="fixed bottom-5 right-5 z-[60] flex flex-col-reverse gap-2">
       {activePrintJobs.map((job) => (
         <JobPill
           key={job.printRunId}

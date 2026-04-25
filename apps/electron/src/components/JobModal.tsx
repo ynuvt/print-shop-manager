@@ -13,6 +13,7 @@ interface JobModalProps {
   printers: { name: string; isDefault: boolean }[];
   selectedPrinter: string;
   selectedColorPrinter: string;
+  hasActiveIndicators?: boolean;
 }
 
 export default function JobModal({
@@ -25,10 +26,12 @@ export default function JobModal({
   printers,
   selectedPrinter,
   selectedColorPrinter,
+  hasActiveIndicators = false,
 }: JobModalProps) {
   const [rejectLoading, setRejectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localPrinter, setLocalPrinter] = useState<string>(selectedPrinter);
+  const [showReprintConfirm, setShowReprintConfirm] = useState(false);
 
   // Is this the job currently printing?
   const isThisJobActive =
@@ -111,6 +114,57 @@ export default function JobModal({
   const canPrint =
     !isPrintBusy || (isThisJobActive && (printPhase === "completed" || printPhase === "failed"));
 
+  /** Count how many pages a custom range string like "1,3,5-10" represents */
+  function countPagesInRange(rangeStr: string, totalPages: number): number {
+    if (!rangeStr.trim()) return totalPages;
+    const pages = new Set<number>();
+    for (const part of rangeStr.split(",")) {
+      const trimmed = part.trim();
+      const dashMatch = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (dashMatch) {
+        const start = Math.max(1, parseInt(dashMatch[1]!, 10));
+        const end = Math.min(totalPages, parseInt(dashMatch[2]!, 10));
+        for (let i = start; i <= end; i++) pages.add(i);
+      } else {
+        const num = parseInt(trimmed, 10);
+        if (!isNaN(num) && num >= 1 && num <= totalPages) pages.add(num);
+      }
+    }
+    return pages.size || totalPages;
+  }
+
+  /** Calculate physical sheets for a file based on its print options */
+  function getEffectiveSheets(pages: number, opt: PrintFileOption): number {
+    // Start with actual pages being printed (custom range reduces this)
+    let effectivePages = pages;
+    if (opt.pageRange === "CUSTOM" && opt.customRange) {
+      effectivePages = countPagesInRange(opt.customRange, pages);
+    }
+    // Duplex halves the sheet count
+    if (opt.duplex === "BOTH") {
+      effectivePages = Math.ceil(effectivePages / 2);
+    }
+    // Copies multiply sheets
+    effectivePages *= (opt.copies || 1);
+    return effectivePages;
+  }
+
+  /** Total effective sheets across all files */
+  const totalEffectiveSheets = useMemo(() => {
+    return job.files.reduce((sum, file) => {
+      const opt: PrintFileOption = file.option ?? {
+        paperSize: "A4", colorMode: "BW", orientation: "PORTRAIT",
+        scaleMode: "FIT", pageRange: "ALL", duplex: "ONE", copies: 1,
+      };
+      return sum + getEffectiveSheets(file.pages, opt);
+    }, 0);
+  }, [job.files]);
+
+  /** Does this job contain any color files? */
+  const hasColorFiles = useMemo(() => {
+    return job.files.some((f) => (f.option?.colorMode || "BW").toUpperCase() === "COLOR");
+  }, [job.files]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
@@ -124,6 +178,7 @@ export default function JobModal({
         style={{
           background: "var(--panel)",
           border: "1px solid var(--border)",
+          ...(hasActiveIndicators ? { marginRight: "220px" } : {}),
         }}
       >
         {/* ─── Header ─────────────────────────────────── */}
@@ -326,15 +381,21 @@ export default function JobModal({
               className="rounded-xl p-4 text-center"
               style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Pages</p>
-              <p className="mt-1.5 text-xl font-bold" style={{ color: "var(--text)" }}>{job.totalPages}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Sheets</p>
+              <p className="mt-1.5 text-xl font-bold" style={{ color: "var(--text)" }}>{totalEffectiveSheets}</p>
+              {totalEffectiveSheets !== job.totalPages && (
+                <p className="mt-0.5 text-[10px]" style={{ color: "var(--text-muted)" }}>{job.totalPages} pages</p>
+              )}
             </div>
             <div
               className="rounded-xl p-4 text-center"
-              style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
+              style={{
+                border: hasColorFiles ? "1px solid rgba(245,158,11,0.4)" : "1px solid var(--border)",
+                background: hasColorFiles ? "rgba(245,158,11,0.08)" : "var(--panel-muted)",
+              }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Print Type</p>
-              <p className="mt-1.5 text-xl font-bold" style={{ color: "var(--text)" }}>{printTypeLabel}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: hasColorFiles ? "#d97706" : "var(--text-muted)" }}>Print Type</p>
+              <p className="mt-1.5 text-xl font-bold" style={{ color: hasColorFiles ? "#d97706" : "var(--text)" }}>{printTypeLabel}</p>
             </div>
           </div>
 
@@ -349,17 +410,27 @@ export default function JobModal({
                   paperSize: "A4", colorMode: "BW", orientation: "PORTRAIT",
                   scaleMode: "FIT", pageRange: "ALL", duplex: "ONE", copies: 1,
                 };
+                const isColor = (opt.colorMode || "BW").toUpperCase() === "COLOR";
+                const sheets = getEffectiveSheets(file.pages, opt);
                 return (
                   <li
                     key={file.url}
                     className="rounded-xl p-4 transition"
-                    style={{ border: "1px solid var(--border)", background: "var(--panel)" }}
+                    style={{
+                      border: isColor ? "1px solid rgba(245,158,11,0.4)" : "1px solid var(--border)",
+                      background: isColor ? "rgba(245,158,11,0.05)" : "var(--panel)",
+                      borderLeft: isColor ? "4px solid #f59e0b" : undefined,
+                    }}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-3">
                         <div
                           className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-                          style={{ border: "1px solid var(--border)", background: "var(--panel-muted)", color: "var(--text-muted)" }}
+                          style={{
+                            border: isColor ? "1px solid rgba(245,158,11,0.3)" : "1px solid var(--border)",
+                            background: isColor ? "rgba(245,158,11,0.12)" : "var(--panel-muted)",
+                            color: isColor ? "#d97706" : "var(--text-muted)",
+                          }}
                         >
                           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -368,7 +439,10 @@ export default function JobModal({
                         </div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold" style={{ color: "var(--text)" }}>{file.name}</p>
-                          <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{file.pages} page{file.pages !== 1 ? "s" : ""}</p>
+                          <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>
+                            {sheets} sheet{sheets !== 1 ? "s" : ""}
+                            {sheets !== file.pages && <span className="opacity-60"> ({file.pages} pages)</span>}
+                          </p>
                         </div>
                       </div>
                       <a
@@ -508,27 +582,70 @@ export default function JobModal({
           )}
 
           {isCompleted && !isActivePhase && (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80"
-                style={{
-                  border: "1px solid var(--border)",
-                  background: "var(--panel)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={handlePrint}
-                disabled={isPrintBusy && !isThisJobActive}
-                className="flex-1 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
-              >
-                Print Again
-              </button>
+            <div className="flex flex-col gap-2">
+              {!showReprintConfirm ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80"
+                    style={{
+                      border: "1px solid var(--border)",
+                      background: "var(--panel)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowReprintConfirm(true)}
+                    disabled={isPrintBusy && !isThisJobActive}
+                    className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition hover:opacity-80 active:scale-[0.98] disabled:opacity-50"
+                    style={{
+                      border: "1.5px dashed var(--text-muted)",
+                      background: "transparent",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                     Reprint
+                  </button>
+                </div>
+              ) : (
+                <div
+                  className="rounded-xl p-3"
+                  style={{ background: "var(--panel-muted)", border: "1px solid var(--border)" }}
+                >
+                  <p className="mb-3 text-center text-sm font-medium" style={{ color: "var(--text)" }}>
+                    Are you sure you want to print this job again?
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowReprintConfirm(false)}
+                      className="flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition hover:opacity-80"
+                      style={{
+                        border: "1px solid var(--border)",
+                        background: "var(--panel)",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowReprintConfirm(false);
+                        handlePrint();
+                      }}
+                      className="flex-1 rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 active:scale-[0.98]"
+                      style={{ background: "var(--brand)" }}
+                    >
+                      Yes, Print Again
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
