@@ -710,22 +710,28 @@ Please try again.`,
                 }
 
                 if (existingJob) {
+                  // Update existing draft totals
                   await prisma.printJob.update({
                     where: { id: existingJob.id },
                     data: {
                       totalCost: existingJob.totalCost + cost,
                       totalPages: existingJob.totalPages + pages,
-                      files: {
-                        create: {
-                          name: pdfFileName,
-                          url: uploaded.url,
-                          pages,
-                          cost,
-                          uploadedByPhoneNumber: userData.displayPhoneNumber,
-                          uploadedByUserId: waUser.userId,
-                          option: { create: defaultOptions },
-                        },
-                      },
+                    },
+                  });
+
+                  // Create the file separately
+                  await prisma.file.create({
+                    data: {
+                      name: pdfFileName,
+                      url: uploaded.url,
+                      pages,
+                      fileCost: cost,
+                      printJobId: existingJob.id,
+                      uploadedByPhoneNumber: userData.displayPhoneNumber || null,
+                      uploadedByDisplayName: userData.displayName || userData.displayPhoneNumber || null,
+                      uploadedByUserId: waUser.userId ?? null,
+                      uploadedByRole: "OWNER",
+                      option: { create: defaultOptions },
                     },
                   });
 
@@ -735,39 +741,36 @@ Please try again.`,
                 } else if (waUser.userId) {
                   const verificationCode = Math.floor(
                     1000 + Math.random() * 9000,
-                  ).toString();
-                  existingJob = await prisma.printJob.create({
+                  );
+                  const newJob = await prisma.printJob.create({
                     data: {
                       userId: waUser.userId,
                       verificationCode,
                       totalCost: cost,
                       totalPages: pages,
                       estimatedTime: 1,
-                      files: {
-                        create: {
-                          name: pdfFileName,
-                          url: uploaded.url,
-                          pages,
-                          cost,
-                          uploadedByPhoneNumber: userData.displayPhoneNumber,
-                          uploadedByUserId: waUser.userId,
-                          option: { create: defaultOptions },
-                        },
-                      },
-                    },
-                    select: {
-                      id: true,
-                      totalCost: true,
-                      totalPages: true,
-                      userId: true,
-                      files: {
-                        orderBy: { createdAt: "desc" },
-                        take: 1,
-                        select: { createdAt: true },
-                      },
+                      source: "WHATSAPP",
+                      status: PrintJobStatus.DRAFT,
                     },
                   });
-                  socket.emit("files-added", waUser.userId, existingJob.id);
+                  existingJob = { ...newJob, files: [], _count: { files: 0 } };
+
+                  await prisma.file.create({
+                    data: {
+                      name: pdfFileName,
+                      url: uploaded.url,
+                      pages,
+                      fileCost: cost,
+                      printJobId: newJob.id,
+                      uploadedByPhoneNumber: userData.displayPhoneNumber || null,
+                      uploadedByDisplayName: userData.displayName || userData.displayPhoneNumber || null,
+                      uploadedByUserId: waUser.userId ?? null,
+                      uploadedByRole: "OWNER",
+                      option: { create: defaultOptions },
+                    },
+                  });
+
+                  socket.emit("files-added", waUser.userId, newJob.id);
                 }
 
                 // Send confirmation
