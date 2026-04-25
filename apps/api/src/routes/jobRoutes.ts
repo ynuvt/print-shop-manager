@@ -614,15 +614,9 @@ app.post(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.ms-powerpoint",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "image/jpeg",
-        "image/png",
-        "image/gif",
-        "image/bmp",
-        "image/tiff",
-        "image/webp",
       ]);
 
-      const ALLOWED_EXTENSIONS = /\.(pdf|docx?|pptx?|jpe?g|png|gif|bmp|tiff?|webp)$/i;
+      const ALLOWED_EXTENSIONS = /\.(pdf|docx?|pptx?)$/i;
 
       const uploads = await Promise.all(
         files.map(async (file) => {
@@ -631,7 +625,7 @@ app.post(
 
           if (!nameMatch && !typeMatch) {
             throw new PrintJobAnalysisError(
-              `${file.name} is not a supported file type. Supported: PDF, Word, PowerPoint, and images (JPG, PNG, GIF, BMP, TIFF, WebP).`,
+              `${file.name} is not a supported file type. Supported: PDF, Word, and PowerPoint.`,
               400,
             );
           }
@@ -872,7 +866,6 @@ app.post(
         copies: 1,
       });
 
-      const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|bmp|tiff?|webp)$/i;
       const OFFICE_EXTENSIONS = /\.(docx?|pptx?)$/i;
 
       const processedFiles: UploadedFileForCreate[] = [];
@@ -898,17 +891,13 @@ app.post(
           );
         }
 
-        const isImage = IMAGE_EXTENSIONS.test(file.name);
         const isOffice = OFFICE_EXTENSIONS.test(file.name);
 
         let finalUrl = file.url;
         let finalName = file.name;
         let pages: number;
 
-        if (isImage) {
-          // Images: keep as-is, SumatraPDF can print them directly. 1 page per image.
-          pages = 1;
-        } else if (isOffice) {
+        if (isOffice) {
           // Word/PPT: convert to PDF server-side using LibreOffice
           const { convertToPdfFromBuffer } = await import("../utils/convertToPdf.js");
           const converted = await convertToPdfFromBuffer(buffer, file.name);

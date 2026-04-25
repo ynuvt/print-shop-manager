@@ -1177,7 +1177,7 @@ export default function HomePage({
                       : uploadStage === "creating"
                         ? "Processing files. Please wait..."
                         : "Uploading files. Please wait..."
-                    : "PDF, Word, PowerPoint, or images."}
+                    : "PDF, Word, or PowerPoint."}
                 </p>
                 {isPreparingFiles && (
                   <div
@@ -1355,7 +1355,7 @@ export default function HomePage({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/jpeg,image/png,image/gif,image/bmp,image/tiff,image/webp"
+              accept=".pdf,.doc,.docx,.ppt,.pptx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
               multiple
               className="hidden-input"
               onChange={onFilesSelected}
