@@ -3,6 +3,9 @@ import type { ChangeEvent, DragEvent, CSSProperties } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
 import { Link } from "react-router-dom";
 import {
+  Check,
+  ChevronDown,
+  Copy,
   FileText,
   MessageCircle,
   Moon,
@@ -287,6 +290,16 @@ export default function HomePage({
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
+
+  // ── Global print options panel state ──
+  const [showGlobalOptions, setShowGlobalOptions] = useState(false);
+  const [globalSelectedFiles, setGlobalSelectedFiles] = useState<Set<number>>(new Set());
+  const [globalOptions, setGlobalOptions] = useState({
+    duplex: "ONE" as PrintOptions["duplex"],
+    orientation: "PORTRAIT" as PrintOptions["orientation"],
+    scaleMode: "FIT" as PrintOptions["scaleMode"],
+    copies: 1,
+  });
 
   const [uploadStage, setUploadStage] = useState<"uploading" | "converting" | "creating">(
     "uploading",
@@ -755,6 +768,47 @@ export default function HomePage({
     },
     [],
   );
+
+  const toggleGlobalFileSelection = useCallback((idx: number) => {
+    setGlobalSelectedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleAllGlobalFiles = useCallback(() => {
+    setGlobalSelectedFiles((prev) => {
+      if (prev.size === printFiles.length) {
+        return new Set();
+      }
+      return new Set(printFiles.map((_, i) => i));
+    });
+  }, [printFiles.length]);
+
+  const applyGlobalOptions = useCallback(() => {
+    if (globalSelectedFiles.size === 0) return;
+    setPrintFiles((prev) =>
+      prev.map((file, idx) => {
+        if (!globalSelectedFiles.has(idx)) return file;
+        return {
+          ...file,
+          options: {
+            ...file.options,
+            duplex: globalOptions.duplex,
+            orientation: globalOptions.orientation,
+            scaleMode: globalOptions.scaleMode,
+            copies: globalOptions.copies,
+          },
+        };
+      }),
+    );
+    setToast(`Applied global options to ${globalSelectedFiles.size} file(s)`);
+  }, [globalSelectedFiles, globalOptions, setToast]);
 
   const onFilesSelected = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1318,6 +1372,145 @@ export default function HomePage({
                       value={globalColorMode}
                       onChange={(v) => applyGlobalColorMode(v)}
                     />
+                  </div>
+
+                  {/* ── Global Print Options Panel ── */}
+                  <div className="global-options-panel">
+                    <button
+                      type="button"
+                      className="global-options-toggle"
+                      onClick={() => {
+                        const willOpen = !showGlobalOptions;
+                        setShowGlobalOptions(willOpen);
+                        if (willOpen && globalSelectedFiles.size === 0) {
+                          setGlobalSelectedFiles(new Set(printFiles.map((_, i) => i)));
+                        }
+                      }}
+                    >
+                      <div className="global-options-toggle-left">
+                        <Copy size={14} />
+                        <span>Apply Options to Multiple Files</span>
+                      </div>
+                      <ChevronDown
+                        size={16}
+                        className={showGlobalOptions ? "global-chevron global-chevron--open" : "global-chevron"}
+                      />
+                    </button>
+
+                    {showGlobalOptions && (
+                      <div className="global-options-body">
+                        <div className="global-options-fields">
+                          <div>
+                            <p className="field-label">Print Sides</p>
+                            <ToggleGroup
+                              options={[
+                                { label: "One Side", value: "ONE" },
+                                { label: "Both Sides", value: "BOTH" },
+                              ]}
+                              value={globalOptions.duplex}
+                              onChange={(v) => setGlobalOptions((p) => ({ ...p, duplex: v }))}
+                            />
+                          </div>
+
+                          <div>
+                            <p className="field-label">Orientation</p>
+                            <ToggleGroup
+                              options={[
+                                { label: "Vertical", value: "PORTRAIT" },
+                                { label: "Horizontal", value: "LANDSCAPE" },
+                              ]}
+                              value={globalOptions.orientation}
+                              onChange={(v) => setGlobalOptions((p) => ({ ...p, orientation: v }))}
+                            />
+                          </div>
+
+                          <div>
+                            <p className="field-label">Scale</p>
+                            <ToggleGroup
+                              options={[
+                                { label: "Fit to paper", value: "FIT" },
+                                { label: "Original size", value: "NOSCALE" },
+                              ]}
+                              value={globalOptions.scaleMode}
+                              onChange={(v) => setGlobalOptions((p) => ({ ...p, scaleMode: v }))}
+                            />
+                          </div>
+
+                          <div>
+                            <p className="field-label">Copies</p>
+                            <div className="counter">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setGlobalOptions((p) => ({ ...p, copies: Math.max(1, p.copies - 1) }))
+                                }
+                              >
+                                -
+                              </button>
+                              <span>{globalOptions.copies}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setGlobalOptions((p) => ({ ...p, copies: p.copies + 1 }))
+                                }
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="global-file-select">
+                          <div className="global-file-select-header">
+                            <p className="field-label">Apply to files:</p>
+                            <button
+                              type="button"
+                              className="global-select-all-btn"
+                              onClick={toggleAllGlobalFiles}
+                            >
+                              {globalSelectedFiles.size === printFiles.length
+                                ? "Deselect All"
+                                : "Select All"}
+                            </button>
+                          </div>
+
+                          <div className="global-file-checklist">
+                            {printFiles.map((pf, idx) => (
+                              <label
+                                key={`global-${pf.name}-${idx}`}
+                                className={`global-file-check-item${
+                                  globalSelectedFiles.has(idx) ? " selected" : ""
+                                }`}
+                              >
+                                <span
+                                  className={`global-checkbox${
+                                    globalSelectedFiles.has(idx) ? " checked" : ""
+                                  }`}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    toggleGlobalFileSelection(idx);
+                                  }}
+                                >
+                                  {globalSelectedFiles.has(idx) && <Check size={12} />}
+                                </span>
+                                <span className="global-file-name">{pf.name}</span>
+                                <span className="global-file-pages">{pf.detectedPages}p</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-primary global-apply-btn"
+                          disabled={globalSelectedFiles.size === 0}
+                          onClick={applyGlobalOptions}
+                        >
+                          <Copy size={14} />
+                          Apply to {globalSelectedFiles.size} file{globalSelectedFiles.size !== 1 ? "s" : ""}
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="upload-file-list">

@@ -1,3 +1,5 @@
+import { prisma } from "@printowl/db";
+
 interface WhatsAppButton {
   type: "reply";
   reply: {
@@ -243,4 +245,30 @@ export async function sendWhatsAppPdfDocument(
       `Failed to send WhatsApp PDF: ${messageResponse.status} ${errorText}`,
     );
   }
+}
+
+// ─── WhatsApp 24h Messaging Window ──────────────────────────────────────────
+
+const WHATSAPP_WINDOW_HOURS = 20;
+
+/**
+ * Check if we are within the free WhatsApp messaging window.
+ * Returns true only if the user messaged us within the last 20 hours.
+ * Returns false if lastMessageAt is null (never messaged) or older than the window.
+ */
+export async function isWithinWhatsAppWindow(
+  phoneNumber: string,
+): Promise<boolean> {
+  const waUser = await prisma.whatsAppUser.findUnique({
+    where: { phoneNumber },
+    select: { lastMessageAt: true },
+  });
+
+  if (!waUser?.lastMessageAt) {
+    return false;
+  }
+
+  const hoursSinceLastMessage =
+    (Date.now() - waUser.lastMessageAt.getTime()) / (1000 * 60 * 60);
+  return hoursSinceLastMessage <= WHATSAPP_WINDOW_HOURS;
 }

@@ -328,6 +328,188 @@ body {
   line-height: 1.35;
 }
 
+/* ── Global Print Options Panel ─────────────────────── */
+
+.global-options-panel {
+  margin-top: 10px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-muted);
+  overflow: hidden;
+}
+
+.global-options-toggle {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  transition: background 0.15s;
+}
+
+.global-options-toggle:hover {
+  background: color-mix(in srgb, var(--brand) 6%, var(--panel-muted));
+}
+
+.global-options-toggle-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-options-toggle-left svg {
+  color: var(--brand);
+}
+
+.global-chevron {
+  color: var(--text-muted);
+  transition: transform 0.25s ease;
+}
+
+.global-chevron--open {
+  transform: rotate(180deg);
+}
+
+.global-options-body {
+  border-top: 1px solid var(--border);
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.global-options-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.global-file-select {
+  display: grid;
+  gap: 8px;
+}
+
+.global-file-select-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.global-file-select-header .field-label {
+  margin: 0;
+}
+
+.global-select-all-btn {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand);
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border));
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  transition: all 0.15s;
+}
+
+.global-select-all-btn:hover {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  border-color: var(--brand);
+}
+
+.global-file-checklist {
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.global-file-check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+
+.global-file-check-item:hover {
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+}
+
+.global-file-check-item.selected {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
+  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+}
+
+.global-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+  transition: all 0.15s;
+  cursor: pointer;
+}
+
+.global-checkbox.checked {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+[data-theme="dark"] .global-checkbox.checked {
+  color: #0f0f0f;
+}
+
+.global-file-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.global-file-pages {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.global-apply-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.global-apply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .toggle-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));

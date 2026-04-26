@@ -24,7 +24,7 @@ import {
   uploadBufferToR2,
 } from "../utils/r2Storage.js";
 import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
-import { sendWhatsAppTextMessage } from "../modules/whatsappServices.js";
+import { sendWhatsAppTextMessage, isWithinWhatsAppWindow } from "../modules/whatsappServices.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import {
   ColorMode,
@@ -1728,34 +1728,37 @@ app.post(
         data: { isDone: true },
       });
 
-      // Notify the job owner via WhatsApp
+      // Notify the job owner via WhatsApp (only if within 20h messaging window)
       if (job.userId) {
         const ownerWa = await prisma.whatsAppUser.findFirst({
           where: { userId: job.userId },
           select: { phoneNumber: true },
         });
         if (ownerWa?.phoneNumber) {
-          const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-          if (phoneNumberId) {
-            try {
-              await sendWhatsAppTextMessage({
-                to: ownerWa.phoneNumber,
-                phoneNumberId,
-                message: [
-                  `*${collabDisplayName}* has finished adding files.`,
-                  "",
-                  `Their files total: *Rs ${userCost}*`,
-                  "",
-                  `You can now review and submit the job.`,
-                  "",
-                  `Type *"EDIT"* to open the review link.`,
-                ].join("\n"),
-              });
-            } catch (err) {
-              console.error("Failed to notify owner via WhatsApp:", err);
+          const withinWindow = await isWithinWhatsAppWindow(ownerWa.phoneNumber);
+          if (withinWindow) {
+            const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+            if (phoneNumberId) {
+              try {
+                await sendWhatsAppTextMessage({
+                  to: ownerWa.phoneNumber,
+                  phoneNumberId,
+                  message: [
+                    `*${collabDisplayName}* has finished adding files.`,
+                    "",
+                    `Their files total: *Rs ${userCost}*`,
+                    "",
+                    `You can now review and submit the job.`,
+                    "",
+                    `Type *"EDIT"* to open the review link.`,
+                  ].join("\n"),
+                });
+              } catch (err) {
+                console.error("Failed to notify owner via WhatsApp:", err);
+              }
             }
           } else {
-            console.error("Missing WHATSAPP_PHONE_NUMBER_ID in env, cannot send 'I'm done' message.");
+            console.log(`Skipping WhatsApp notify for ${ownerWa.phoneNumber}: outside 20h messaging window`);
           }
         }
       }
@@ -2012,36 +2015,39 @@ app.post(
       }
       const perUserCosts = [...perUserMap.values()].sort((a, b) => b.cost - a.cost);
       
-      // Notify owner via WhatsApp with OTP and Cost Breakdown
+      // Notify owner via WhatsApp with OTP and Cost Breakdown (only if within 20h window)
       if (userId) {
         const ownerWa = await prisma.whatsAppUser.findFirst({
           where: { userId },
           select: { phoneNumber: true },
         });
         if (ownerWa?.phoneNumber) {
-          const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-          if (phoneNumberId) {
-            const message = [
-              `*Job Submitted Successfully!*`,
-              ``,
-              `Your Verification Code (OTP) is: *${verificationCode}*`,
-              `Share this code with the shopkeeper to collect your prints.`,
-              ``,
-              `*Total:* Rs ${totalCost}`
-            ].join("\n");
-            
-            try {
-              const { sendWhatsAppTextMessage } = await import("../modules/whatsappServices.js");
-              await sendWhatsAppTextMessage({
-                to: ownerWa.phoneNumber,
-                phoneNumberId,
-                message,
-              });
-            } catch (err) {
-              console.error("Failed to send OTP whatsapp message", err);
+          const withinWindow = await isWithinWhatsAppWindow(ownerWa.phoneNumber);
+          if (withinWindow) {
+            const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+            if (phoneNumberId) {
+              const message = [
+                `*Job Submitted Successfully!*`,
+                ``,
+                `Your Verification Code (OTP) is: *${verificationCode}*`,
+                `Share this code with the shopkeeper to collect your prints.`,
+                ``,
+                `*Total:* Rs ${totalCost}`
+              ].join("\n");
+              
+              try {
+                const { sendWhatsAppTextMessage: sendWaText } = await import("../modules/whatsappServices.js");
+                await sendWaText({
+                  to: ownerWa.phoneNumber,
+                  phoneNumberId,
+                  message,
+                });
+              } catch (err) {
+                console.error("Failed to send OTP whatsapp message", err);
+              }
             }
           } else {
-            console.error("Missing WHATSAPP_PHONE_NUMBER_ID in env, cannot send OTP message.");
+            console.log(`Skipping WhatsApp OTP message for ${ownerWa.phoneNumber}: outside 20h messaging window`);
           }
         }
       }

@@ -385,6 +385,27 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
             };
             const phoneNumberId = change.value.metadata?.phone_number_id;
 
+            // Track the timestamp of every incoming message for 24h window checks.
+            // This lets us avoid sending costly outbound messages when the user
+            // hasn't messaged us within the last 20 hours.
+            if (userData.displayPhoneNumber) {
+              try {
+                await prisma.whatsAppUser.upsert({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  create: {
+                    phoneNumber: userData.displayPhoneNumber,
+                    name: userData.displayName || null,
+                    lastMessageAt: new Date(),
+                  },
+                  update: {
+                    lastMessageAt: new Date(),
+                  },
+                });
+              } catch {
+                // Non-critical — don't block message processing
+              }
+            }
+
             // ─── DOCUMENT HANDLER ────────────────────────────────────────────
             if (incomingMessage.type === "document") {
               const mimeType = incomingMessage.document?.mime_type || "";
@@ -423,10 +444,12 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                       phoneNumber: userData.displayPhoneNumber,
                       name: userData.displayName || null,
                       lastFileStartedProcessingAt: startedProcessingAt,
+                      lastMessageAt: new Date(),
                     },
                     update: {
                       name: userData.displayName || null,
                       lastFileStartedProcessingAt: startedProcessingAt,
+                      lastMessageAt: new Date(),
                     },
                     select: {
                       phoneNumber: true,

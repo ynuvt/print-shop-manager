@@ -141,6 +141,7 @@ model WhatsAppUser {
   phoneNumber        String   @id
   name               String?
   lastFileStartedProcessingAt DateTime?
+  lastMessageAt      DateTime?
   userId             String?  @unique
   user               User?    @relation(fields: [userId], references: [id], map: "whatsappuser_userId_fkey")
   printJobs          PrintJob[]
