@@ -44,15 +44,6 @@ function getStatusBadgeClass(status: string) {
   return "status-pill";
 }
 
-function formatOption(label: string, value: string) {
-  return (
-    <div className="job-option-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function FileOptionCard({
   file,
   canViewFile,
@@ -62,12 +53,21 @@ function FileOptionCard({
 }) {
   const opt = file.option;
   const colorLabel =
-    opt?.colorMode === "COLOR" ? "Color (Rs 7/sheet)" : "B&W (Rs 2/sheet)";
+    opt?.colorMode === "COLOR" ? "Color" : "B\u0026W";
   const duplexLabel = opt?.duplex === "BOTH" ? "Both Sides" : "One Side";
   const rangeLabel =
     opt?.pageRange === "CUSTOM" && opt?.customRange
-      ? `Custom: ${opt.customRange}`
+      ? `${opt.customRange}`
       : "All Pages";
+  const orientationLabel =
+    opt?.orientation === "LANDSCAPE" ? "Landscape" : "Portrait";
+  const scaleLabel =
+    opt?.scaleMode === "SHRINK"
+      ? "Shrink"
+      : opt?.scaleMode === "NOSCALE"
+        ? "No Scale"
+        : "Fit";
+  const paperLabel = opt?.paperSize ?? "A4";
 
   return (
     <div className="job-file-card">
@@ -86,11 +86,18 @@ function FileOptionCard({
       </div>
       <p className="job-file-pages">{file.pages} pages</p>
       {opt && (
-        <div className="job-file-options">
-          {formatOption("Color", colorLabel)}
-          {formatOption("Sides", duplexLabel)}
-          {formatOption("Page Range", rangeLabel)}
-          {formatOption("Copies", String(opt.copies))}
+        <div className="job-file-chips">
+          <span className={`job-chip ${opt.colorMode === "COLOR" ? "job-chip--color" : "job-chip--bw"}`}>
+            {colorLabel}
+          </span>
+          <span className="job-chip">{duplexLabel}</span>
+          <span className="job-chip">{orientationLabel}</span>
+          <span className="job-chip">{scaleLabel}</span>
+          <span className="job-chip">{paperLabel}</span>
+          <span className="job-chip">Pages: {rangeLabel}</span>
+          {(opt.copies ?? 1) > 1 && (
+            <span className="job-chip job-chip--copies">{opt.copies}x copies</span>
+          )}
         </div>
       )}
     </div>

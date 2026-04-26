@@ -842,10 +842,25 @@ app.post(
         include: { _count: { select: { files: true } } },
       });
 
-      if (job && job._count.files + incomingFiles.length > 30) {
-        return res.status(400).json({ error: "You cannot add more than 30 files to a job." });
-      } else if (!job && incomingFiles.length > 30) {
-        return res.status(400).json({ error: "You cannot add more than 30 files to a job." });
+      const MAX_FILES = 30;
+      const existingCount = job ? job._count.files : 0;
+      const availableSlots = MAX_FILES - existingCount;
+
+      if (availableSlots <= 0) {
+        // Clean up all uploaded R2 files since we can't accept any
+        await Promise.allSettled(
+          incomingFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
+        );
+        return res.status(400).json({ error: "You already have 30 files. Remove some before adding more." });
+      }
+
+      if (incomingFiles.length > availableSlots) {
+        // Clean up excess R2 files, keep only what we can accept
+        const excess = incomingFiles.slice(availableSlots);
+        await Promise.allSettled(
+          excess.map((file) => deleteObjectFromR2ByUrl(file.url)),
+        );
+        incomingFiles = incomingFiles.slice(0, availableSlots);
       }
 
       if (!job) {
@@ -928,7 +943,8 @@ app.post(
           // Delete the original non-PDF from R2
           await deleteObjectFromR2ByUrl(file.url).catch(() => {});
 
-          pages = await getPdfPageCountFromBuffer(converted.pdfBuffer);
+          // Images always produce exactly 1 page; skip pdf-parse to avoid flate warnings
+          pages = isImage ? 1 : await getPdfPageCountFromBuffer(converted.pdfBuffer);
         } else {
           // PDF: existing logic
           pages = await getPdfPageCountFromBuffer(buffer);
@@ -1067,8 +1083,22 @@ app.post(
           .json({ error: "This job is not available for review." });
       }
 
-      if (job._count.files + incomingFiles.length > 30) {
-        return res.status(400).json({ error: "You cannot add more than 30 files to a job." });
+      const MAX_FILES_LIMIT = 30;
+      const slotsAvailable = MAX_FILES_LIMIT - job._count.files;
+
+      if (slotsAvailable <= 0) {
+        await Promise.allSettled(
+          incomingFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
+        );
+        return res.status(400).json({ error: "You already have 30 files. Remove some before adding more." });
+      }
+
+      if (incomingFiles.length > slotsAvailable) {
+        const excess = incomingFiles.slice(slotsAvailable);
+        await Promise.allSettled(
+          excess.map((file) => deleteObjectFromR2ByUrl(file.url)),
+        );
+        incomingFiles = incomingFiles.slice(0, slotsAvailable);
       }
 
       const viewerId = req.user!.uid;
@@ -1155,7 +1185,9 @@ app.post(
 
           await deleteObjectFromR2ByUrl(file.url).catch(() => {});
 
-          pages = await getPdfPageCountFromBuffer(converted.pdfBuffer);
+          // Images always produce exactly 1 page; skip pdf-parse to avoid flate warnings
+          const isImageFile = IMAGE_EXTENSIONS_CHECK.test(file.name);
+          pages = isImageFile ? 1 : await getPdfPageCountFromBuffer(converted.pdfBuffer);
         } else {
           try {
             pages = await getPdfPageCountFromBuffer(buffer);
@@ -1303,7 +1335,10 @@ app.post(
 
 app.get("/all", authMiddleware(["admin"]), async (req, res) => {
   try {
-    const jobs = await prisma.printJob.findMany();
+    const jobs = await prisma.printJob.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
     res.status(200).json(jobs);
   } catch (error) {
     console.log(error);

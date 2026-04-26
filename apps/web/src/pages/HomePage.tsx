@@ -7,6 +7,7 @@ import {
   MessageCircle,
   Moon,
   Plus,
+  RefreshCw,
   SlidersHorizontal,
   Sun,
   Trash2,
@@ -272,6 +273,15 @@ export default function HomePage({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToastRaw] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setToast = useCallback((msg: string | null) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastRaw(msg);
+    if (msg) {
+      toastTimerRef.current = setTimeout(() => setToastRaw(null), 4000);
+    }
+  }, []);
   const [isWhatsappSynced, setIsWhatsappSynced] = useState(false);
   const [showSyncWhatsappModal, setShowSyncWhatsappModal] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -452,7 +462,7 @@ export default function HomePage({
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       void persistCurrentOptionsNow(true);
-      if (isSubmitting) {
+      if (isSubmitting || isPreparingFiles) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -462,7 +472,7 @@ export default function HomePage({
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [isSubmitting, persistCurrentOptionsNow]);
+  }, [isSubmitting, isPreparingFiles, persistCurrentOptionsNow]);
 
   const fetchWebDraft = useCallback(async () => {
     if (!userId) return;
@@ -648,17 +658,26 @@ export default function HomePage({
     async (files: File[]) => {
       if (!files.length) return;
 
-      // Cap at 30 files — take first 30, warn user
+      // ── Enforce 30-file limit BEFORE any upload ──
       const MAX_FILES = 30;
-      let filesToUpload = files;
-      if (files.length > MAX_FILES) {
-        filesToUpload = files.slice(0, MAX_FILES);
-        setError(
-          `Only the first ${MAX_FILES} files were added. Maximum ${MAX_FILES} files per job.`,
+      const existingCount = printFiles.length;
+      const availableSlots = MAX_FILES - existingCount;
+
+      if (availableSlots <= 0) {
+        setToast(
+          `You already have ${MAX_FILES} files. Remove some before adding more.`,
         );
+        return;
       }
 
-      const incomingBytes = filesToUpload.reduce((sum, file) => sum + file.size, 0);
+      if (files.length > availableSlots) {
+        setToast(
+          `Cannot upload more than ${MAX_FILES} documents. You can add ${availableSlots} more file(s). Please reselect and upload again.`,
+        );
+        return;
+      }
+
+      const incomingBytes = files.reduce((sum, file) => sum + file.size, 0);
 
       if (totalBytes + incomingBytes > MAX_JOB_UPLOAD_BYTES) {
         setError(
@@ -667,32 +686,28 @@ export default function HomePage({
         return;
       }
 
-      if (filesToUpload.length < files.length) {
-        // Keep the warning but don't block — proceed below
-      } else {
-        setError(null);
-      }
+      setError(null);
       setIsPreparingFiles(true);
       setUploadStage("uploading");
-      setUploadProgress(filesToUpload.map(() => 0));
+      setUploadProgress(files.map(() => 0));
 
       try {
-        const uploads = await requestPresignedUploads(filesToUpload);
-        for (let index = 0; index < filesToUpload.length; index += 1) {
-          await uploadFileToR2(uploads[index]!.uploadUrl, filesToUpload[index]!);
+        const uploads = await requestPresignedUploads(files);
+        for (let index = 0; index < files.length; index += 1) {
+          await uploadFileToR2(uploads[index]!.uploadUrl, files[index]!);
           setUploadProgress((prev) =>
             prev.map((value, i) => (i === index ? 100 : value)),
           );
         }
 
         // Check if any files need server-side conversion
-        const hasConvertibleFiles = filesToUpload.some((f) =>
+        const hasConvertibleFiles = files.some((f) =>
           /\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i.test(f.name),
         );
         setUploadStage(hasConvertibleFiles ? "converting" : "creating");
         setUploadProgress((prev) => prev.map(() => 100));
 
-        const urlFiles = filesToUpload.map((file, index) => ({
+        const urlFiles = files.map((file, index) => ({
           name: file.name,
           url: uploads[index]!.publicUrl,
         }));
@@ -725,7 +740,7 @@ export default function HomePage({
         setUploadProgress([]);
       }
     },
-    [totalBytes],
+    [totalBytes, printFiles.length],
   );
 
   const applyGlobalColorMode = useCallback(
@@ -1115,9 +1130,9 @@ export default function HomePage({
         </div>
 
         <div className="top-bar-actions">
-          <Link to="/about" className="ghost-link">
+          {/* <Link to="/about" className="ghost-link">
             About Us
-          </Link>
+          </Link> */}
           <button
             type="button"
             className="theme-btn icon-theme-btn"
@@ -1134,6 +1149,11 @@ export default function HomePage({
 
       <main className="main-wrap">
         {error && <div className="banner-error">{error}</div>}
+        {toast && (
+          <div className="toast-notification" onClick={() => setToast(null)}>
+            {toast}
+          </div>
+        )}
 
           <>
             <section className="hero-panel">
@@ -1244,32 +1264,33 @@ export default function HomePage({
                 )}
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%" }}>
+              <button
+                type="button"
+                className="whatsapp-cta-btn"
+                onClick={handleForwardFromWhatsapp}
+              >
+                <MessageCircle size={18} />
+                Forward from WhatsApp
+              </button>
+
+              <div className="draft-actions-row">
                 <button
                   type="button"
-                  className="whatsapp-forward-btn"
-                  onClick={handleForwardFromWhatsapp}
-                  style={{ width: "100%" }}
-                >
-                  <MessageCircle size={20} />
-                  Forward from WhatsApp (Beta)
-                </button>
-                <button
-                  type="button"
-                  className="btn"
+                  className="draft-action-btn"
                   onClick={() => fetchWebDraft()}
-                  style={{ width: "100%", justifyContent: "center" }}
                   disabled={isRefreshing}
                 >
-                  {isRefreshing ? (
-                    <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span className="upload-inline-loader-dot" aria-hidden="true" style={{ width: 12, height: 12, borderWidth: 2 }} />
-                      Refreshing...
-                    </span>
-                  ) : (
-                    "Refresh Files"
-                  )}
+                  {isRefreshing ? "Refreshing..." : <><RefreshCw size={12} /> Refresh Files</>}
                 </button>
+                {printFiles.length > 0 && (
+                  <button
+                    type="button"
+                    className="draft-action-btn draft-action-btn--danger"
+                    onClick={() => setShowClearConfirm(true)}
+                  >
+                    <Trash2 size={12} /> Clear Draft
+                  </button>
+                )}
               </div>
 
               {printFiles.length > 0 && (
@@ -1334,7 +1355,7 @@ export default function HomePage({
                     ))}
                   </div>
 
-                  <div className="section-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div className="section-foot">
                     <button
                       type="button"
                       ref={addMoreRef}
@@ -1347,15 +1368,6 @@ export default function HomePage({
                     >
                       <Plus size={16} aria-hidden="true" />
                       Add More
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-link"
-                      style={{ color: "var(--error)", fontSize: "13px", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}
-                      onClick={() => setShowClearConfirm(true)}
-                    >
-                      <Trash2 size={14} aria-hidden="true" />
-                      Clear Draft
                     </button>
                   </div>
 

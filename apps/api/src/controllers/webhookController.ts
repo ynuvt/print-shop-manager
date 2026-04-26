@@ -105,6 +105,215 @@ const STICKER_FILE_PATH = fileURLToPath(
   new URL("../resource/stickerzopy.webp", import.meta.url),
 );
 
+// ─── WhatsApp Message Rate Limiter & File Confirmation Batcher ──────────────
+// Prevents hitting WhatsApp API rate limits when users send many files at once.
+
+interface PendingFileConfirmation {
+  fileName: string;
+  pages: number;
+}
+
+interface PendingFileBatch {
+  files: PendingFileConfirmation[];
+  timer: ReturnType<typeof setTimeout>;
+  phoneNumberId: string;
+  isStale: boolean;
+  jobId: string | null;
+  userId: string | null;
+}
+
+const FILE_BATCH_DELAY_MS = 3000; // Wait 3s for more files before sending
+const LIMIT_REACHED_MAX = 2; // Max 2 "limit reached" messages per draft per window
+const LIMIT_REACHED_WINDOW_MS = 60_000; // 1-minute window for limit-reached reset
+const COMMAND_WINDOW_MS = 60_000; // 60-second sliding window for command tracking
+const COMMAND_SPAM_THRESHOLD = 15; // Send spam warning at this count
+
+// Per-phone pending file batches
+const pendingFileBatches = new Map<string, PendingFileBatch>();
+
+// Per-DRAFT-JOB "limit reached" tracking (time-bound)
+const limitReachedPerDraft = new Map<string, { count: number; windowStart: number }>();
+
+// Per-phone command frequency tracking within a sliding window
+// Tracks how many times EACH command appeared in the current window
+interface CommandWindowEntry {
+  counts: Map<string, number>; // command → count in this window
+  windowStart: number;
+  warningSent: boolean; // only send 1 spam warning per window total
+}
+const commandFrequencyTracker = new Map<string, CommandWindowEntry>();
+
+/** Queue a file confirmation. After FILE_BATCH_DELAY_MS of inactivity, flush the batch. */
+function queueFileConfirmation(
+  phone: string,
+  phoneNumberId: string,
+  file: PendingFileConfirmation,
+  isStale: boolean,
+  jobId: string | null,
+  userId: string | null,
+) {
+  const existing = pendingFileBatches.get(phone);
+
+  if (existing) {
+    existing.files.push(file);
+    existing.isStale = existing.isStale || isStale;
+    existing.jobId = jobId ?? existing.jobId;
+    existing.userId = userId ?? existing.userId;
+    clearTimeout(existing.timer);
+    existing.timer = setTimeout(() => flushFileConfirmation(phone), FILE_BATCH_DELAY_MS);
+  } else {
+    const timer = setTimeout(() => flushFileConfirmation(phone), FILE_BATCH_DELAY_MS);
+    pendingFileBatches.set(phone, {
+      files: [file],
+      timer,
+      phoneNumberId,
+      isStale,
+      jobId,
+      userId,
+    });
+  }
+}
+
+/** Send the batched file confirmation message. */
+async function flushFileConfirmation(phone: string) {
+  const batch = pendingFileBatches.get(phone);
+  if (!batch || batch.files.length === 0) {
+    pendingFileBatches.delete(phone);
+    return;
+  }
+  pendingFileBatches.delete(phone);
+
+  try {
+    let bodyText: string;
+    if (batch.files.length === 1) {
+      const f = batch.files[0]!;
+      bodyText = [
+        `${waBold("File received!")}`,
+        `${f.fileName} \u2022 ${f.pages} page(s)`,
+        "What would you like to do next?",
+      ].join("\n");
+    } else {
+      const fileList = batch.files
+        .map((f, i) => `${i + 1}. ${f.fileName} (${f.pages}p)`)
+        .join("\n");
+      bodyText = [
+        `${waBold(`${batch.files.length} files received!`)}`,
+        fileList,
+        "",
+        "What would you like to do next?",
+      ].join("\n");
+    }
+
+    await sendWhatsAppButtonMessage({
+      to: phone,
+      phoneNumberId: batch.phoneNumberId,
+      body: bodyText,
+      buttons: [
+        { type: "reply", reply: { id: "edit", title: "EDIT" } },
+        { type: "reply", reply: { id: "current", title: "STATUS" } },
+      ],
+    });
+
+    // Send stale warning once (not per file)
+    if (batch.isStale && batch.jobId) {
+      const oldFiles = await prisma.file.findMany({
+        where: {
+          printJobId: batch.jobId,
+          createdAt: { lt: new Date(Date.now() - 30 * 60 * 1000) },
+        },
+        select: { name: true },
+        orderBy: { createdAt: "asc" },
+      });
+      if (oldFiles.length > 0) {
+        const oldFileList = oldFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+        await sendWhatsAppButtonMessage({
+          to: phone,
+          phoneNumberId: batch.phoneNumberId,
+          body: [
+            `${waBold("Existing Files Found")} \u26a0\ufe0f`,
+            "Your draft contains old files (30+ min ago):",
+            oldFileList,
+            "",
+            `Type ${waBold('"EDIT"')} to visit the website and remove unwanted files using the ${waBold("\u2715 button")}.`,
+          ].join("\n"),
+          buttons: [
+            { type: "reply", reply: { id: "edit", title: "EDIT" } },
+          ],
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Failed to send batched file confirmation:", err);
+  }
+}
+
+/**
+ * Returns true if a "limit reached" message should be sent for this draft.
+ * Time-bound: resets after 1 minute, max 2 per window.
+ */
+function shouldSendLimitReached(draftJobId: string): boolean {
+  const now = Date.now();
+  const entry = limitReachedPerDraft.get(draftJobId);
+
+  if (!entry || now - entry.windowStart > LIMIT_REACHED_WINDOW_MS) {
+    // New or expired window
+    limitReachedPerDraft.set(draftJobId, { count: 1, windowStart: now });
+    return true;
+  }
+
+  if (entry.count < LIMIT_REACHED_MAX) {
+    entry.count++;
+    return true;
+  }
+
+  return false; // Already told them twice in this minute
+}
+
+/**
+ * Per-command frequency-aware rate limiter for text/interactive replies.
+ *
+ * Tracks how many times EACH command appeared in a 60-second window:
+ *   - 1st occurrence of any command → "reply" (normal)
+ *   - 2nd–14th of the SAME command → "skip" (silent, no message sent)
+ *   - 15th of ANY command → "warn" (spam warning, only once per window)
+ *   - 16th+ → "skip"
+ *
+ * Example with user spamming "hi" + "help" + "steps" simultaneously:
+ *   hi(1st)→reply, help(1st)→reply, steps(1st)→reply,
+ *   hi(2nd)→skip, help(2nd)→skip, hi(3rd)→skip, ...
+ *   hi(15th)→warn, hi(16th)→skip, help(15th)→skip (warning already sent)
+ */
+function checkTextRateLimit(
+  phone: string,
+  messageText: string,
+): "reply" | "warn" | "skip" {
+  const now = Date.now();
+  let entry = commandFrequencyTracker.get(phone);
+
+  // Reset window if expired
+  if (!entry || now - entry.windowStart > COMMAND_WINDOW_MS) {
+    entry = { counts: new Map(), windowStart: now, warningSent: false };
+    commandFrequencyTracker.set(phone, entry);
+  }
+
+  const currentCount = (entry.counts.get(messageText) ?? 0) + 1;
+  entry.counts.set(messageText, currentCount);
+
+  // 1st occurrence of this specific command → reply normally
+  if (currentCount === 1) {
+    return "reply";
+  }
+
+  // At spam threshold → send warning (only once per window across all commands)
+  if (currentCount >= COMMAND_SPAM_THRESHOLD && !entry.warningSent) {
+    entry.warningSent = true;
+    return "warn";
+  }
+
+  // 2nd to 14th, or 15th+ after warning already sent → skip silently
+  return "skip";
+}
+
 export const verifyWhatsAppWebhook = (req: Request, res: Response) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -373,29 +582,14 @@ Please try again or send a different file.`,
                 }
 
                 if (existingJob && existingJob._count && existingJob._count.files >= 30) {
-                  // Fetch the files to list them
-                  const jobFiles = await prisma.file.findMany({
-                    where: { printJobId: existingJob.id },
-                    select: { name: true, pages: true },
-                    orderBy: { createdAt: "asc" },
-                  });
-
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+                  // Rate-limit "limit reached" per draft (max 2 per draft lifetime)
+                  if (phoneNumberId && userData.displayPhoneNumber && shouldSendLimitReached(existingJob.id)) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Limit reached")}
-You cannot add more than 30 files to a single job.
-
-*Current files in your job:*
-${fileListStr}
-
-Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"')} to start a new one.`,
+                      message: `${waBold("Limit reached")}\nYou cannot add more than 30 files to a single job.\n\nPlease type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"')} to start a new one.`,
                       phoneNumberId,
                     });
                   }
-                  
-                  // Also emit socket event to show toast on web
                   if (waUser.userId) {
                     socket.emit("job-status-updated", waUser.userId, existingJob.id, "Limit reached: Maximum 30 files allowed per job.");
                   }
@@ -484,49 +678,15 @@ Please type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"'
                     socket.emit("job-file-added", waUser.userId);
                   }
 
-                  // Always send the file received confirmation first
-                  await sendWhatsAppButtonMessage({
-                    to: userData.displayPhoneNumber,
+                  // Queue confirmation — will be batched with other files arriving within 3s
+                  queueFileConfirmation(
+                    userData.displayPhoneNumber,
                     phoneNumberId,
-                    body: [
-                      `${waBold("File received!")}`,
-                      `${pdfFileName} \u2022 ${pages} page(s)`,
-                      "What would you like to do next?",
-                    ].join("\n"),
-                    buttons: [
-                      { type: "reply", reply: { id: "edit", title: "EDIT" } },
-                      { type: "reply", reply: { id: "current", title: "STATUS" } },
-                    ],
-                  });
-
-                  // Additionally send the stale warning as a follow-up
-                  if (isStale) {
-                    // Fetch old files (added more than 30 min ago) to list them
-                    const oldFiles = await prisma.file.findMany({
-                      where: {
-                        printJobId: printJobId,
-                        createdAt: { lt: new Date(Date.now() - 30 * 60 * 1000) },
-                      },
-                      select: { name: true },
-                      orderBy: { createdAt: "asc" },
-                    });
-                    const oldFileList = oldFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
-
-                    await sendWhatsAppButtonMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      body: [
-                        `${waBold("Existing Files Found")} \u26a0\ufe0f`,
-                        "Your draft contains old files (30+ min ago):",
-                        oldFileList,
-                        "",
-                        `Type ${waBold('"EDIT"')} to visit the website and remove unwanted files using the ${waBold("✕ button")}.`,
-                      ].join("\n"),
-                      buttons: [
-                        { type: "reply", reply: { id: "edit", title: "EDIT" } },
-                      ],
-                    });
-                  }
+                    { fileName: pdfFileName, pages },
+                    isStale,
+                    printJobId,
+                    waUser.userId ?? null,
+                  );
                 }
               } catch (error) {
                 console.log("Failed to process document:", error);
@@ -617,8 +777,8 @@ Please try again.`,
 
                 console.log(`Image converted to PDF: ${rawFileName} → ${pdfFileName}`);
 
-                // Step 5: Feed into the existing document processing pipeline
-                const pages = await getPdfPageCountFromBuffer(pdfBuffer);
+                // Images always produce exactly 1 page; skip pdf-parse
+                const pages = 1;
 
                 const startedProcessingAt = new Date();
                 if (userData.displayPhoneNumber) {
@@ -699,10 +859,11 @@ Please try again.`,
                 }
 
                 if (existingJob && existingJob._count && existingJob._count.files >= 30) {
-                  if (phoneNumberId && userData.displayPhoneNumber) {
+                  // Rate-limit "limit reached" per draft (max 2 per draft lifetime)
+                  if (phoneNumberId && userData.displayPhoneNumber && shouldSendLimitReached(existingJob.id)) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Limit reached")}\nYou cannot add more than 30 files to a single job.`,
+                      message: `${waBold("Limit reached")}\nYou cannot add more than 30 files to a single job.\n\nPlease type ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start fresh.`,
                       phoneNumberId,
                     });
                   }
@@ -773,13 +934,17 @@ Please try again.`,
                   socket.emit("files-added", waUser.userId, newJob.id);
                 }
 
-                // Send confirmation
+                // Queue confirmation — batched with other files arriving within 3s
                 if (phoneNumberId && userData.displayPhoneNumber) {
-                  await sendWhatsAppTextMessage({
-                    to: userData.displayPhoneNumber,
-                    message: `${waBold("✓ Image received")}\n${waBold(pdfFileName)} (${pages} page${pages !== 1 ? "s" : ""})\nConverted to PDF and added to your draft.\n\nSend more files or visit ${waBold("zopy.in")} to customize and submit.`,
+                  const imageIsStale = !!(existingJob && existingJob.files.length > 0 && existingJob.files[0] && (Date.now() - existingJob.files[0].createdAt.getTime()) > 30 * 60 * 1000);
+                  queueFileConfirmation(
+                    userData.displayPhoneNumber,
                     phoneNumberId,
-                  });
+                    { fileName: pdfFileName, pages },
+                    imageIsStale,
+                    existingJob?.id ?? null,
+                    waUser.userId ?? null,
+                  );
                 }
               } catch (imageError) {
                 console.error("Image processing failed:", imageError);
@@ -819,6 +984,27 @@ Please try again.`,
 
             if (messageText === null) {
               continue;
+            }
+
+            // Duplicate-aware rate limiting for text/interactive replies
+            if (userData.displayPhoneNumber) {
+              const rateResult = checkTextRateLimit(userData.displayPhoneNumber, messageText);
+              if (rateResult === "skip") {
+                console.log(`Rate-limited (skip) text reply to ${userData.displayPhoneNumber}: "${messageText}"`);
+                continue;
+              }
+              if (rateResult === "warn") {
+                console.log(`Rate-limited (warn) text reply to ${userData.displayPhoneNumber}: "${messageText}"`);
+                if (phoneNumberId) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    message: `${waBold("Please don't spam")} \u26a0\ufe0f\nSending the same message repeatedly won't help. Continued abuse may result in your number being blocked.`,
+                    phoneNumberId,
+                  });
+                }
+                continue;
+              }
+              // rateResult === "reply" → proceed normally
             }
 
             if (userData.displayPhoneNumber) {

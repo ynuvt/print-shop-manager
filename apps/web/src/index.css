@@ -558,25 +558,28 @@ body {
 }
 
 .add-more-btn {
-  height: 48px;
-  min-width: 220px;
-  padding: 0 28px;
+  height: 44px;
+  min-width: 200px;
+  padding: 0 24px;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--brand) 70%, var(--border));
-  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
-  color: var(--text);
+  border: 1.5px dashed color-mix(in srgb, var(--brand) 50%, var(--border));
+  background: color-mix(in srgb, var(--brand) 6%, var(--panel));
+  color: var(--brand-strong, var(--brand));
   font-size: 13px;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .add-more-btn:hover {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--brand) 70%, var(--border));
-  background: color-mix(in srgb, var(--brand) 18%, var(--panel));
+  color: var(--brand-strong, var(--brand));
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, var(--panel));
 }
 
 .section-head h2 {
@@ -982,7 +985,7 @@ body {
 .modal-summary h3 {
   display: block;
   margin-top: 2px;
-  font-size: 32px;
+  font-size: 26px;
   line-height: 1.15;
   color: var(--text);
 }
@@ -1303,27 +1306,82 @@ body {
   margin-top: 12px;
 }
 
-.whatsapp-forward-btn {
+/* ── WhatsApp CTA Button ─────────────────────────── */
+.whatsapp-cta-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 14px 20px;
+  border-radius: 14px;
+  border: none;
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(37, 211, 102, 0.3);
+}
+
+.whatsapp-cta-btn:hover {
+  background: linear-gradient(135deg, #22c55e, #0f7a6b);
+  box-shadow: 0 6px 24px rgba(37, 211, 102, 0.4);
+  transform: translateY(-1px);
+}
+
+.whatsapp-cta-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.3);
+}
+
+/* ── Draft Actions Row (Refresh + Clear) ─────────── */
+.draft-actions-row {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: 100%;
-  margin-top: 12px;
-  padding: 16px;
-  border-radius: 18px;
-  border: 2px dashed var(--border);
-  background: var(--panel-muted);
-  color: var(--text);
-  font-weight: 700;
-  font-size: 15px;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  margin-top: 8px;
 }
 
-.whatsapp-forward-btn:hover {
-  border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 8%, var(--panel));
+.draft-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.draft-action-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  background: color-mix(in srgb, var(--brand) 6%, var(--panel));
+}
+
+.draft-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.draft-action-btn--danger {
+  color: color-mix(in srgb, var(--error) 70%, var(--text-muted));
+}
+
+.draft-action-btn--danger:hover {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 35%, var(--border));
+  background: color-mix(in srgb, var(--error) 6%, var(--panel));
 }
 
 /* Cost Split Table */
@@ -1496,6 +1554,47 @@ body {
   color: var(--error);
   background: color-mix(in srgb, var(--error) 10%, transparent);
   font-size: 13px;
+}
+
+/* ── Toast Notification ─────────────────────────── */
+.toast-notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  width: min(92vw, 520px);
+  padding: 14px 22px;
+  border-radius: 16px;
+  background: #d32f2f;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  box-shadow:
+    0 6px 24px rgba(211, 47, 47, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  animation: toast-in 0.3s ease-out;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+[data-theme="dark"] .toast-notification {
+  background: #ef5350;
+  color: #fff;
 }
 
 .jobs-panel-head {
@@ -2150,6 +2249,50 @@ body {
   font-weight: 600;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+/* ── File Option Chips ───────────────────────────── */
+.job-file-chips {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.job-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.job-chip--bw {
+  background: color-mix(in srgb, var(--text) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--text) 20%, var(--border));
+}
+
+.job-chip--color {
+  background: color-mix(in srgb, var(--brand) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  color: var(--brand-strong, var(--brand));
+}
+
+.job-chip--copies {
+  background: color-mix(in srgb, #f59e0b 12%, var(--panel));
+  border-color: color-mix(in srgb, #f59e0b 40%, var(--border));
+  color: #b45309;
+}
+
+[data-theme="dark"] .job-chip--copies {
+  color: #fbbf24;
 }
 
 .icon-btn,
