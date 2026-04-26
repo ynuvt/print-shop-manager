@@ -130,6 +130,33 @@ export async function convertToPdfFromBuffer(
     await fs.writeFile(inputPath, buffer);
 
     try {
+      // Select the correct PDF export filter based on file type.
+      // Using the wrong filter (e.g. writer_pdf_Export for .pptx) will produce
+      // broken or garbled output.
+      const ext = (parsed.ext || "").toLowerCase();
+      let filterName: string;
+      if (/^\.(pptx?|odp)$/.test(ext)) {
+        filterName = "impress_pdf_Export";
+      } else if (/^\.(xlsx?|ods|csv)$/.test(ext)) {
+        filterName = "calc_pdf_Export";
+      } else {
+        // .doc, .docx, .odt, .rtf, .txt, and everything else
+        filterName = "writer_pdf_Export";
+      }
+
+      // Common PDF export options for all filters:
+      // - EmbedStandardFonts: embeds base fonts to prevent substitution/reflow
+      // - UseLosslessCompression: preserves image quality
+      // - IsSkipEmptyPages: false so blank pages aren't dropped
+      // - SelectPdfVersion 15: PDF 1.5 for wide compatibility
+      const filterOptions = [
+        '"EmbedStandardFonts":{"type":"boolean","value":"true"}',
+        '"UseLosslessCompression":{"type":"boolean","value":"true"}',
+        '"IsSkipEmptyPages":{"type":"boolean","value":"false"}',
+        '"SelectPdfVersion":{"type":"long","value":"15"}',
+      ].join(",");
+      const pdfFilter = `pdf:${filterName}:{${filterOptions}}`;
+
       await execFileAsync(
         libreOfficeBin,
         [
@@ -141,7 +168,7 @@ export async function convertToPdfFromBuffer(
           "--nofirststartwizard",
           "--norestore",
           "--convert-to",
-          "pdf",
+          pdfFilter,
           "--outdir",
           tempDir,
           inputPath,
