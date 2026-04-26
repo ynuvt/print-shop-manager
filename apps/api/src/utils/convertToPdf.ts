@@ -99,6 +99,58 @@ async function convertImageToPdf(
   };
 }
 
+/**
+ * Create a fontconfig XML that explicitly lists all common Linux font
+ * directories so LibreOffice can find system-installed fonts even when
+ * running under isolated profiles or unusual environments.
+ */
+async function writeFontconfigXml(targetPath: string): Promise<void> {
+  const xml = `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>/usr/share/fonts</dir>
+  <dir>/usr/local/share/fonts</dir>
+  <dir>/usr/share/fonts/truetype</dir>
+  <dir>/usr/share/fonts/opentype</dir>
+  <dir>/usr/share/fonts/type1</dir>
+  <dir>/usr/share/fonts/truetype/msttcorefonts</dir>
+  <dir>/usr/share/fonts/truetype/liberation</dir>
+  <dir>/usr/share/fonts/truetype/liberation2</dir>
+  <dir>/usr/share/fonts/truetype/dejavu</dir>
+  <dir>/usr/share/fonts/truetype/noto</dir>
+  <dir>/usr/share/fonts/truetype/freefont</dir>
+  <dir prefix="xdg">fonts</dir>
+  <dir>~/.fonts</dir>
+  <cachedir>/var/cache/fontconfig</cachedir>
+  <cachedir prefix="xdg">fontconfig</cachedir>
+  <cachedir>~/.fontconfig</cachedir>
+
+  <!-- Prefer Liberation as substitutes for Microsoft fonts -->
+  <alias>
+    <family>Times New Roman</family>
+    <prefer><family>Liberation Serif</family></prefer>
+  </alias>
+  <alias>
+    <family>Arial</family>
+    <prefer><family>Liberation Sans</family></prefer>
+  </alias>
+  <alias>
+    <family>Courier New</family>
+    <prefer><family>Liberation Mono</family></prefer>
+  </alias>
+  <alias>
+    <family>Calibri</family>
+    <prefer><family>Carlito</family><family>Liberation Sans</family></prefer>
+  </alias>
+  <alias>
+    <family>Cambria</family>
+    <prefer><family>Caladea</family><family>Liberation Serif</family></prefer>
+  </alias>
+</fontconfig>`;
+
+  await fs.writeFile(targetPath, xml, "utf8");
+}
+
 export async function convertToPdfFromBuffer(
   buffer: Buffer,
   fileName: string,
@@ -108,7 +160,7 @@ export async function convertToPdfFromBuffer(
     return convertImageToPdf(buffer, fileName);
   }
 
-  // ── Office files: use LibreOffice as before ──
+  // ── Office files: use LibreOffice ──
   const libreOfficeBin = process.env.LIBREOFFICE_BIN || "soffice";
   const sanitizedName = sanitizeBaseName(fileName);
   const parsed = path.parse(sanitizedName);
@@ -125,9 +177,24 @@ export async function convertToPdfFromBuffer(
   const userInstallationPath = path.join(tempDir, "lo-profile");
   const userInstallationUri = `${pathToFileURL(userInstallationPath).toString()}/`;
 
+  // Write a custom fontconfig XML so LO can find system fonts even
+  // under isolated/sandboxed environments.
+  const fontconfigPath = path.join(tempDir, "fonts.conf");
+
   try {
     await fs.mkdir(userInstallationPath, { recursive: true });
     await fs.writeFile(inputPath, buffer);
+    await writeFontconfigXml(fontconfigPath);
+
+    // Build environment: ensure LibreOffice uses the headless SVP plugin,
+    // finds our custom fontconfig, and has a writable HOME.
+    const loEnv: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      HOME: tempDir,
+      SAL_USE_VCLPLUGIN: "svp",
+      FONTCONFIG_FILE: fontconfigPath,
+      FONTCONFIG_PATH: "/etc/fonts",
+    };
 
     try {
       // Select the correct PDF export filter based on file type.
@@ -144,18 +211,10 @@ export async function convertToPdfFromBuffer(
         filterName = "writer_pdf_Export";
       }
 
-      // Common PDF export options for all filters:
-      // - EmbedStandardFonts: embeds base fonts to prevent substitution/reflow
-      // - UseLosslessCompression: preserves image quality
-      // - IsSkipEmptyPages: false so blank pages aren't dropped
-      // - SelectPdfVersion 15: PDF 1.5 for wide compatibility
-      const filterOptions = [
-        '"EmbedStandardFonts":{"type":"boolean","value":"true"}',
-        '"UseLosslessCompression":{"type":"boolean","value":"true"}',
-        '"IsSkipEmptyPages":{"type":"boolean","value":"false"}',
-        '"SelectPdfVersion":{"type":"long","value":"15"}',
-      ].join(",");
-      const pdfFilter = `pdf:${filterName}:{${filterOptions}}`;
+      // Use the simple filter syntax for maximum compatibility across
+      // all LibreOffice versions (the JSON FilterData syntax requires 7.2+
+      // and is unreliable in headless mode on some distros).
+      const pdfFilter = `pdf:${filterName}`;
 
       await execFileAsync(
         libreOfficeBin,
@@ -176,6 +235,7 @@ export async function convertToPdfFromBuffer(
         {
           timeout: 120_000,
           maxBuffer: 10 * 1024 * 1024,
+          env: loEnv,
         },
       );
     } catch (error) {
@@ -201,6 +261,19 @@ export async function convertToPdfFromBuffer(
       const tail = (value: string, max = 1200) =>
         value.length > max ? value.slice(-max) : value;
 
+      // Log font diagnostic info on failure
+      let fontInfo = "";
+      try {
+        const { stdout: fcOut } = await execFileAsync("fc-list", ["--format", "%{family}\\n"], {
+          timeout: 5_000,
+          env: loEnv,
+        });
+        const families = [...new Set((typeof fcOut === "string" ? fcOut : "").split("\n").filter(Boolean))];
+        fontInfo = `\n\nAvailable font families (${families.length}): ${families.slice(0, 30).join(", ")}${families.length > 30 ? "..." : ""}`;
+      } catch {
+        fontInfo = "\n\n(Could not list fonts via fc-list)";
+      }
+
       const details = [
         err.message ? `message: ${err.message}` : "",
         stderr ? `stderr (tail):\n${tail(stderr)}` : "",
@@ -210,7 +283,9 @@ export async function convertToPdfFromBuffer(
         .join("\n\n");
 
       throw new Error(
-        details ? `LibreOffice conversion failed\n\n${details}` : "LibreOffice conversion failed",
+        details
+          ? `LibreOffice conversion failed\n\n${details}${fontInfo}`
+          : `LibreOffice conversion failed${fontInfo}`,
       );
     }
 

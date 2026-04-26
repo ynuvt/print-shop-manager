@@ -223,29 +223,65 @@ export async function requestPresignedUploads(
   return res.data.uploads as PresignedUpload[];
 }
 
-export async function uploadFileToR2(uploadUrl: string, fileUri: string, mimeType: string): Promise<void> {
+/** Infer a valid MIME from file extension when the share intent gives us a wildcard */
+function inferMime(name: string, fallback: string): string {
+  if (fallback && !fallback.includes("*") && fallback !== "application/octet-stream") return fallback;
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    tiff: "image/tiff",
+    tif: "image/tiff",
+  };
+  return map[ext] || fallback || "application/octet-stream";
+}
+
+export async function uploadFileToR2(uploadUrl: string, fileUri: string, mimeType: string, fileName?: string): Promise<void> {
   const FileSystem = await import("expo-file-system");
+
+  const actualMime = fileName ? inferMime(fileName, mimeType) : (mimeType || "application/octet-stream");
+  console.log("[Upload] Start:", { fileName, mimeType: actualMime, uri: fileUri.substring(0, 80) });
 
   // For content:// URIs (from share intents), copy to a temp file first
   let uri = fileUri;
   if (fileUri.startsWith("content://")) {
-    const tempPath = FileSystem.cacheDirectory + "upload_" + Date.now();
-    await FileSystem.copyAsync({ from: fileUri, to: tempPath });
-    uri = tempPath;
+    const ext = fileName?.split(".").pop() || "bin";
+    const tempPath = FileSystem.cacheDirectory + "upload_" + Date.now() + "." + ext;
+    try {
+      await FileSystem.copyAsync({ from: fileUri, to: tempPath });
+      const info = await FileSystem.getInfoAsync(tempPath);
+      console.log("[Upload] Copied to temp:", tempPath, "exists:", info.exists, "size:", (info as any).size);
+      uri = tempPath;
+    } catch (copyErr) {
+      console.error("[Upload] copyAsync failed:", copyErr);
+      throw new Error(`Cannot read shared file: ${fileName || "unknown"}`);
+    }
   }
 
-  const result = await FileSystem.uploadAsync(uploadUrl, uri, {
-    httpMethod: "PUT",
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-    headers: { "Content-Type": mimeType || "application/octet-stream" },
-  });
+  try {
+    const result = await FileSystem.uploadAsync(uploadUrl, uri, {
+      httpMethod: "PUT",
+      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      headers: { "Content-Type": actualMime },
+    });
+    console.log("[Upload] Done:", { status: result.status, file: fileName });
 
-  // Clean up temp file
-  if (uri !== fileUri) {
-    try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {}
-  }
-
-  if (result.status < 200 || result.status >= 300) {
-    throw new Error(`Upload failed with status ${result.status}`);
+    if (result.status < 200 || result.status >= 300) {
+      throw new Error(`Upload failed (status ${result.status}) for ${fileName}`);
+    }
+  } finally {
+    // Clean up temp file
+    if (uri !== fileUri) {
+      try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch {}
+    }
   }
 }

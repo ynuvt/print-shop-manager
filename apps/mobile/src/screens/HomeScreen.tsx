@@ -74,6 +74,8 @@ export default function HomeScreen() {
 
   const lastPersistedRef = useRef<Record<string, PrintOptions>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const fileOptionsY = useRef(0);
 
   // ── userId is already set by SyncScreen before we get here ──
   useEffect(() => {
@@ -144,7 +146,7 @@ export default function HomeScreen() {
   }, [userId, fetchWebDraft]);
 
   // ── Handle files shared TO the app (Android Share Intent) ──
-  const uploadSharedFiles = useCallback(async (uris: { uri: string; name: string; mimeType: string }[]) => {
+  const uploadSharedFiles = useCallback(async (uris: { uri: string; name: string; mimeType: string; size?: number }[]) => {
     if (!uris.length) return;
     const available = MAX_FILES - printFiles.length;
     if (available <= 0) {
@@ -156,16 +158,20 @@ export default function HomeScreen() {
     setIsPreparingFiles(true);
     setUploadStage("uploading");
     try {
-      // Get file info for presigned uploads
-      const fileInfos = await Promise.all(
-        toUpload.map(async (f) => {
-          const info = await FileSystem.getInfoAsync(f.uri);
-          return { name: f.name, mimeType: f.mimeType, size: (info as any).size ?? 0 };
-        })
-      );
+      // Use size from native module — do NOT call getInfoAsync on content:// URIs (SecurityException)
+      const fileInfos = toUpload.map((f) => ({
+        name: f.name,
+        mimeType: f.mimeType,
+        size: f.size ?? 0,
+      }));
+      console.log("[ShareUpload] fileInfos:", JSON.stringify(fileInfos));
+
       const uploads = await requestPresignedUploads(fileInfos);
+      console.log("[ShareUpload] Got", uploads.length, "presigned URLs");
+
       for (let i = 0; i < toUpload.length; i++) {
-        await uploadFileToR2(uploads[i]!.uploadUrl, toUpload[i]!.uri, toUpload[i]!.mimeType);
+        console.log("[ShareUpload] Uploading file", i + 1, "of", toUpload.length, ":", toUpload[i]!.name);
+        await uploadFileToR2(uploads[i]!.uploadUrl, toUpload[i]!.uri, toUpload[i]!.mimeType, toUpload[i]!.name);
       }
       const hasConvertible = toUpload.some((f) => /\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i.test(f.name));
       setUploadStage(hasConvertible ? "converting" : "creating");
@@ -180,7 +186,10 @@ export default function HomeScreen() {
         }),
       );
       notify(`${toUpload.length} file(s) added from share!`, { variant: "success" });
+      // Auto-scroll to file options
+      setTimeout(() => scrollRef.current?.scrollTo({ y: fileOptionsY.current, animated: true }), 400);
     } catch (err) {
+      console.error("[ShareUpload] Error:", err);
       setError(err instanceof Error ? err.message : "Failed to process shared files.");
     } finally {
       setIsPreparingFiles(false);
@@ -203,7 +212,7 @@ export default function HomeScreen() {
         if (files.length > 0 && mounted) {
           console.log("[ShareIntent] Processing", files.length, "shared file(s)");
           await uploadSharedFiles(
-            files.map((f) => ({ uri: f.uri, name: f.name, mimeType: f.mimeType }))
+            files.map((f) => ({ uri: f.uri, name: f.name, mimeType: f.mimeType, size: f.size }))
           );
         } else {
           console.log("[ShareIntent] No files to process");
@@ -304,6 +313,8 @@ export default function HomeScreen() {
           return { id: f.id, url: f.url, name: f.name, detectedPages: f.pages, options: opts, pageRangeError: "" };
         }),
       );
+      // Auto-scroll to file options
+      setTimeout(() => scrollRef.current?.scrollTo({ y: fileOptionsY.current, animated: true }), 400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed. Try again.");
     } finally {
@@ -398,7 +409,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {error && (
           <View style={[styles.errorBanner, { backgroundColor: `${colors.error}18`, borderColor: `${colors.error}40` }]}>
             <Text style={{ color: colors.error, fontSize: 13, fontWeight: "600" }}>{error}</Text>
@@ -438,11 +449,31 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[styles.waFolderBtn, { borderColor: colors.border, backgroundColor: colors.panelMuted }]}
                 activeOpacity={0.8}
-                onPress={pickAndUpload}
+                onPress={async () => {
+                  try {
+                    const { ShareIntentModule: SIM } = NativeModules;
+                    if (!SIM?.openWhatsAppFolder) {
+                      notify("Not available — rebuild the app first.", { variant: "error" });
+                      return;
+                    }
+                    const files: { uri: string; name: string; mimeType: string; size: number }[] = await SIM.openWhatsAppFolder();
+                    if (files.length > 0) {
+                      await uploadSharedFiles(files.map((f) => ({ uri: f.uri, name: f.name, mimeType: f.mimeType, size: f.size })));
+                    }
+                  } catch (err: any) {
+                    if (err?.code !== "PICKER_BUSY") {
+                      notify("Couldn't browse files.", { variant: "error" });
+                    }
+                  }
+                }}
               >
-                <FolderOpen size={16} color={colors.textMuted} />
-                <Text style={[styles.waFolderText, { color: colors.textMuted }]}>Browse Files (WhatsApp / Downloads)</Text>
+                <FolderOpen size={15} color={colors.textMuted} />
+                <Text style={[styles.waFolderText, { color: colors.textMuted }]}>Browse WhatsApp Files</Text>
               </TouchableOpacity>
+
+              <Text style={{ color: colors.textMuted, fontSize: 10, textAlign: "center", marginTop: 6, lineHeight: 15 }}>
+                Send docs via WhatsApp or pick files saved by WhatsApp on your device
+              </Text>
 
               {/* Draft actions */}
               <View style={styles.draftActions}>
@@ -461,6 +492,7 @@ export default function HomeScreen() {
               </View>
 
               {/* File Options */}
+              <View onLayout={(e) => { fileOptionsY.current = e.nativeEvent.layout.y; }} />
               {printFiles.length > 0 && (
                 <>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>File Options</Text>

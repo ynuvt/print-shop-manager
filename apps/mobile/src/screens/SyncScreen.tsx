@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../context/ThemeContext";
 import { requestMobileSync, checkMobileSyncStatus } from "../api/api";
 import { WHATSAPP_NUMBER } from "../config";
@@ -18,7 +20,7 @@ interface Props {
 }
 
 export default function SyncScreen({ onSynced }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [status, setStatus] = useState<SyncStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -31,7 +33,6 @@ export default function SyncScreen({ onSynced }: Props) {
     }
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => () => stopPolling(), [stopPolling]);
 
   const startSync = async () => {
@@ -43,20 +44,17 @@ export default function SyncScreen({ onSynced }: Props) {
       const { syncId, otp } = await requestMobileSync();
       syncIdRef.current = syncId;
 
-      // Open WhatsApp with the OTP message pre-filled
       const waUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=ZOPY-${otp}`;
       await Linking.openURL(waUrl);
 
       setStatus("waiting");
 
-      // Start polling every 3 seconds
       pollRef.current = setInterval(async () => {
         try {
           const res = await checkMobileSyncStatus(syncId);
           if (res.status === "linked" && res.token && res.userId) {
             stopPolling();
             setStatus("success");
-            // Small delay for visual feedback
             setTimeout(() => onSynced(res.token, res.userId!), 1200);
           } else if (res.status === "expired") {
             stopPolling();
@@ -67,7 +65,6 @@ export default function SyncScreen({ onSynced }: Props) {
         }
       }, 3000);
 
-      // Auto-expire after 5 minutes
       setTimeout(() => {
         if (syncIdRef.current === syncId) {
           stopPolling();
@@ -81,10 +78,14 @@ export default function SyncScreen({ onSynced }: Props) {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
-      {/* Logo area */}
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
+      {/* Logo */}
       <View style={styles.logoArea}>
-        <Text style={[styles.logo, { color: colors.brand }]}>ZOPY</Text>
+        <Image
+          source={require("../../public/zopy.png")}
+          style={styles.logoImage}
+          resizeMode="contain"
+        />
         <Text style={[styles.tagline, { color: colors.textMuted }]}>PRINT FROM ANYWHERE</Text>
       </View>
 
@@ -94,15 +95,33 @@ export default function SyncScreen({ onSynced }: Props) {
           <>
             <Text style={[styles.title, { color: colors.text }]}>Connect WhatsApp</Text>
             <Text style={[styles.desc, { color: colors.textMuted }]}>
-              Link your WhatsApp to start printing. Tap the button below — it will open WhatsApp and send a sync code automatically.
+              Link your WhatsApp to get started. We'll send a one-time code to verify your number.
             </Text>
+
             <TouchableOpacity
-              style={[styles.syncBtn, { backgroundColor: "#25D366" }]}
+              style={[styles.primaryBtn, { backgroundColor: colors.brand }]}
               onPress={startSync}
               activeOpacity={0.8}
             >
-              <Text style={styles.syncBtnText}>Connect with WhatsApp</Text>
+              <Text style={[styles.primaryBtnText, { color: isDark ? "#0f0f0f" : "#fff" }]}>
+                Connect with WhatsApp
+              </Text>
             </TouchableOpacity>
+
+            <View style={styles.stepsContainer}>
+              {[
+                "Tap the button above",
+                "Send the pre-filled code on WhatsApp",
+                "Come back here — we'll detect it instantly",
+              ].map((step, i) => (
+                <View key={i} style={styles.stepRow}>
+                  <View style={[styles.stepBadge, { backgroundColor: colors.brand + "20" }]}>
+                    <Text style={[styles.stepNum, { color: colors.brand }]}>{i + 1}</Text>
+                  </View>
+                  <Text style={[styles.stepText, { color: colors.textMuted }]}>{step}</Text>
+                </View>
+              ))}
+            </View>
           </>
         )}
 
@@ -120,16 +139,13 @@ export default function SyncScreen({ onSynced }: Props) {
             </View>
             <Text style={[styles.title, { color: colors.text, marginTop: 20 }]}>Waiting for sync...</Text>
             <Text style={[styles.desc, { color: colors.textMuted }]}>
-              Switch to WhatsApp and send the message. Once you send it, come back here — we'll detect it automatically.
+              Send the message on WhatsApp, then come back here. We'll auto-detect it.
             </Text>
             <TouchableOpacity
-              style={[styles.retryBtn, { borderColor: colors.border }]}
-              onPress={() => {
-                stopPolling();
-                setStatus("idle");
-              }}
+              style={[styles.outlineBtn, { borderColor: colors.border }]}
+              onPress={() => { stopPolling(); setStatus("idle"); }}
             >
-              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Cancel</Text>
+              <Text style={{ color: colors.textMuted, fontSize: 14, fontWeight: "600" }}>Cancel</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -141,6 +157,7 @@ export default function SyncScreen({ onSynced }: Props) {
             <Text style={[styles.desc, { color: colors.textMuted }]}>
               Your WhatsApp is connected. Setting up your account...
             </Text>
+            <ActivityIndicator size="small" color={colors.brand} style={{ marginTop: 8 }} />
           </View>
         )}
 
@@ -152,11 +169,11 @@ export default function SyncScreen({ onSynced }: Props) {
               The sync code has expired. Please try again.
             </Text>
             <TouchableOpacity
-              style={[styles.syncBtn, { backgroundColor: "#25D366" }]}
+              style={[styles.primaryBtn, { backgroundColor: colors.brand }]}
               onPress={startSync}
               activeOpacity={0.8}
             >
-              <Text style={styles.syncBtnText}>Try Again</Text>
+              <Text style={[styles.primaryBtnText, { color: isDark ? "#0f0f0f" : "#fff" }]}>Try Again</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -167,11 +184,11 @@ export default function SyncScreen({ onSynced }: Props) {
             <Text style={[styles.title, { color: colors.text, marginTop: 12 }]}>Sync Failed</Text>
             <Text style={[styles.desc, { color: colors.error }]}>{errorMsg}</Text>
             <TouchableOpacity
-              style={[styles.syncBtn, { backgroundColor: "#25D366" }]}
+              style={[styles.primaryBtn, { backgroundColor: colors.brand }]}
               onPress={startSync}
               activeOpacity={0.8}
             >
-              <Text style={styles.syncBtnText}>Try Again</Text>
+              <Text style={[styles.primaryBtnText, { color: isDark ? "#0f0f0f" : "#fff" }]}>Try Again</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -180,23 +197,28 @@ export default function SyncScreen({ onSynced }: Props) {
       <Text style={[styles.footerText, { color: colors.textMuted }]}>
         By continuing, you agree to our Terms of Service
       </Text>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: "center", padding: 24 },
-  logoArea: { alignItems: "center", marginBottom: 32 },
-  logo: { fontSize: 40, fontWeight: "900", letterSpacing: 4 },
-  tagline: { fontSize: 11, fontWeight: "700", letterSpacing: 3, marginTop: 4 },
-  card: { borderWidth: 1, borderRadius: 20, padding: 28 },
-  title: { fontSize: 22, fontWeight: "800", marginBottom: 8 },
-  desc: { fontSize: 14, lineHeight: 21, marginBottom: 20 },
+  logoArea: { alignItems: "center", marginBottom: 28 },
+  logoImage: { width: 72, height: 72, borderRadius: 18, marginBottom: 10 },
+  tagline: { fontSize: 11, fontWeight: "700", letterSpacing: 3 },
+  card: { borderWidth: 1, borderRadius: 20, padding: 24 },
+  title: { fontSize: 20, fontWeight: "800", marginBottom: 6 },
+  desc: { fontSize: 14, lineHeight: 21, marginBottom: 16 },
   centerContent: { alignItems: "center", paddingVertical: 12 },
   waitText: { fontSize: 14, marginTop: 16 },
-  pulseRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 3, alignItems: "center", justifyContent: "center" },
-  syncBtn: { borderRadius: 14, paddingVertical: 16, alignItems: "center", marginTop: 4 },
-  syncBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
-  retryBtn: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10, marginTop: 16 },
+  pulseRing: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, alignItems: "center", justifyContent: "center" },
+  primaryBtn: { borderRadius: 14, paddingVertical: 16, alignItems: "center", marginTop: 4, width: "100%" },
+  primaryBtnText: { fontWeight: "800", fontSize: 15 },
+  outlineBtn: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, marginTop: 16 },
+  stepsContainer: { marginTop: 20, gap: 12 },
+  stepRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  stepBadge: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  stepNum: { fontSize: 13, fontWeight: "800" },
+  stepText: { fontSize: 13, flex: 1 },
   footerText: { textAlign: "center", fontSize: 11, marginTop: 20 },
 });
