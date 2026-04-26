@@ -122,7 +122,7 @@ interface PendingFileBatch {
   userId: string | null;
 }
 
-const FILE_BATCH_DELAY_MS = 3000; // Wait 3s for more files before sending
+const FILE_BATCH_DELAY_MS = 10_000; // Wait 10s for more files before sending
 const LIMIT_REACHED_MAX = 2; // Max 2 "limit reached" messages per draft per window
 const LIMIT_REACHED_WINDOW_MS = 60_000; // 1-minute window for limit-reached reset
 const COMMAND_WINDOW_MS = 60_000; // 60-second sliding window for command tracking
@@ -142,6 +142,29 @@ interface CommandWindowEntry {
   warningSent: boolean; // only send 1 spam warning per window total
 }
 const commandFrequencyTracker = new Map<string, CommandWindowEntry>();
+
+// Per-phone fallback/welcome message rate limiter
+// Tracks how many times we sent the "Welcome to Zopy" / unrecognized-text reply
+const FALLBACK_MAX_PER_WINDOW = 2; // Reply to first 2 random texts, then ignore
+const fallbackReplyTracker = new Map<string, { count: number; windowStart: number }>();
+
+/** Returns true if we should send the fallback/welcome message (max 2 per 60s window). */
+function shouldSendFallbackReply(phone: string): boolean {
+  const now = Date.now();
+  const entry = fallbackReplyTracker.get(phone);
+
+  if (!entry || now - entry.windowStart > COMMAND_WINDOW_MS) {
+    fallbackReplyTracker.set(phone, { count: 1, windowStart: now });
+    return true;
+  }
+
+  if (entry.count < FALLBACK_MAX_PER_WINDOW) {
+    entry.count++;
+    return true;
+  }
+
+  return false; // Already sent 2 in this window — ignore the rest
+}
 
 /** Queue a file confirmation. After FILE_BATCH_DELAY_MS of inactivity, flush the batch. */
 function queueFileConfirmation(
@@ -231,10 +254,9 @@ async function flushFileConfirmation(phone: string) {
           phoneNumberId: batch.phoneNumberId,
           body: [
             `${waBold("Existing Files Found")} \u26a0\ufe0f`,
-            "Your draft contains old files (30+ min ago):",
+            `_Your draft contains old files (30+ min ago):_`,
             oldFileList,
-            "",
-            `Type ${waBold('"EDIT"')} to visit the website and remove unwanted files using the ${waBold("\u2715 button")}.`,
+            `_Type ${waBold('"EDIT"')} to remove unwanted files._`,
           ].join("\n"),
           buttons: [
             { type: "reply", reply: { id: "edit", title: "EDIT" } },
@@ -582,11 +604,18 @@ Please try again or send a different file.`,
                 }
 
                 if (existingJob && existingJob._count && existingJob._count.files >= 30) {
-                  // Rate-limit "limit reached" per draft (max 2 per draft lifetime)
+                  // Rate-limit "limit reached" per draft (max 2 per 1-min window)
                   if (phoneNumberId && userData.displayPhoneNumber && shouldSendLimitReached(existingJob.id)) {
+                    // List all files already in the draft
+                    const jobFiles = await prisma.file.findMany({
+                      where: { printJobId: existingJob.id },
+                      select: { name: true },
+                      orderBy: { createdAt: "asc" },
+                    });
+                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Limit reached")}\nYou cannot add more than 30 files to a single job.\n\nPlease type ${waBold('"EDIT"')} to submit your current job or ${waBold('"CLEAR"')} to start a new one.`,
+                      message: `${waBold("Limit reached")}\nYou already have ${jobFiles.length} files in your draft (max 30).\n\n${waBold("Your files:")}\n${fileListStr}\n\nType ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start a new one.`,
                       phoneNumberId,
                     });
                   }
@@ -859,11 +888,17 @@ Please try again.`,
                 }
 
                 if (existingJob && existingJob._count && existingJob._count.files >= 30) {
-                  // Rate-limit "limit reached" per draft (max 2 per draft lifetime)
+                  // Rate-limit "limit reached" per draft (max 2 per 1-min window)
                   if (phoneNumberId && userData.displayPhoneNumber && shouldSendLimitReached(existingJob.id)) {
+                    const jobFiles = await prisma.file.findMany({
+                      where: { printJobId: existingJob.id },
+                      select: { name: true },
+                      orderBy: { createdAt: "asc" },
+                    });
+                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Limit reached")}\nYou cannot add more than 30 files to a single job.\n\nPlease type ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start fresh.`,
+                      message: `${waBold("Limit reached")}\nYou already have ${jobFiles.length} files in your draft (max 30).\n\n${waBold("Your files:")}\n${fileListStr}\n\nType ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start fresh.`,
                       phoneNumberId,
                     });
                   }
@@ -998,7 +1033,7 @@ Please try again.`,
                 if (phoneNumberId) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Please don't spam")} \u26a0\ufe0f\nSending the same message repeatedly won't help. Continued abuse may result in your number being blocked.`,
+                    message: `${waBold("Please don't spam")} \u26a0\ufe0f\n_Repeated messages are ignored. Continued abuse may result in your number being blocked._`,
                     phoneNumberId,
                   });
                 }
@@ -1030,7 +1065,7 @@ Please try again.`,
             const isAuthenticated = !!waUser?.userId;
 
             if (!isAuthenticated && messageText !== "sync") {
-              if (phoneNumberId && userData.displayPhoneNumber) {
+              if (phoneNumberId && userData.displayPhoneNumber && shouldSendFallbackReply(userData.displayPhoneNumber)) {
                 const syncLink = await getOrCreateWhatsAppSyncLink(
                   userData.displayPhoneNumber,
                 );
@@ -1046,8 +1081,7 @@ Please try again.`,
                     message: [
                       `${waBold("To use this, sync first:")}`,
                       syncLink ?? "Link unavailable",
-                      "",
-                      "_Link valid for 2 minutes._",
+                      `_Link valid for 2 minutes._`,
                     ].join("\n"),
                   });
                 } else {
@@ -1056,13 +1090,11 @@ Please try again.`,
                     phoneNumberId,
                     message: [
                       `${waBold("Welcome to Zopy!")} 🚀`,
+                      `Send your ${waBold("PDF, Word, or image files")} here.`,
                       "",
-                      `Send your ${waBold("PDF, Word, or other files")} here.`,
-                      "",
-                      `${waBold("To use this, click the link below and sync first:")}`,
+                      `${waBold("Sync first to get started:")}`,
                       syncLink ?? "Link unavailable",
-                      "",
-                      "_Link valid for 2 minutes._",
+                      `_Link valid for 2 minutes._`,
                     ].join("\n"),
                   });
                 }
@@ -1082,12 +1114,8 @@ Please try again.`,
                   phoneNumberId,
                   body: [
                     `${waBold("Welcome to Zopy!")} 🚀`,
-                    "",
-                    `Send your ${waBold("PDF, Word, or other files")} here.`,
-                    "",
-                    `When you're done, type ${waBold('"EDIT"')} to review and submit.`,
-                    "",
-                    `Type ${waBold('"HELP"')} to see all options.`,
+                    `Send your ${waBold("PDF, Word, or image files")} here.`,
+                    `_Type ${waBold('"EDIT"')} when done · ${waBold('"HELP"')} for options_`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "HELP" } },
@@ -1101,13 +1129,11 @@ Please try again.`,
                   phoneNumberId,
                   body: [
                     `${waBold("How it works:")}`,
-                    "",
                     `1) Send documents`,
                     `2) Wait for confirmation`,
                     `3) Type ${waBold('"EDIT"')}`,
-                    `4) Submit`,
-                    "",
-                    `You can send more files anytime before submitting.`,
+                    `4) Submit your printout`,
+                    `_Send more files anytime before submitting._`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "current", title: "CURRENT" } },
@@ -1126,14 +1152,12 @@ Please try again.`,
                   phoneNumberId,
                   body: [
                     `${waBold("Here\u2019s what you can do:")}`,
-                    "",
                     `\u2022 ${waBold("STEPS")} \u2014 How it works`,
                     `\u2022 ${waBold("CURRENT")} \u2014 View documents`,
                     `\u2022 ${waBold("EDIT")} \u2014 Review & customize`,
                     `\u2022 ${waBold("SYNC")} \u2014 Sync WhatsApp with web`,
                     `\u2022 ${waBold("CLEAR")} \u2014 Delete draft`,
-                    "",
-                    `Start sending files, then type ${waBold('"EDIT"')} when done.`,
+                    `_Send files, then type ${waBold('"EDIT"')} when done._`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "steps", title: "STEPS" } },
@@ -1166,7 +1190,7 @@ Please try again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*No jobs found yet.*\n\nSend a *document* to create your first job. \ud83d\udcc4",
+                      `${waBold("No jobs found yet.")}\n_Send a document to create your first job._ \ud83d\udcc4`,
                     phoneNumberId,
                   });
                 } else {
@@ -1208,8 +1232,7 @@ Please try again.`,
                     phoneNumberId,
                     body: [
                       `${waBold("No files added yet.")}`,
-                      "",
-                      `Send your documents and type ${waBold('"EDIT"')} when done.`,
+                      `_Send your documents and type ${waBold('"EDIT"')} when done._`,
                     ].join("\n"),
                     buttons: [
                       { type: "reply", reply: { id: "steps", title: "STEPS" } },
@@ -1225,12 +1248,8 @@ Please try again.`,
                     phoneNumberId,
                     body: [
                       `${waBold("Your current documents:")}`,
-                      "",
                       ...fileLines,
-                      "",
-                      `Send more files anytime.`,
-                      "",
-                      `Type ${waBold('"EDIT"')} to continue.`,
+                      `_Send more · Type ${waBold('"EDIT"')} to continue_`,
                     ].join("\n"),
                     buttons: [
                       { type: "reply", reply: { id: "edit", title: "EDIT" } },
@@ -1259,11 +1278,8 @@ Please try again.`,
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message: [
-                      `${waBold("Your draft has been cleared.")}`,
-                      "",
-                      "Send files to start a new printout.",
-                      "",
-                      `Type ${waBold('"HELP"')} if needed.`,
+                      `${waBold("Draft cleared.")} \u2713`,
+                      `_Send files to start a new printout._`,
                     ].join("\n"),
                     phoneNumberId,
                   });
@@ -1287,11 +1303,8 @@ Please try again.`,
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
                   message: [
-                    `${waBold("Your draft has been cleared.")}`,
-                    "",
-                    "Send files to start a new printout.",
-                    "",
-                    `Type ${waBold('"HELP"')} if needed.`,
+                    `${waBold("Draft cleared.")} \u2713`,
+                    `_Send files to start a new printout._`,
                   ].join("\n"),
                   phoneNumberId,
                 });
@@ -1343,8 +1356,7 @@ Please try again.`,
                     to: userData.displayPhoneNumber,
                     message: [
                       `${waBold("No documents found.")}`,
-                      "",
-                      `Send files first, then type ${waBold('"EDIT"')}.`,
+                      `_Send files first, then type ${waBold('"EDIT"')}._`,
                     ].join("\n"),
                     phoneNumberId,
                   });
@@ -1367,10 +1379,7 @@ Please try again.`,
                     body: [
                       `${waBold("Customize your printout:")}`,
                       reviewUrl,
-                      "",
-                      "Edit your options, confirm, and print your job.",
-                      `Type ${waBold('"CURRENT"')} to view your documents.`,
-                      `_You can also delete files from the link._`,
+                      `_Edit options, confirm, and submit._`,
                     ].join("\n"),
                     buttons: [
                       { type: "reply", reply: { id: "current", title: "CURRENT" } },
@@ -1402,23 +1411,20 @@ Please try again.`,
                     message: [
                       `${waBold("Sync using the link below:")}`,
                       loginUrl ?? "Link unavailable",
+                      `_Link valid for 2 minutes._`,
                     ].join("\n"),
                   });
                 }
               }
             } else {
-              if (phoneNumberId && userData.displayPhoneNumber) {
+              if (phoneNumberId && userData.displayPhoneNumber && shouldSendFallbackReply(userData.displayPhoneNumber)) {
                 await sendWhatsAppButtonMessage({
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   body: [
                     `${waBold("Welcome to Zopy!")} 🚀`,
-                    "",
-                    `Send your ${waBold("PDF, Word, or other files")} here.`,
-                    "",
-                    `When you're done, type ${waBold('"EDIT"')} to review and submit.`,
-                    "",
-                    `Type ${waBold('"HELP"')} to see all options.`,
+                    `Send your ${waBold("PDF, Word, or image files")} here.`,
+                    `_Type ${waBold('"EDIT"')} when done · ${waBold('"HELP"')} for options_`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "help", title: "HELP" } },
