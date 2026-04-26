@@ -11,7 +11,7 @@ process.on("unhandledRejection", (reason) => {
   console.error("[WEBSOCKET UNHANDLED REJECTION]", reason);
 });
 
-const io = new Server(4000, {
+const io = new Server(4001, {
   cors: { origin: "*" }, // allow cross-origin for testing
 });
 

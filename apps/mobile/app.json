@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Zopy",
+    "slug": "zopy-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "zopy",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./public/zopy.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zopy.mobile",
+      "icon": "./public/zopy.png"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./public/zopy.png",
+        "backgroundColor": "#0f0f0f"
+      },
+      "package": "com.zopy.mobile",
+      "intentFilters": [
+        {
+          "action": "SEND",
+          "category": ["DEFAULT"],
+          "data": [
+            { "mimeType": "application/pdf" },
+            { "mimeType": "application/msword" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+            { "mimeType": "application/vnd.ms-powerpoint" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+            { "mimeType": "image/*" }
+          ]
+        },
+        {
+          "action": "SEND_MULTIPLE",
+          "category": ["DEFAULT"],
+          "data": [
+            { "mimeType": "application/pdf" },
+            { "mimeType": "application/msword" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+            { "mimeType": "application/vnd.ms-powerpoint" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+            { "mimeType": "image/*" }
+          ]
+        }
+      ]
+    },
+    "plugins": [
+      "expo-font",
+      "expo-document-picker"
+    ]
+  }
+}

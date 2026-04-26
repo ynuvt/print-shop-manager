@@ -213,3 +213,14 @@ model UserEvent {
   @@index([type])
 }
 
+model MobileSyncOtp {
+  id          String    @id @default(cuid())
+  syncId      String    @unique
+  otp         String    @unique
+  phoneNumber String?
+  userId      String?
+  token       String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+}

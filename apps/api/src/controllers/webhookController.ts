@@ -19,6 +19,7 @@ import {
   uploadBufferToR2,
 } from "../utils/r2Storage.js";
 import { convertToPdfFromBuffer } from "../utils/convertToPdf.js";
+import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import socket from "../config/socket.js";
 
@@ -1054,6 +1055,95 @@ Please try again.`,
                 },
                 select: { phoneNumber: true },
               });
+            }
+
+            // ─── MOBILE APP SYNC (ZOPY-XXXXXX) ──────────────────────────────
+            const mobileSyncMatch = incomingMessage.text?.body?.trim().match(/^ZOPY-(\d{6})$/i);
+            if (mobileSyncMatch && userData.displayPhoneNumber && phoneNumberId) {
+              const otpCode = mobileSyncMatch[1]!;
+              try {
+                const syncRecord = await prisma.mobileSyncOtp.findUnique({
+                  where: { otp: otpCode },
+                });
+
+                if (!syncRecord || syncRecord.usedAt || syncRecord.expiresAt.getTime() < Date.now()) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    message: `${waBold("Code expired")} ⏳\nPlease try again from the Zopy app.`,
+                  });
+                  continue;
+                }
+
+                // Create/find user for this phone
+                let waUser = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { userId: true, phoneNumber: true },
+                });
+
+                let resolvedUserId: string;
+                let token: string;
+
+                if (waUser?.userId) {
+                  // Already has a linked user — reuse
+                  const generated = generateTokenForUser(waUser.userId, "customer");
+                  resolvedUserId = generated.userId;
+                  token = generated.token;
+                } else {
+                  // Create new user
+                  const generated = generateUserToken();
+                  resolvedUserId = generated.userId;
+                  token = generated.token;
+
+                  await prisma.user.upsert({
+                    where: { id: resolvedUserId },
+                    create: { id: resolvedUserId },
+                    update: {},
+                  });
+
+                  // Link WhatsApp to user
+                  await prisma.whatsAppUser.update({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    data: { userId: resolvedUserId },
+                  });
+
+                  // Migrate any existing jobs
+                  await prisma.printJob.updateMany({
+                    where: { userMetadataId: userData.displayPhoneNumber },
+                    data: { userId: resolvedUserId },
+                  });
+                }
+
+                // Mark OTP as used and store credentials
+                await prisma.mobileSyncOtp.update({
+                  where: { id: syncRecord.id },
+                  data: {
+                    usedAt: new Date(),
+                    phoneNumber: userData.displayPhoneNumber,
+                    userId: resolvedUserId,
+                    token,
+                  },
+                });
+
+                // Send success with deep link to open the app
+                const API_BASE = (process.env.API_BASE_URL ?? process.env.FRONTEND_BASE_URL ?? "https://zopy.co.in").replace(/\/$/, "");
+                const openAppUrl = `${API_BASE}/api/v1/auth/open-app?syncId=${syncRecord.syncId}`;
+
+                await sendWhatsAppTextMessage({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  message: `${waBold("Synced successfully")} ✅\nYour Zopy app is now connected!\n\n👉 ${openAppUrl}`,
+                });
+
+              } catch (err) {
+                console.error("[mobile-sync-otp] Error:", err);
+                await sendWhatsAppTextMessage({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  message: `${waBold("Sync failed")} ❌\nPlease try again from the app.`,
+                });
+              }
+              continue;
             }
 
             const waUser = userData.displayPhoneNumber

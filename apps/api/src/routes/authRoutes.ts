@@ -234,4 +234,101 @@ router.post(
     }
   },
 );
+
+// ── Mobile App Sync ──────────────────────────────────────────────────────────
+
+/** POST /auth/mobile-sync — generate a one-time OTP for the mobile app */
+router.post("/mobile-sync", async (_req, res) => {
+  try {
+    const { v4: uuidv4 } = await import("uuid");
+    const syncId = uuidv4();
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 5 * 60_000); // 5 minutes
+
+    // Clean up old unused OTPs
+    await prisma.mobileSyncOtp.deleteMany({
+      where: { usedAt: null, expiresAt: { lt: new Date() } },
+    });
+
+    await prisma.mobileSyncOtp.create({
+      data: { syncId, otp, expiresAt },
+    });
+
+    return res.status(200).json({ syncId, otp });
+  } catch (error) {
+    console.error("[mobile-sync] Error:", error);
+    return res.status(500).json({ error: "Failed to generate sync code." });
+  }
+});
+
+/** GET /auth/mobile-sync/status?syncId=xxx — poll to check if OTP was used */
+router.get("/mobile-sync/status", async (req, res) => {
+  try {
+    const syncId = String(req.query.syncId ?? "").trim();
+    if (!syncId) {
+      return res.status(400).json({ error: "Missing syncId." });
+    }
+
+    const record = await prisma.mobileSyncOtp.findUnique({
+      where: { syncId },
+    });
+
+    if (!record) {
+      return res.status(404).json({ status: "not_found" });
+    }
+
+    if (record.usedAt && record.token && record.userId) {
+      return res.status(200).json({
+        status: "linked",
+        token: record.token,
+        userId: record.userId,
+      });
+    }
+
+    if (record.expiresAt.getTime() < Date.now()) {
+      return res.status(200).json({ status: "expired" });
+    }
+
+    return res.status(200).json({ status: "pending" });
+  } catch (error) {
+    console.error("[mobile-sync/status] Error:", error);
+    return res.status(500).json({ error: "Failed to check status." });
+  }
+});
+
+/** GET /open-app — redirect page: tries deep link, falls back to homepage */
+router.get("/open-app", (req, res) => {
+  const syncId = String(req.query.syncId ?? "");
+  const FRONTEND = (process.env.FRONTEND_BASE_URL ?? "https://zopy.co.in").replace(/\/$/, "");
+
+  // Android intent:// scheme — if app is installed, opens instantly.
+  // S.browser_fallback_url sends user to homepage if app not installed.
+  const intentUrl = `intent://sync-complete?syncId=${syncId}#Intent;scheme=zopy;package=com.zopy.mobile;S.browser_fallback_url=${encodeURIComponent(FRONTEND + "/")};end`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zopy</title>
+</head>
+<body style="margin:0;background:#0f0f0f;">
+  <script>
+    // Android: use intent scheme (instant, handles fallback natively)
+    var isAndroid = /android/i.test(navigator.userAgent);
+    if (isAndroid) {
+      window.location = "${intentUrl}";
+    } else {
+      // iOS/other: try custom scheme, fallback fast
+      window.location = "zopy://sync-complete?syncId=${syncId}";
+      setTimeout(function() { window.location = "${FRONTEND}/"; }, 1000);
+    }
+  </script>
+</body>
+</html>`;
+
+  res.setHeader("Content-Type", "text/html");
+  return res.send(html);
+});
+
 export default router;

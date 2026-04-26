@@ -1,29 +1,7 @@
 /**
- * Shared domain types for the print job flow.
- * Used by pdfPageCount, costCalculator, and the UI layer.
+ * Re-export shared domain types from @printowl/shared-utils.
+ * Web-specific extensions can be added here if needed.
  */
 
-import type { PrintFileOption } from "@printowl/types";
-/** Constructs a fresh set of default print options. */
-export const defaultPrintOptions = (): PrintFileOption => ({
-  paperSize: "A4",
-  colorMode: "BW",
-  orientation: "PORTRAIT",
-  scaleMode: "FIT",
-  pageRange: "ALL",
-  customRange: "",
-  duplex: "ONE",
-  copies: 1,
-});
-
-/** A file the user has selected, with its detected page count and chosen print options. */
-export type PrintFileState = {
-  id?: string;
-  url?: string;
-  file?: File;
-  name: string;
-  detectedPages: number;
-  options: PrintFileOption;
-  /** Empty string = no error. Non-empty = validation message for the custom page range. */
-  pageRangeError: string;
-};
+export { defaultPrintOptions } from "@printowl/shared-utils";
+export type { PrintFileState } from "@printowl/shared-utils";
