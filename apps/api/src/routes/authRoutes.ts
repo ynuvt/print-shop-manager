@@ -240,8 +240,7 @@ router.post(
 /** POST /auth/mobile-sync — generate a one-time OTP for the mobile app */
 router.post("/mobile-sync", async (_req, res) => {
   try {
-    const { v4: uuidv4 } = await import("uuid");
-    const syncId = uuidv4();
+    const syncId = crypto.randomUUID();
     const otp = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60_000); // 5 minutes
 

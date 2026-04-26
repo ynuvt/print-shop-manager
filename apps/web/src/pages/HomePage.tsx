@@ -208,7 +208,7 @@ function FileCard({
               <div className="field-spacing">
                 <input
                   type="text"
-                  value={pf.options.customRange}
+                  value={pf.options.customRange ?? ""}
                   onChange={(e) => onUpdate({ customRange: e.target.value })}
                   placeholder={`1-5, 8, 10-12 (total ${pf.detectedPages} pages)`}
                   className={
@@ -293,7 +293,7 @@ export default function HomePage({
   );
   const [draftJobId, setDraftJobId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const totalBytes = printFiles.reduce((sum, file) => sum + (file.file?.size ?? 0), 0);
+  const totalBytes = printFiles.reduce((sum, file) => sum + ((file.file as any)?.size ?? 0), 0);
   const overallProgress = uploadProgress.length
     ? Math.round(
         uploadProgress.reduce((sum, value) => sum + value, 0) /
@@ -917,7 +917,7 @@ export default function HomePage({
   const hasErrors = printFiles.some(
     (f) =>
       f.pageRangeError ||
-      (f.options.pageRange === "CUSTOM" && !f.options.customRange.trim()),
+      (f.options.pageRange === "CUSTOM" && !f.options.customRange?.trim()),
   );
 
   const canSubmit =
