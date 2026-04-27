@@ -41,7 +41,7 @@ export default function AuthOtpPage() {
           if (source === "web") {
             navigate("/");
           } else {
-            window.location.href = "https://wa.me/918369757906?text=hi";
+            window.location.href = "https://wa.me/918369757906";
           }
         }, 1000);
       })

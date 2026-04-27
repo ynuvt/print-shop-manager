@@ -370,7 +370,7 @@ export default function HomePage({
   const handleForwardFromWhatsapp = useCallback(() => {
     const digits = "918369757906";
     if (isWhatsappSynced) {
-      window.open(`https://wa.me/${digits}?text=hi`, "_blank", "noopener,noreferrer");
+      window.open(`https://wa.me/${digits}`, "_blank", "noopener,noreferrer");
       return;
     }
     setShowSyncWhatsappModal(true);

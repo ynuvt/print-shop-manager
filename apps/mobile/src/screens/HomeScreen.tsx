@@ -435,7 +435,7 @@ export default function HomeScreen() {
                 activeOpacity={0.8}
                 onPress={() => {
                   if (isWhatsappSynced) {
-                    Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}?text=hi`);
+                    Linking.openURL(`https://wa.me/${WHATSAPP_NUMBER}`);
                   } else {
                     setShowSyncModal(true);
                   }
