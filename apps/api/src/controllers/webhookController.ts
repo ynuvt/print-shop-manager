@@ -1504,21 +1504,15 @@ Please try again.`,
                     phoneNumberId,
                   });
                 } else {
-                  await sendWhatsAppButtonMessage({
+                  await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    body: [
+                    message: [
                       `${waBold("Customize your printout:")}`,
                       reviewUrl,
                       `_Edit options, confirm, and submit._`,
                     ].join("\n"),
-                    buttons: [
-                      {
-                        type: "reply",
-                        reply: { id: "current", title: "CURRENT" },
-                      },
-                    ],
-                  });
+                    });
                 }
               }
             } else if (messageText === "sync" || messageText === "sync web") {
