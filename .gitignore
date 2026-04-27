@@ -56,3 +56,6 @@ apps/electron/native/ZopyPrinter/bin/
 apps/electron/native/ZopyPrinter/obj/
 apps/electron/native/ZopyPrinter/pdfium.dll
 apps/electron/native/ZopyPrinter/pdfium-win-x64.tgz
+
+# Runtime tracking cache (file-backed cache for webhook performance)
+apps/api/data/

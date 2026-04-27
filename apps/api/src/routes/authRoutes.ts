@@ -2,9 +2,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { prisma } from "@printowl/db";
-import {
-  authMiddleware,
-} from "../middleware/authMiddleware.js";
+import { authMiddleware } from "../middleware/authMiddleware.js";
 import { sendWhatsAppTextMessage } from "../modules/whatsappServices.js";
 
 const router = express.Router();
@@ -75,10 +73,8 @@ router.post("/admin-login", (req, res) => {
   }
 });
 
-router.post(
-  "/whatsapp-login",
-  async (req, res) => {
-    try {
+router.post("/whatsapp-login", async (req, res) => {
+  try {
     const code = String(req.body?.code ?? "").trim();
     if (!code) {
       return res.status(400).json({ error: "Missing login code." });
@@ -142,7 +138,7 @@ router.post(
           res.status(500).json({ error: "Failed to create user record" });
           return;
         }
-        const {phoneNumber} =  await prisma.whatsAppUser.update({
+        const { phoneNumber } = await prisma.whatsAppUser.update({
           where: { phoneNumber: whatsAppUser.phoneNumber },
           data: { userId },
         });
@@ -162,10 +158,13 @@ router.post(
               to: whatsAppUser.phoneNumber,
               phoneNumberId,
               message:
-                "*Synced successfully* ✅\nYou can now send your *PDF, Word, or image files* directly here on WhatsApp.\n\nTo customize print options, visit:\nhttps://zopy.co.in/\n_Start by sending your first document!_",
+                "*Synced successfully* ✅\nYou can now send your documents directly here on WhatsApp.\n_Start by sending your first file!_",
             });
           } catch (error) {
-            console.error("Failed to send WhatsApp login success message:", error);
+            console.error(
+              "Failed to send WhatsApp login success message:",
+              error,
+            );
           }
         }
 
@@ -220,7 +219,7 @@ router.post(
           to: whatsAppUser.phoneNumber,
           phoneNumberId,
           message:
-            "*Synced successfully* ✅\nYou can now send your *PDF, Word, or image files* directly here on WhatsApp.\n\nTo customize print options, visit:\nhttps://zopy.co.in/\n_Start by sending your first document!_",
+            "*Synced successfully* ✅\nYou can now send your documents directly here on WhatsApp.\n_Start by sending your first file!_",
         });
       } catch (error) {
         console.error("Failed to send WhatsApp login success message:", error);
@@ -228,12 +227,11 @@ router.post(
     }
 
     return res.status(200).json({ token, userId });
-    } catch (error) {
-      console.error("[whatsapp-login] Unexpected error:", error);
-      return res.status(500).json({ error: "Login failed. Please try again." });
-    }
-  },
-);
+  } catch (error) {
+    console.error("[whatsapp-login] Unexpected error:", error);
+    return res.status(500).json({ error: "Login failed. Please try again." });
+  }
+});
 
 // ── Mobile App Sync ──────────────────────────────────────────────────────────
 
@@ -298,7 +296,9 @@ router.get("/mobile-sync/status", async (req, res) => {
 /** GET /open-app — redirect page: tries deep link, falls back to homepage */
 router.get("/open-app", (req, res) => {
   const syncId = String(req.query.syncId ?? "");
-  const FRONTEND = (process.env.FRONTEND_BASE_URL ?? "https://zopy.co.in").replace(/\/$/, "");
+  const FRONTEND = (
+    process.env.FRONTEND_BASE_URL ?? "https://zopy.co.in"
+  ).replace(/\/$/, "");
 
   // Android intent:// scheme — if app is installed, opens instantly.
   // S.browser_fallback_url sends user to homepage if app not installed.

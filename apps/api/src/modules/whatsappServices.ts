@@ -53,6 +53,61 @@ export async function sendWhatsAppButtonMessage(
     );
   }
 }
+
+interface SendWhatsAppCtaUrlMessageArgs {
+  to: string;
+  phoneNumberId: string;
+  body: string;
+  buttonText: string;
+  url: string;
+}
+
+/**
+ * Send an interactive CTA URL button message.
+ * Free within the 24h conversation window. Opens the URL directly when tapped.
+ */
+export async function sendWhatsAppCtaUrlMessage(
+  args: SendWhatsAppCtaUrlMessageArgs,
+): Promise<void> {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error("WHATSAPP_ACCESS_TOKEN is not configured.");
+  }
+
+  const response = await fetch(
+    `${WHATSAPP_API_BASE}/${args.phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: args.to,
+        type: "interactive",
+        interactive: {
+          type: "cta_url",
+          body: { text: args.body },
+          action: {
+            name: "cta_url",
+            parameters: {
+              display_text: args.buttonText,
+              url: args.url,
+            },
+          },
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Failed to send WhatsApp CTA URL message: ${response.status} ${errorText}`,
+    );
+  }
+}
 const WHATSAPP_API_BASE = "https://graph.facebook.com/v20.0";
 
 interface SendWhatsAppStickerArgs {

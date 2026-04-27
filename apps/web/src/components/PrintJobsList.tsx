@@ -5,7 +5,6 @@ import {
   deleteUserPrintJob,
   getUserPrintJobById,
   getUserPrintJobs,
-  resyncWhatsappJobs,
   resubmitCompletedPrintJob,
 } from "../api/api";
 import type { UserPrintJob, UserPrintJobFile } from "../api/api";
@@ -337,7 +336,6 @@ export default function PrintJobsList({
 }) {
   const [jobs, setJobs] = useState<UserPrintJob[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isResyncing, setIsResyncing] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showLinkWhatsappModal, setShowLinkWhatsappModal] = useState(false);
   const [activeTab, setActiveTab] = useState<JobsTab>("ALL");
@@ -471,7 +469,7 @@ export default function PrintJobsList({
         <div className="jobs-panel-head">
           <h3>Recent Jobs</h3>
           <div className="jobs-panel-actions">
-            <button
+            {/* <button
               type="button"
               className="ghost-link"
               onClick={async () => {
@@ -509,7 +507,7 @@ export default function PrintJobsList({
               disabled={isResyncing}
             >
               {isResyncing ? "Syncing..." : "Sync WhatsApp"}
-            </button>
+            </button> */}
             <button
               type="button"
               className="ghost-link"

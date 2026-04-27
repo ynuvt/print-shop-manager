@@ -183,11 +183,32 @@ function mapDuplexToEnum(duplexMode: "ONE" | "BOTH") {
   return duplexMode === "ONE" ? duplex.ONE : duplex.BOTH;
 }
 
-async function generateUniqueVerificationCode(): Promise<number> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+/**
+ * Generate a 4-digit verification code that is unique among *active* jobs
+ * (DRAFT, PENDING, PROCESSING).  Completed / cancelled / rejected jobs
+ * are excluded so their codes can be recycled.
+ *
+ * Must be called **inside a Prisma interactive transaction** (`tx`) to
+ * guarantee the check-then-insert is atomic — two concurrent calls cannot
+ * both "see" the same candidate as free.
+ */
+async function generateUniqueVerificationCode(
+  tx?: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+): Promise<number> {
+  const client = tx ?? prisma;
+  const ACTIVE_STATUSES = [
+    PrintJobStatus.DRAFT,
+    PrintJobStatus.PENDING,
+    PrintJobStatus.PROCESSING,
+  ];
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
     const candidate = Math.floor(1000 + Math.random() * 9000);
-    const existing = await prisma.printJob.findFirst({
-      where: { verificationCode: candidate },
+    const existing = await client.printJob.findFirst({
+      where: {
+        verificationCode: candidate,
+        status: { in: ACTIVE_STATUSES },
+      },
       select: { id: true },
     });
 
@@ -197,7 +218,7 @@ async function generateUniqueVerificationCode(): Promise<number> {
   }
 
   throw new PrintJobAnalysisError(
-    "Unable to generate a unique verification code.",
+    "Unable to generate a unique verification code. Too many active jobs.",
     500,
   );
 }
@@ -244,10 +265,11 @@ type UploadedFileForCreate = {
 async function buildPrintJobCreateDataFromProcessedFiles(
   files: UploadedFileForCreate[],
   userId: string,
+  tx?: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
 ) {
   const totalPages = files.reduce((sum, file) => sum + file.pages, 0);
   const totalCost = files.reduce((sum, file) => sum + file.cost, 0);
-  const verificationCode = await generateUniqueVerificationCode();
+  const verificationCode = await generateUniqueVerificationCode(tx);
 
   return {
     userId,
@@ -757,11 +779,14 @@ app.post(
         });
       }
 
-      const createdJob = await prisma.printJob.create({
-        data: await buildPrintJobCreateDataFromProcessedFiles(
+      // Wrap in a transaction so generateUniqueVerificationCode check-then-insert is atomic
+      const createdJob = await prisma.$transaction(async (tx) => {
+        const data = await buildPrintJobCreateDataFromProcessedFiles(
           uploadedFiles,
-          req.user.uid,
-        ),
+          req.user!.uid,
+          tx,
+        );
+        return tx.printJob.create({ data });
       });
 
       return res.status(201).json({
@@ -1935,10 +1960,11 @@ app.post(
       );
       const totalCost = updateEntries.reduce((sum, file) => sum + file.cost, 0);
 
-      const verificationCode =
-        job.verificationCode ?? (await generateUniqueVerificationCode());
+      const verificationCode = await prisma.$transaction(async (tx) => {
+        // Generate verification code INSIDE the transaction for atomicity
+        const code =
+          job.verificationCode ?? (await generateUniqueVerificationCode(tx));
 
-      await prisma.$transaction(async (tx) => {
         for (const entry of updateEntries) {
           await tx.printOption.update({
             where: { id: entry.optionId },
@@ -1979,9 +2005,11 @@ app.post(
             totalCost,
             estimatedTime: calculateEstimatedTime(totalPages),
             status: PrintJobStatus.PENDING,
-            verificationCode,
+            verificationCode: code,
           },
         });
+
+        return code;
       });
 
       await Promise.allSettled(

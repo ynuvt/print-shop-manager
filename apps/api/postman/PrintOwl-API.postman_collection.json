@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "PrintOwl API",
-    "description": "Comprehensive collection for PrintOwl backend APIs.\n\nNotes:\n- Base URL defaults to http://localhost:4000\n- Customer token is generated via /api/v1/auth/register\n- Admin token is generated via /api/v1/auth/admin-login\n- File routes are included, but they are not mounted in src/routes/index.ts currently (expected 404 unless mounted).",
+    "name": "Zopy API",
+    "description": "Comprehensive API collection for the Zopy print platform.\n\nBase URL defaults to http://localhost:4000.\n\n**Quick Start:**\n1. Run 'Register (customer)' to get a customer token.\n2. Run 'Admin Login' to get an admin token.\n3. Use the relevant endpoints with the auto-populated tokens.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -13,7 +13,7 @@
     { "key": "verificationCode", "value": "" },
     { "key": "jobId", "value": "" },
     { "key": "fileId", "value": "" },
-    { "key": "analysisDate", "value": "2026-04-06" },
+    { "key": "analysisDate", "value": "2026-04-27" },
     { "key": "sampleFilePath", "value": "/absolute/path/to/sample.pdf" }
   ],
   "item": [
@@ -38,7 +38,7 @@
       "name": "Auth",
       "item": [
         {
-          "name": "GET /api/v1/auth/register (customer token)",
+          "name": "Register (customer token)",
           "event": [
             {
               "listen": "test",
@@ -64,7 +64,7 @@
           }
         },
         {
-          "name": "POST /api/v1/auth/admin-login",
+          "name": "Admin Login",
           "event": [
             {
               "listen": "test",
@@ -92,14 +92,9 @@
               "path": ["api", "v1", "auth", "admin-login"]
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "Jobs",
-      "item": [
+        },
         {
-          "name": "POST /api/v1/jobs/create-with-files",
+          "name": "WhatsApp Login (OTP)",
           "event": [
             {
               "listen": "test",
@@ -107,8 +102,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "const data = pm.response.json();",
-                  "if (data && data.verificationCode) {",
-                  "  pm.collectionVariables.set('verificationCode', String(data.verificationCode));",
+                  "if (data && data.token) {",
+                  "  pm.collectionVariables.set('customerToken', data.token);",
                   "}"
                 ]
               }
@@ -117,32 +112,136 @@
           "request": {
             "method": "POST",
             "header": [
+              { "key": "Content-Type", "value": "application/json" },
               { "key": "Authorization", "value": "Bearer {{customerToken}}" }
             ],
             "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "files",
-                  "type": "file",
-                  "src": "{{sampleFilePath}}"
-                },
-                {
-                  "key": "fileOptions",
-                  "type": "text",
-                  "value": "[{\"paperSize\":\"A4\",\"colorMode\":\"bw\",\"pageRange\":\"all\",\"customRange\":\"\",\"duplex\":\"one\",\"copies\":1}]"
-                }
-              ]
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"replace-with-otp-code\"\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/api/v1/jobs/create-with-files",
+              "raw": "{{baseUrl}}/api/v1/auth/whatsapp-login",
               "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "jobs", "create-with-files"]
+              "path": ["api", "v1", "auth", "whatsapp-login"]
             }
           }
         },
         {
-          "name": "POST /api/v1/jobs/create (legacy JSON)",
+          "name": "Mobile Sync — Generate OTP",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/mobile-sync",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "mobile-sync"]
+            }
+          }
+        },
+        {
+          "name": "Mobile Sync — Poll Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/mobile-sync/status?syncId=replace-with-syncId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "mobile-sync", "status"],
+              "query": [{ "key": "syncId", "value": "replace-with-syncId" }]
+            }
+          }
+        },
+        {
+          "name": "Open App (deep link redirect)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/open-app?syncId=replace-with-syncId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "open-app"],
+              "query": [{ "key": "syncId", "value": "replace-with-syncId" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/session",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "session"]
+            }
+          }
+        },
+        {
+          "name": "Onboarding Completed",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/onboarding/completed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "onboarding", "completed"]
+            }
+          }
+        },
+        {
+          "name": "Onboarding Skipped",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metadata\": { \"reason\": \"testing\" }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/onboarding/skipped",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", "onboarding", "skipped"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Presign Uploads",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"files\": [\n    { \"name\": \"sample.pdf\", \"contentType\": \"application/pdf\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/presign-uploads",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "presign-uploads"]
+            }
+          }
+        },
+        {
+          "name": "Create with URLs",
           "event": [
             {
               "listen": "test",
@@ -165,17 +264,83 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"files\": [\n    {\n      \"name\": \"demo.pdf\",\n      \"pages\": 1,\n      \"url\": \"https://example.com/demo.pdf\",\n      \"options\": {\n        \"paperSize\": \"A4\",\n        \"colorMode\": \"bw\",\n        \"pageRange\": \"all\",\n        \"customRange\": \"\",\n        \"duplex\": \"one\",\n        \"copies\": 1\n      },\n      \"cost\": 2\n    }\n  ],\n  \"totalCost\": 2,\n  \"totalPages\": 1,\n  \"estimatedTime\": 1,\n  \"status\": \"processing\",\n  \"verificationCode\": \"1234\"\n}"
+              "raw": "{\n  \"files\": [\n    {\n      \"name\": \"sample.pdf\",\n      \"url\": \"https://example.com/sample.pdf\",\n      \"options\": {\n        \"paperSize\": \"A4\",\n        \"colorMode\": \"BW\",\n        \"orientation\": \"PORTRAIT\",\n        \"scaleMode\": \"FIT\",\n        \"pageRange\": \"ALL\",\n        \"customRange\": \"\",\n        \"duplex\": \"ONE\",\n        \"copies\": 1\n      }\n    }\n  ]\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/api/v1/jobs/create",
+              "raw": "{{baseUrl}}/api/v1/jobs/create-with-urls",
               "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "jobs", "create"]
+              "path": ["api", "v1", "jobs", "create-with-urls"]
             }
           }
         },
         {
-          "name": "GET /api/v1/jobs/all (admin)",
+          "name": "Get Web Draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.id) {",
+                  "  pm.collectionVariables.set('jobId', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/web-draft",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "web-draft"]
+            }
+          }
+        },
+        {
+          "name": "Add Files to Web Draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"files\": [\n    {\n      \"name\": \"another.pdf\",\n      \"url\": \"https://example.com/another.pdf\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/web-draft/add-files",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "web-draft", "add-files"]
+            }
+          }
+        },
+        {
+          "name": "Add Files from URLs to Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"files\": [\n    {\n      \"name\": \"extra.pdf\",\n      \"url\": \"https://example.com/extra.pdf\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/{{jobId}}/add-files-from-urls",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "{{jobId}}", "add-files-from-urls"]
+            }
+          }
+        },
+        {
+          "name": "Get All Jobs (admin)",
           "request": {
             "method": "GET",
             "header": [
@@ -189,7 +354,26 @@
           }
         },
         {
-          "name": "GET /api/v1/jobs/user-jobs (customer)",
+          "name": "Update Job Status (admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"COMPLETED\",\n  \"userId\": \"replace-with-user-id\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/update-status/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "update-status", "{{jobId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get User Jobs",
           "event": [
             {
               "listen": "test",
@@ -217,7 +401,71 @@
           }
         },
         {
-          "name": "GET /api/v1/jobs/:verificationCode",
+          "name": "Resync WhatsApp",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/resync-whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "resync-whatsapp"]
+            }
+          }
+        },
+        {
+          "name": "Review Job (public by ID)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/review/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "review", "{{jobId}}"]
+            }
+          }
+        },
+        {
+          "name": "Confirm Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"files\": [\n    {\n      \"id\": \"replace-with-file-id\",\n      \"options\": {\n        \"paperSize\": \"A4\",\n        \"colorMode\": \"BW\",\n        \"orientation\": \"PORTRAIT\",\n        \"scaleMode\": \"FIT\",\n        \"pageRange\": \"ALL\",\n        \"customRange\": \"\",\n        \"duplex\": \"ONE\",\n        \"copies\": 1\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/review/{{jobId}}/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "review", "{{jobId}}", "confirm"]
+            }
+          }
+        },
+        {
+          "name": "Submit WhatsApp Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jobId\": \"{{jobId}}\",\n  \"files\": [\n    {\n      \"id\": \"replace-with-file-id\",\n      \"options\": {\n        \"paperSize\": \"A4\",\n        \"colorMode\": \"BW\",\n        \"orientation\": \"PORTRAIT\",\n        \"scaleMode\": \"FIT\",\n        \"pageRange\": \"ALL\",\n        \"customRange\": \"\",\n        \"duplex\": \"ONE\",\n        \"copies\": 1\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/submit-whatsapp-job",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "submit-whatsapp-job"]
+            }
+          }
+        },
+        {
+          "name": "Get Job by Verification Code",
           "request": {
             "method": "GET",
             "header": [
@@ -231,26 +479,7 @@
           }
         },
         {
-          "name": "PUT /api/v1/jobs/update-status/:id (admin)",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"status\": \"completed\",\n  \"userId\": \"replace-with-user-id\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/jobs/update-status/{{jobId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "jobs", "update-status", "{{jobId}}"]
-            }
-          }
-        },
-        {
-          "name": "DELETE /api/v1/jobs/delete/:id",
+          "name": "Delete Job",
           "request": {
             "method": "DELETE",
             "header": [
@@ -262,23 +491,37 @@
               "path": ["api", "v1", "jobs", "delete", "{{jobId}}"]
             }
           }
+        },
+        {
+          "name": "Resubmit Job",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/jobs/resubmit/{{jobId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "jobs", "resubmit", "{{jobId}}"]
+            }
+          }
         }
       ]
     },
     {
-      "name": "Files (Declared Routes)",
+      "name": "Files",
       "item": [
         {
-          "name": "POST /api/v1/files/:jobId",
+          "name": "Add File to Job",
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"demo.pdf\",\n  \"pages\": 1,\n  \"url\": \"https://example.com/demo.pdf\",\n  \"options\": {\n    \"paperSize\": \"A4\",\n    \"colorMode\": \"bw\",\n    \"pageRange\": \"all\",\n    \"customRange\": \"\",\n    \"duplex\": \"one\",\n    \"copies\": 1\n  },\n  \"cost\": 2\n}"
+              "raw": "{\n  \"name\": \"demo.pdf\",\n  \"pages\": 1,\n  \"url\": \"https://example.com/demo.pdf\",\n  \"option\": {\n    \"paperSize\": \"A4\",\n    \"colorMode\": \"BW\",\n    \"orientation\": \"PORTRAIT\",\n    \"scaleMode\": \"FIT\",\n    \"pageRange\": \"ALL\",\n    \"customRange\": \"\",\n    \"duplex\": \"ONE\",\n    \"copies\": 1\n  }\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/files/{{jobId}}",
@@ -288,16 +531,16 @@
           }
         },
         {
-          "name": "PUT /api/v1/files/printOptions/:fileId",
+          "name": "Update Print Options",
           "request": {
             "method": "PUT",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"paperSize\": \"A4\",\n  \"colorMode\": \"color\",\n  \"pageRange\": \"custom\",\n  \"customRange\": \"1-2\",\n  \"duplex\": \"both\",\n  \"copies\": 2\n}"
+              "raw": "{\n  \"paperSize\": \"A4\",\n  \"colorMode\": \"COLOR\",\n  \"orientation\": \"PORTRAIT\",\n  \"scaleMode\": \"FIT\",\n  \"pageRange\": \"ALL\",\n  \"customRange\": \"\",\n  \"duplex\": \"ONE\",\n  \"copies\": 2\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/files/printOptions/{{fileId}}",
@@ -307,11 +550,11 @@
           }
         },
         {
-          "name": "DELETE /api/v1/files",
+          "name": "Delete File",
           "request": {
             "method": "DELETE",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
@@ -331,7 +574,7 @@
       "name": "Analysis",
       "item": [
         {
-          "name": "GET /api/v1/analysis/summary (overall, admin)",
+          "name": "Summary (overall)",
           "request": {
             "method": "GET",
             "header": [
@@ -342,33 +585,10 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "analysis", "summary"]
             }
-          },
-          "response": [
-            {
-              "name": "Example Response",
-              "originalRequest": {
-                "method": "GET",
-                "header": [
-                  { "key": "Authorization", "value": "Bearer {{adminToken}}" }
-                ],
-                "url": {
-                  "raw": "{{baseUrl}}/api/v1/analysis/summary",
-                  "host": ["{{baseUrl}}"],
-                  "path": ["api", "v1", "analysis", "summary"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
-              "body": "{\n  \"date\": null,\n  \"isOverall\": true,\n  \"totalJobs\": 100,\n  \"statusCounts\": {\n    \"PENDING\": 10,\n    \"COMPLETED\": 80,\n    \"FAILED\": 10\n  },\n  \"pagesPrintedByDay\": [\n    { \"date\": \"2026-04-06\", \"pages\": 120 }\n  ],\n  \"totalCompletedCost\": 1234.56,\n  \"pending\": {\n    \"count\": 10,\n    \"jobs\": []\n  },\n  \"completed\": {\n    \"count\": 80,\n    \"jobs\": []\n  }\n}"
-            }
-          ]
+          }
         },
         {
-          "name": "GET /api/v1/analysis/summary?date={{analysisDate}} (admin)",
+          "name": "Summary (by date)",
           "request": {
             "method": "GET",
             "header": [
@@ -383,7 +603,7 @@
           }
         },
         {
-          "name": "GET /api/v1/analysis/users (overall, admin)",
+          "name": "Users (overall)",
           "request": {
             "method": "GET",
             "header": [
@@ -397,7 +617,7 @@
           }
         },
         {
-          "name": "GET /api/v1/analysis/users?date={{analysisDate}} (admin)",
+          "name": "Users (by date)",
           "request": {
             "method": "GET",
             "header": [
@@ -408,6 +628,79 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "analysis", "users"],
               "query": [{ "key": "date", "value": "{{analysisDate}}" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Maintenance",
+      "item": [
+        {
+          "name": "Cleanup Old PrintJobs (24h+)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/maintenance/cleanup-old-printjobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "maintenance", "cleanup-old-printjobs"]
+            }
+          }
+        },
+        {
+          "name": "Cleanup Stale Drafts (24h+)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/maintenance/cleanup-stale-drafts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "maintenance", "cleanup-stale-drafts"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "WhatsApp Verify (GET)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=YOUR_VERIFY_TOKEN&hub.challenge=test123",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "webhooks", "whatsapp"],
+              "query": [
+                { "key": "hub.mode", "value": "subscribe" },
+                { "key": "hub.verify_token", "value": "YOUR_VERIFY_TOKEN" },
+                { "key": "hub.challenge", "value": "test123" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "WhatsApp Webhook (POST)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": []\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/webhooks/whatsapp",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "webhooks", "whatsapp"]
             }
           }
         }

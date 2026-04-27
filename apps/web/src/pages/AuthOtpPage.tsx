@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import axios from "axios";
 import { loginWithWhatsappOtp } from "../api/api";
 import { useNotifications } from "../components/NotificationCenter";
 
@@ -17,6 +18,11 @@ export default function AuthOtpPage() {
     return params.get("code")?.trim() ?? "";
   }, [location.search]);
 
+  const source = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get("source")?.trim() ?? "";
+  }, [location.search]);
+
   useEffect(() => {
     if (!code) {
       setStatus("error");
@@ -32,18 +38,28 @@ export default function AuthOtpPage() {
         setMessage("Synced! Redirecting you now...");
         notify("WhatsApp synced successfully.", { variant: "success" });
         setTimeout(() => {
-          window.location.href = "https://wa.me/918369757906?text=hi";
+          if (source === "web") {
+            navigate("/");
+          } else {
+            window.location.href = "https://wa.me/918369757906?text=hi";
+          }
         }, 1000);
       })
       .catch((err) => {
         setStatus("error");
-        setMessage(
-          err instanceof Error
-            ? err.message
-            : "Failed to sync WhatsApp. Please try again.",
-        );
+        // Extract the actual server error message from Axios 400/500 responses
+        let errorMsg = "Failed to sync WhatsApp. Please try again.";
+        if (axios.isAxiosError(err)) {
+          const serverError = err.response?.data?.error;
+          if (typeof serverError === "string" && serverError.trim()) {
+            errorMsg = serverError;
+          }
+        } else if (err instanceof Error) {
+          errorMsg = err.message;
+        }
+        setMessage(errorMsg);
       });
-  }, [code, navigate, notify]);
+  }, [code, source, navigate, notify]);
 
   return (
     <div className="app-shell">
@@ -56,7 +72,7 @@ export default function AuthOtpPage() {
                 ? "Verifying your link"
                 : status === "success"
                   ? "All set"
-                  : "Link expired"}
+                  : "Something went wrong"}
             </p>
           </div>
 
@@ -66,13 +82,24 @@ export default function AuthOtpPage() {
             )}
             <p className="upload-title">{message}</p>
             {status === "error" && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => navigate("/")}
-              >
-                Back to Home
-              </button>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginTop: "12px" }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => navigate("/")}
+                >
+                  Back to Home
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    window.location.href = "https://wa.me/918369757906?text=sync";
+                  }}
+                >
+                  Try Again on WhatsApp
+                </button>
+              </div>
             )}
           </div>
         </section>

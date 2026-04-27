@@ -287,6 +287,53 @@ body {
   gap: 10px;
 }
 
+.btn-sync-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #25d366;
+  background: color-mix(in srgb, #25d366 10%, var(--panel));
+  color: #25d366;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-sync-nav:hover {
+  background: color-mix(in srgb, #25d366 20%, var(--panel));
+  border-color: #1eba57;
+  transform: translateY(-1px);
+}
+
+[data-theme="dark"] .btn-sync-nav {
+  border-color: #25d366;
+  color: #25d366;
+}
+
+.sync-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sync-steps li {
+  padding-left: 4px;
+}
+
+.sync-steps li::marker {
+  color: var(--brand);
+  font-weight: 700;
+}
+
 .hero-panel,
 .jobs-panel {
   border: 1px solid var(--border);
@@ -2329,6 +2376,7 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
+  justify-content: flex-end;
 }
 
 .modal-actions .btn {

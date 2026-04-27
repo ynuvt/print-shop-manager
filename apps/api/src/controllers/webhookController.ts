@@ -10,6 +10,7 @@ import {
   sendWhatsAppStickerFromFile,
   sendWhatsAppTextMessage,
   sendWhatsAppButtonMessage,
+  sendWhatsAppCtaUrlMessage,
   sendWhatsAppPdfDocument,
 } from "../modules/whatsappServices.js";
 import { getPdfPageCountFromBuffer } from "../utils/pdfPageCount.js";
@@ -22,6 +23,11 @@ import { convertToPdfFromBuffer } from "../utils/convertToPdf.js";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import socket from "../config/socket.js";
+import {
+  trackMessageReceived,
+  trackFileProcessingStarted,
+  isFileStillProcessing,
+} from "../utils/waTrackingCache.js";
 
 const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL ?? "").replace(
   /\/$/,
@@ -68,18 +74,44 @@ async function getUnifiedDraftWhere(phoneNumber: string) {
   };
 }
 
-async function generateWhatsAppSyncLink(phoneNumber: string): Promise<string | null> {
+async function generateWhatsAppSyncLink(
+  phoneNumber: string,
+): Promise<string | null> {
   if (!FRONTEND_BASE_URL) {
     return null;
   }
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  const expiresAt = new Date(Date.now() + 2 * 60_000);
-  await prisma.whatsAppLoginOtp.deleteMany({ where: { phoneNumber } });
-  await prisma.whatsAppLoginOtp.create({
-    data: { code, phoneNumber, expiresAt },
-  });
-  return `${FRONTEND_BASE_URL}/auth/otp?code=${code}`;
+
+  // Sync links stay active for 30 days — they only expire when the user
+  // actually clicks and completes the sync. This avoids regenerating codes
+  // on every message from an unsynced user.
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60_000);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    try {
+      await prisma.whatsAppLoginOtp.create({
+        data: { code, phoneNumber, expiresAt },
+      });
+      const link = `${FRONTEND_BASE_URL}/auth/otp?code=${code}`;
+      // Cache the link so subsequent messages don't hit the DB
+      syncLinkCache.set(phoneNumber, link);
+      return link;
+    } catch (err) {
+      const prismaCode = (err as { code?: string } | null)?.code;
+      if (prismaCode === "P2002" && attempt < 2) {
+        continue;
+      }
+      console.error("Failed to create WhatsApp sync OTP:", err);
+      return null;
+    }
+  }
+
+  return null;
 }
+
+// In-memory cache for sync links — avoids hitting DB on every message
+// from an unsynced user. Cleared when the user syncs.
+const syncLinkCache = new Map<string, string>();
 
 async function getOrCreateWhatsAppSyncLink(
   phoneNumber: string,
@@ -87,254 +119,130 @@ async function getOrCreateWhatsAppSyncLink(
   if (!FRONTEND_BASE_URL) {
     return null;
   }
-  const active = await prisma.whatsAppLoginOtp.findFirst({
-    where: {
-      phoneNumber,
-      usedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { code: true },
-  });
-  if (active?.code) {
-    return `${FRONTEND_BASE_URL}/auth/otp?code=${active.code}`;
+
+  // 1) Check in-memory cache first (instant, zero DB cost)
+  const cached = syncLinkCache.get(phoneNumber);
+  if (cached) {
+    return cached;
   }
-  return generateWhatsAppSyncLink(phoneNumber);
+
+  try {
+    // 2) Check DB for an existing active (unused, not expired) OTP
+    const active = await prisma.whatsAppLoginOtp.findFirst({
+      where: {
+        phoneNumber,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { code: true },
+    });
+    if (active?.code) {
+      const link = `${FRONTEND_BASE_URL}/auth/otp?code=${active.code}`;
+      syncLinkCache.set(phoneNumber, link);
+      return link;
+    }
+    // 3) No active OTP — create a new one
+    return generateWhatsAppSyncLink(phoneNumber);
+  } catch (err) {
+    console.error("Failed to get/create WhatsApp sync link:", err);
+    return null;
+  }
 }
 
 const STICKER_FILE_PATH = fileURLToPath(
   new URL("../resource/stickerzopy.webp", import.meta.url),
 );
+// ── Batched file-received confirmations ──────────────────────────────────────
+// Collects files received within a 3-second window per phone number,
+// then sends ONE consolidated WhatsApp message listing all of them.
 
-// ─── WhatsApp Message Rate Limiter & File Confirmation Batcher ──────────────
-// Prevents hitting WhatsApp API rate limits when users send many files at once.
-
-interface PendingFileConfirmation {
-  fileName: string;
+interface QueuedFile {
+  displayName: string;
   pages: number;
 }
 
-interface PendingFileBatch {
-  files: PendingFileConfirmation[];
-  timer: ReturnType<typeof setTimeout>;
+interface PendingBatch {
+  to: string;
   phoneNumberId: string;
-  isStale: boolean;
-  jobId: string | null;
-  userId: string | null;
+  files: QueuedFile[];
+  timer: ReturnType<typeof setTimeout>;
 }
 
-const FILE_BATCH_DELAY_MS = 10_000; // Wait 10s for more files before sending
-const LIMIT_REACHED_MAX = 2; // Max 2 "limit reached" messages per draft per window
-const LIMIT_REACHED_WINDOW_MS = 60_000; // 1-minute window for limit-reached reset
-const COMMAND_WINDOW_MS = 60_000; // 60-second sliding window for command tracking
-const COMMAND_SPAM_THRESHOLD = 15; // Send spam warning at this count
+const fileBatchQueue = new Map<string, PendingBatch>();
 
-// Per-phone pending file batches
-const pendingFileBatches = new Map<string, PendingFileBatch>();
+const BATCH_WINDOW_MS = 3000;
 
-// Per-DRAFT-JOB "limit reached" tracking (time-bound)
-const limitReachedPerDraft = new Map<string, { count: number; windowStart: number }>();
-
-// Per-phone command frequency tracking within a sliding window
-// Tracks how many times EACH command appeared in the current window
-interface CommandWindowEntry {
-  counts: Map<string, number>; // command → count in this window
-  windowStart: number;
-  warningSent: boolean; // only send 1 spam warning per window total
-}
-const commandFrequencyTracker = new Map<string, CommandWindowEntry>();
-
-// Per-phone fallback/welcome message rate limiter
-// Tracks how many times we sent the "Welcome to Zopy" / unrecognized-text reply
-const FALLBACK_MAX_PER_WINDOW = 2; // Reply to first 2 random texts, then ignore
-const fallbackReplyTracker = new Map<string, { count: number; windowStart: number }>();
-
-/** Returns true if we should send the fallback/welcome message (max 2 per 60s window). */
-function shouldSendFallbackReply(phone: string): boolean {
-  const now = Date.now();
-  const entry = fallbackReplyTracker.get(phone);
-
-  if (!entry || now - entry.windowStart > COMMAND_WINDOW_MS) {
-    fallbackReplyTracker.set(phone, { count: 1, windowStart: now });
-    return true;
+function friendlyFileName(rawName: string): string {
+  // Image-converted files: show "Photo" instead of "whatsapp-image-173849384.pdf"
+  if (/^whatsapp-image-\d+/i.test(rawName)) {
+    return "Photo";
   }
-
-  if (entry.count < FALLBACK_MAX_PER_WINDOW) {
-    entry.count++;
-    return true;
-  }
-
-  return false; // Already sent 2 in this window — ignore the rest
+  // Strip long extensions for display, keep it readable
+  return rawName.replace(/\.pdf$/i, "");
 }
 
-/** Queue a file confirmation. After FILE_BATCH_DELAY_MS of inactivity, flush the batch. */
-function queueFileConfirmation(
-  phone: string,
-  phoneNumberId: string,
-  file: PendingFileConfirmation,
-  isStale: boolean,
-  jobId: string | null,
-  userId: string | null,
-) {
-  const existing = pendingFileBatches.get(phone);
-
-  if (existing) {
-    existing.files.push(file);
-    existing.isStale = existing.isStale || isStale;
-    existing.jobId = jobId ?? existing.jobId;
-    existing.userId = userId ?? existing.userId;
-    clearTimeout(existing.timer);
-    existing.timer = setTimeout(() => flushFileConfirmation(phone), FILE_BATCH_DELAY_MS);
-  } else {
-    const timer = setTimeout(() => flushFileConfirmation(phone), FILE_BATCH_DELAY_MS);
-    pendingFileBatches.set(phone, {
-      files: [file],
-      timer,
-      phoneNumberId,
-      isStale,
-      jobId,
-      userId,
-    });
-  }
-}
-
-/** Send the batched file confirmation message. */
-async function flushFileConfirmation(phone: string) {
-  const batch = pendingFileBatches.get(phone);
+function flushFileBatch(phoneNumber: string): void {
+  const batch = fileBatchQueue.get(phoneNumber);
   if (!batch || batch.files.length === 0) {
-    pendingFileBatches.delete(phone);
+    fileBatchQueue.delete(phoneNumber);
     return;
   }
-  pendingFileBatches.delete(phone);
 
-  try {
-    let bodyText: string;
-    if (batch.files.length === 1) {
-      const f = batch.files[0]!;
-      bodyText = [
-        `${waBold("File received!")}`,
-        `${f.fileName} \u2022 ${f.pages} page(s)`,
-        "What would you like to do next?",
-      ].join("\n");
-    } else {
-      const fileList = batch.files
-        .map((f, i) => `${i + 1}. ${f.fileName} (${f.pages}p)`)
-        .join("\n");
-      bodyText = [
-        `${waBold(`${batch.files.length} files received!`)}`,
-        fileList,
-        "",
-        "What would you like to do next?",
-      ].join("\n");
-    }
+  const fileLines = batch.files.map((f, i) => {
+    return `${i + 1}. ${f.displayName} \u2022 ${f.pages} pg`;
+  });
 
-    await sendWhatsAppButtonMessage({
-      to: phone,
-      phoneNumberId: batch.phoneNumberId,
-      body: bodyText,
-      buttons: [
-        { type: "reply", reply: { id: "edit", title: "EDIT" } },
-        { type: "reply", reply: { id: "current", title: "STATUS" } },
-      ],
+  const totalFiles = batch.files.length;
+
+  const body = [
+    waBold(`${totalFiles} file${totalFiles > 1 ? "s" : ""} received`),
+    fileLines.join("\n"),
+    "",
+    `_Send more files or tap Edit to set print options._`,
+  ].join("\n");
+
+  sendWhatsAppButtonMessage({
+    to: batch.to,
+    phoneNumberId: batch.phoneNumberId,
+    body,
+    buttons: [
+      {
+        type: "reply",
+        reply: { id: "edit", title: "Edit" },
+      },
+    ],
+  }).catch((err) => console.error("[file-batch] send error:", err));
+
+  fileBatchQueue.delete(phoneNumber);
+}
+
+function queueFileConfirmation(args: {
+  phoneNumber: string;
+  to: string;
+  phoneNumberId: string;
+  fileName: string;
+  pages: number;
+}): void {
+  const existing = fileBatchQueue.get(args.phoneNumber);
+
+  const displayName = friendlyFileName(args.fileName);
+
+  if (existing) {
+    // Add to the existing batch and reset the timer
+    existing.files.push({ displayName, pages: args.pages });
+    clearTimeout(existing.timer);
+    existing.timer = setTimeout(() => flushFileBatch(args.phoneNumber), BATCH_WINDOW_MS);
+  } else {
+    // Start a new batch
+    const timer = setTimeout(() => flushFileBatch(args.phoneNumber), BATCH_WINDOW_MS);
+    fileBatchQueue.set(args.phoneNumber, {
+      to: args.to,
+      phoneNumberId: args.phoneNumberId,
+      files: [{ displayName, pages: args.pages }],
+      timer,
     });
-
-    // Send stale warning once (not per file)
-    if (batch.isStale && batch.jobId) {
-      const oldFiles = await prisma.file.findMany({
-        where: {
-          printJobId: batch.jobId,
-          createdAt: { lt: new Date(Date.now() - 30 * 60 * 1000) },
-        },
-        select: { name: true },
-        orderBy: { createdAt: "asc" },
-      });
-      if (oldFiles.length > 0) {
-        const oldFileList = oldFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
-        await sendWhatsAppButtonMessage({
-          to: phone,
-          phoneNumberId: batch.phoneNumberId,
-          body: [
-            `${waBold("Existing Files Found")} \u26a0\ufe0f`,
-            `_Your draft contains old files (30+ min ago):_`,
-            oldFileList,
-            `_Type ${waBold('"EDIT"')} to remove unwanted files._`,
-          ].join("\n"),
-          buttons: [
-            { type: "reply", reply: { id: "edit", title: "EDIT" } },
-          ],
-        });
-      }
-    }
-  } catch (err) {
-    console.error("Failed to send batched file confirmation:", err);
   }
-}
-
-/**
- * Returns true if a "limit reached" message should be sent for this draft.
- * Time-bound: resets after 1 minute, max 2 per window.
- */
-function shouldSendLimitReached(draftJobId: string): boolean {
-  const now = Date.now();
-  const entry = limitReachedPerDraft.get(draftJobId);
-
-  if (!entry || now - entry.windowStart > LIMIT_REACHED_WINDOW_MS) {
-    // New or expired window
-    limitReachedPerDraft.set(draftJobId, { count: 1, windowStart: now });
-    return true;
-  }
-
-  if (entry.count < LIMIT_REACHED_MAX) {
-    entry.count++;
-    return true;
-  }
-
-  return false; // Already told them twice in this minute
-}
-
-/**
- * Per-command frequency-aware rate limiter for text/interactive replies.
- *
- * Tracks how many times EACH command appeared in a 60-second window:
- *   - 1st occurrence of any command → "reply" (normal)
- *   - 2nd–14th of the SAME command → "skip" (silent, no message sent)
- *   - 15th of ANY command → "warn" (spam warning, only once per window)
- *   - 16th+ → "skip"
- *
- * Example with user spamming "hi" + "help" + "steps" simultaneously:
- *   hi(1st)→reply, help(1st)→reply, steps(1st)→reply,
- *   hi(2nd)→skip, help(2nd)→skip, hi(3rd)→skip, ...
- *   hi(15th)→warn, hi(16th)→skip, help(15th)→skip (warning already sent)
- */
-function checkTextRateLimit(
-  phone: string,
-  messageText: string,
-): "reply" | "warn" | "skip" {
-  const now = Date.now();
-  let entry = commandFrequencyTracker.get(phone);
-
-  // Reset window if expired
-  if (!entry || now - entry.windowStart > COMMAND_WINDOW_MS) {
-    entry = { counts: new Map(), windowStart: now, warningSent: false };
-    commandFrequencyTracker.set(phone, entry);
-  }
-
-  const currentCount = (entry.counts.get(messageText) ?? 0) + 1;
-  entry.counts.set(messageText, currentCount);
-
-  // 1st occurrence of this specific command → reply normally
-  if (currentCount === 1) {
-    return "reply";
-  }
-
-  // At spam threshold → send warning (only once per window across all commands)
-  if (currentCount >= COMMAND_SPAM_THRESHOLD && !entry.warningSent) {
-    entry.warningSent = true;
-    return "warn";
-  }
-
-  // 2nd to 14th, or 15th+ after warning already sent → skip silently
-  return "skip";
 }
 
 export const verifyWhatsAppWebhook = (req: Request, res: Response) => {
@@ -358,11 +266,23 @@ interface UserMetadata {
 }
 
 export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
-  console.log(JSON.stringify(req.body, null, 2));
+  // Logging full webhook payload is expensive and can delay replies.
+  // Keep it behind an explicit flag for production performance.
+  if (process.env.DEBUG_WHATSAPP_WEBHOOK === "true") {
+    console.log(JSON.stringify(req.body, null, 2));
+  }
   if (!req.body || !req.body.entry) {
     console.error("Invalid webhook payload");
     return res.sendStatus(400);
   }
+
+  // ⚡ Respond 200 IMMEDIATELY so WhatsApp doesn't retry.
+  // All processing happens asynchronously after this point.
+  res.sendStatus(200);
+
+  // Process the webhook payload in the background — errors are caught and logged.
+  (async () => {
+    try {
 
   if (req.body.object === "whatsapp_business_account") {
     for (const entry of req.body.entry) {
@@ -385,25 +305,39 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
             };
             const phoneNumberId = change.value.metadata?.phone_number_id;
 
+            // Cache minimal WA user data for this message to avoid redundant DB reads.
+            // NOTE: OTPs are still stored in DB (no in-memory OTP storage).
+            let waUserMeta: {
+              phoneNumber: string;
+              userId: string | null;
+            } | null = null;
+
             // Track the timestamp of every incoming message for 24h window checks.
-            // This lets us avoid sending costly outbound messages when the user
-            // hasn't messaged us within the last 20 hours.
+            // Write to file cache INSTANTLY (no DB round-trip), then fire-and-forget the DB update.
             if (userData.displayPhoneNumber) {
-              try {
-                await prisma.whatsAppUser.upsert({
-                  where: { phoneNumber: userData.displayPhoneNumber },
-                  create: {
-                    phoneNumber: userData.displayPhoneNumber,
-                    name: userData.displayName || null,
-                    lastMessageAt: new Date(),
-                  },
-                  update: {
-                    lastMessageAt: new Date(),
-                  },
-                });
-              } catch {
+              // 1) Instant: update the file-backed tracking cache
+              trackMessageReceived(userData.displayPhoneNumber);
+
+              // 2) Fire-and-forget: update the DB in the background (non-blocking).
+              //    We do NOT await this here — for document/image handlers the userId
+              //    is fetched separately. For text messages, we do a dedicated read below.
+              prisma.whatsAppUser.upsert({
+                where: { phoneNumber: userData.displayPhoneNumber },
+                create: {
+                  phoneNumber: userData.displayPhoneNumber,
+                  name: userData.displayName || null,
+                  lastMessageAt: new Date(),
+                },
+                update: {
+                  lastMessageAt: new Date(),
+                  ...(userData.displayName
+                    ? { name: userData.displayName }
+                    : {}),
+                },
+                select: { phoneNumber: true },
+              }).catch(() => {
                 // Non-critical — don't block message processing
-              }
+              });
             }
 
             // ─── DOCUMENT HANDLER ────────────────────────────────────────────
@@ -429,14 +363,47 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                 rawFileName.toLowerCase().endsWith(".docx") ||
                 rawFileName.toLowerCase().endsWith(".doc");
 
+              // ── Sync check FIRST: don't process files for unsynced users ──
+              try {
+                const syncCheckUser = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { userId: true },
+                });
+                if (!syncCheckUser || !syncCheckUser.userId) {
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    const syncLink = await getOrCreateWhatsAppSyncLink(
+                      userData.displayPhoneNumber,
+                    );
+                    sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      message: [
+                        `${waBold("Sync required!")} \ud83d\udd17`,
+                        `To print your files, connect your WhatsApp first:`,
+                        syncLink ?? "https://zopy.co.in",
+                        "",
+                        `_Once synced, just send your files here and edit print options on the website._`,
+                      ].join("\n"),
+                    }).catch((err) => console.error("[sync-prompt] send error:", err));
+                  }
+                  continue;
+                }
+              } catch {
+                // If the check fails, proceed — the later waUser lookup will handle it
+              }
+
               try {
                 if (userData.displayPhoneNumber) {
+                  // Instant: update file-backed tracking cache (no DB round-trip)
+                  trackFileProcessingStarted(userData.displayPhoneNumber);
+
+                  // Fire-and-forget: persist to DB in background
                   const timestampSeconds = Number(incomingMessage.timestamp);
                   const startedProcessingAt = Number.isFinite(timestampSeconds)
                     ? new Date(timestampSeconds * 1000)
                     : new Date();
 
-                  await prisma.whatsAppUser.upsert({
+                  prisma.whatsAppUser.upsert({
                     where: {
                       phoneNumber: userData.displayPhoneNumber,
                     },
@@ -454,7 +421,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     select: {
                       phoneNumber: true,
                     },
-                  });
+                  }).catch(() => { /* non-critical */ });
                 }
 
                 const response = await fetch(incomingMessage.document.url, {
@@ -609,7 +576,9 @@ Please try again or send a different file.`,
                 if (!existingJob) {
                   existingJob = await prisma.printJob.findFirst({
                     where: {
-                      userMetadata: { phoneNumber: userData.displayPhoneNumber },
+                      userMetadata: {
+                        phoneNumber: userData.displayPhoneNumber,
+                      },
                       status: PrintJobStatus.DRAFT,
                     },
                     select: {
@@ -627,30 +596,35 @@ Please try again or send a different file.`,
                   });
                 }
 
-                if (existingJob && existingJob._count && existingJob._count.files >= 30) {
-                  // Rate-limit "limit reached" per draft (max 2 per 1-min window)
-                  if (phoneNumberId && userData.displayPhoneNumber && shouldSendLimitReached(existingJob.id)) {
-                    // List all files already in the draft
-                    const jobFiles = await prisma.file.findMany({
-                      where: { printJobId: existingJob.id },
-                      select: { name: true },
-                      orderBy: { createdAt: "asc" },
-                    });
-                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+                if (
+                  existingJob &&
+                  existingJob._count &&
+                  existingJob._count.files >= 30
+                ) {
+                  if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Limit reached")}\nYou already have ${jobFiles.length} files in your draft (max 30).\n\n${waBold("Your files:")}\n${fileListStr}\n\nType ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start a new one.`,
                       phoneNumberId,
+                      message: [
+                        `${waBold("Limit reached")}`,
+                        `You already have ${existingJob._count.files} files in your draft (max 30).`,
+                        "",
+                        `Type ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start a new one.`,
+                      ].join("\n"),
                     });
                   }
                   if (waUser.userId) {
-                    socket.emit("job-status-updated", waUser.userId, existingJob.id, "Limit reached: Maximum 30 files allowed per job.");
+                    socket.emit(
+                      "job-status-updated",
+                      waUser.userId,
+                      existingJob.id,
+                      "Limit reached: Maximum 30 files allowed per job.",
+                    );
                   }
                   continue;
                 }
 
                 let printJobId: string;
-                let isStale = false;
 
                 if (!existingJob) {
                   // Create a new unified draft
@@ -668,7 +642,9 @@ Please try again or send a different file.`,
                     createData.user = { connect: { id: waUser.userId } };
                   }
 
-                  const newJob = await prisma.printJob.create({ data: createData });
+                  const newJob = await prisma.printJob.create({
+                    data: createData,
+                  });
                   printJobId = newJob.id;
                 } else {
                   printJobId = existingJob.id;
@@ -681,16 +657,6 @@ Please try again or send a different file.`,
                     });
                   }
 
-                  if (existingJob.files.length > 0) {
-                    const latestFile = existingJob.files[0];
-                    if (latestFile) {
-                      const ageMs = Date.now() - latestFile.createdAt.getTime();
-                      if (ageMs > 30 * 60 * 1000) { // 30 minutes
-                        isStale = true;
-                      }
-                    }
-                  }
-                  
                   const nextTotalPages = (existingJob.totalPages ?? 0) + pages;
                   const nextTotalCost = (existingJob.totalCost ?? 0) + cost;
                   await prisma.printJob.update({
@@ -714,7 +680,10 @@ Please try again or send a different file.`,
                     url: uploaded.url,
                     printJobId: printJobId,
                     uploadedByPhoneNumber: userData.displayPhoneNumber || null,
-                    uploadedByDisplayName: userData.displayName || userData.displayPhoneNumber || null,
+                    uploadedByDisplayName:
+                      userData.displayName ||
+                      userData.displayPhoneNumber ||
+                      null,
                     uploadedByUserId: waUser.userId ?? null,
                     uploadedByRole: "OWNER",
                     option: {
@@ -731,15 +700,13 @@ Please try again or send a different file.`,
                     socket.emit("job-file-added", waUser.userId);
                   }
 
-                  // Queue confirmation — will be batched with other files arriving within 3s
-                  queueFileConfirmation(
-                    userData.displayPhoneNumber,
+                  queueFileConfirmation({
+                    phoneNumber: userData.displayPhoneNumber,
+                    to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    { fileName: pdfFileName, pages },
-                    isStale,
-                    printJobId,
-                    waUser.userId ?? null,
-                  );
+                    fileName: pdfFileName,
+                    pages,
+                  });
                 }
               } catch (error) {
                 console.log("Failed to process document:", error);
@@ -774,6 +741,35 @@ Please try again.`,
 
               console.log("Received image:", imageData);
 
+              // ── Sync check FIRST: don't process images for unsynced users ──
+              try {
+                const syncCheckUser = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { userId: true },
+                });
+                if (!syncCheckUser || !syncCheckUser.userId) {
+                  if (phoneNumberId && userData.displayPhoneNumber) {
+                    const syncLink = await getOrCreateWhatsAppSyncLink(
+                      userData.displayPhoneNumber,
+                    );
+                    sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      message: [
+                        `${waBold("Sync required!")} \ud83d\udd17`,
+                        `To print your files, connect your WhatsApp first:`,
+                        syncLink ?? "https://zopy.co.in",
+                        "",
+                        `_Once synced, just send your files here and edit print options on the website._`,
+                      ].join("\n"),
+                    }).catch((err) => console.error("[sync-prompt] send error:", err));
+                  }
+                  continue;
+                }
+              } catch {
+                // If the check fails, proceed — the later waUser lookup will handle it
+              }
+
               try {
                 // Step 1: Get the media URL from the image ID
                 const mediaUrlRes = await fetch(
@@ -781,10 +777,15 @@ Please try again.`,
                   { headers: { Authorization: `Bearer ${accessToken}` } },
                 );
                 if (!mediaUrlRes.ok) {
-                  console.log("Failed to get media URL for image:", mediaUrlRes.status);
+                  console.log(
+                    "Failed to get media URL for image:",
+                    mediaUrlRes.status,
+                  );
                   continue;
                 }
-                const mediaUrlData = await mediaUrlRes.json() as { url?: string };
+                const mediaUrlData = (await mediaUrlRes.json()) as {
+                  url?: string;
+                };
                 const imageUrl = mediaUrlData.url;
                 if (!imageUrl) {
                   console.log("No URL in media response for image.");
@@ -796,7 +797,10 @@ Please try again.`,
                   headers: { Authorization: `Bearer ${accessToken}` },
                 });
                 if (!imageResponse.ok) {
-                  console.log("Failed to download WhatsApp image:", imageResponse.status);
+                  console.log(
+                    "Failed to download WhatsApp image:",
+                    imageResponse.status,
+                  );
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
@@ -824,18 +828,27 @@ Please try again.`,
                 const rawFileName = `whatsapp-image-${Date.now()}${ext}`;
 
                 // Step 4: Convert image to PDF
-                const converted = await convertToPdfFromBuffer(imageBuffer, rawFileName);
+                const converted = await convertToPdfFromBuffer(
+                  imageBuffer,
+                  rawFileName,
+                );
                 const pdfBuffer = converted.pdfBuffer;
                 const pdfFileName = converted.pdfFileName;
 
-                console.log(`Image converted to PDF: ${rawFileName} → ${pdfFileName}`);
+                console.log(
+                  `Image converted to PDF: ${rawFileName} → ${pdfFileName}`,
+                );
 
                 // Images always produce exactly 1 page; skip pdf-parse
                 const pages = 1;
 
                 const startedProcessingAt = new Date();
                 if (userData.displayPhoneNumber) {
-                  await prisma.whatsAppUser.upsert({
+                  // Instant: update file-backed tracking cache (no DB round-trip)
+                  trackFileProcessingStarted(userData.displayPhoneNumber);
+
+                  // Fire-and-forget: persist to DB in background
+                  prisma.whatsAppUser.upsert({
                     where: { phoneNumber: userData.displayPhoneNumber },
                     create: {
                       phoneNumber: userData.displayPhoneNumber,
@@ -847,7 +860,7 @@ Please try again.`,
                       lastFileStartedProcessingAt: startedProcessingAt,
                     },
                     select: { phoneNumber: true },
-                  });
+                  }).catch(() => { /* non-critical */ });
                 }
 
                 const key = buildR2ObjectKey(
@@ -911,19 +924,21 @@ Please try again.`,
                   });
                 }
 
-                if (existingJob && existingJob._count && existingJob._count.files >= 30) {
-                  // Rate-limit "limit reached" per draft (max 2 per 1-min window)
-                  if (phoneNumberId && userData.displayPhoneNumber && shouldSendLimitReached(existingJob.id)) {
-                    const jobFiles = await prisma.file.findMany({
-                      where: { printJobId: existingJob.id },
-                      select: { name: true },
-                      orderBy: { createdAt: "asc" },
-                    });
-                    const fileListStr = jobFiles.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+                if (
+                  existingJob &&
+                  existingJob._count &&
+                  existingJob._count.files >= 30
+                ) {
+                  if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
-                      message: `${waBold("Limit reached")}\nYou already have ${jobFiles.length} files in your draft (max 30).\n\n${waBold("Your files:")}\n${fileListStr}\n\nType ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start fresh.`,
                       phoneNumberId,
+                      message: [
+                        `${waBold("Limit reached")}`,
+                        `You already have ${existingJob._count.files} files in your draft (max 30).`,
+                        "",
+                        `Type ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start fresh.`,
+                      ].join("\n"),
                     });
                   }
                   continue;
@@ -947,8 +962,12 @@ Please try again.`,
                       pages,
                       fileCost: cost,
                       printJobId: existingJob.id,
-                      uploadedByPhoneNumber: userData.displayPhoneNumber || null,
-                      uploadedByDisplayName: userData.displayName || userData.displayPhoneNumber || null,
+                      uploadedByPhoneNumber:
+                        userData.displayPhoneNumber || null,
+                      uploadedByDisplayName:
+                        userData.displayName ||
+                        userData.displayPhoneNumber ||
+                        null,
                       uploadedByUserId: waUser.userId ?? null,
                       uploadedByRole: "OWNER",
                       option: { create: defaultOptions },
@@ -959,13 +978,10 @@ Please try again.`,
                     socket.emit("files-added", waUser.userId, existingJob.id);
                   }
                 } else if (waUser.userId) {
-                  const verificationCode = Math.floor(
-                    1000 + Math.random() * 9000,
-                  );
+                  // No verificationCode for drafts — OTP is generated on submission from the web.
                   const newJob = await prisma.printJob.create({
                     data: {
                       userId: waUser.userId,
-                      verificationCode,
                       totalCost: cost,
                       totalPages: pages,
                       estimatedTime: 1,
@@ -973,7 +989,6 @@ Please try again.`,
                       status: PrintJobStatus.DRAFT,
                     },
                   });
-                  existingJob = { ...newJob, files: [], _count: { files: 0 } };
 
                   await prisma.file.create({
                     data: {
@@ -982,28 +997,32 @@ Please try again.`,
                       pages,
                       fileCost: cost,
                       printJobId: newJob.id,
-                      uploadedByPhoneNumber: userData.displayPhoneNumber || null,
-                      uploadedByDisplayName: userData.displayName || userData.displayPhoneNumber || null,
+                      uploadedByPhoneNumber:
+                        userData.displayPhoneNumber || null,
+                      uploadedByDisplayName:
+                        userData.displayName ||
+                        userData.displayPhoneNumber ||
+                        null,
                       uploadedByUserId: waUser.userId ?? null,
                       uploadedByRole: "OWNER",
                       option: { create: defaultOptions },
                     },
                   });
 
+                  existingJob = { ...newJob, files: [], _count: { files: 0 } };
+
                   socket.emit("files-added", waUser.userId, newJob.id);
                 }
 
                 // Queue confirmation — batched with other files arriving within 3s
                 if (phoneNumberId && userData.displayPhoneNumber) {
-                  const imageIsStale = !!(existingJob && existingJob.files.length > 0 && existingJob.files[0] && (Date.now() - existingJob.files[0].createdAt.getTime()) > 30 * 60 * 1000);
-                  queueFileConfirmation(
-                    userData.displayPhoneNumber,
+                  queueFileConfirmation({
+                    phoneNumber: userData.displayPhoneNumber,
+                    to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    { fileName: pdfFileName, pages },
-                    imageIsStale,
-                    existingJob?.id ?? null,
-                    waUser.userId ?? null,
-                  );
+                    fileName: pdfFileName,
+                    pages,
+                  });
                 }
               } catch (imageError) {
                 console.error("Image processing failed:", imageError);
@@ -1045,51 +1064,85 @@ Please try again.`,
               continue;
             }
 
-            // Duplicate-aware rate limiting for text/interactive replies
+            // ── Fast auth check ──────────────────────────────────────────────
+            // We need to know if the user is synced (has a userId) to decide
+            // whether to show the sync link or process commands.
+            // Start this DB read ASAP — it's the only blocking call needed.
             if (userData.displayPhoneNumber) {
-              const rateResult = checkTextRateLimit(userData.displayPhoneNumber, messageText);
-              if (rateResult === "skip") {
-                console.log(`Rate-limited (skip) text reply to ${userData.displayPhoneNumber}: "${messageText}"`);
-                continue;
+              try {
+                waUserMeta = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { phoneNumber: true, userId: true },
+                });
+              } catch {
+                // Ignore — handled below
               }
-              if (rateResult === "warn") {
-                console.log(`Rate-limited (warn) text reply to ${userData.displayPhoneNumber}: "${messageText}"`);
-                if (phoneNumberId) {
-                  await sendWhatsAppTextMessage({
+            }
+            const isAuthenticated = !!waUserMeta?.userId;
+
+            // If not authenticated, reply with sync link AS FAST AS POSSIBLE.
+            // We run the auth check above (already done) and the OTP lookup
+            // was started in parallel where possible.
+            if (!isAuthenticated && messageText !== "sync" && messageText !== "sync web") {
+              if (phoneNumberId && userData.displayPhoneNumber) {
+                const syncLink = await getOrCreateWhatsAppSyncLink(
+                  userData.displayPhoneNumber,
+                );
+                if (
+                  messageText === "help" ||
+                  messageText === "menu" ||
+                  messageText === "command" ||
+                  messageText === "commands"
+                ) {
+                  sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `${waBold("Please don't spam")} \u26a0\ufe0f\n_Repeated messages are ignored. Continued abuse may result in your number being blocked._`,
                     phoneNumberId,
-                  });
+                    message: [
+                      `${waBold("To use this, sync first:")}`,
+                      syncLink ?? "Link unavailable",
+                      `_Link valid for 2 minutes._`,
+                    ].join("\n"),
+                  }).catch((err) => console.error("[sync-link] send error:", err));
+                } else {
+                  sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    message: [
+                      `${waBold("Welcome to Zopy!")} 🚀`,
+                      `Send your ${waBold("PDF, Word, or image files")} here.`,
+                      "",
+                      `${waBold("Sync first to get started:")}`,
+                      syncLink ?? "Link unavailable",
+                      `_Link valid for 2 minutes._`,
+                    ].join("\n"),
+                  }).catch((err) => console.error("[sync-link] send error:", err));
                 }
-                continue;
               }
-              // rateResult === "reply" → proceed normally
+              continue;
             }
 
-            if (userData.displayPhoneNumber) {
-              await prisma.whatsAppUser.upsert({
-                where: { phoneNumber: userData.displayPhoneNumber },
-                create: {
-                  phoneNumber: userData.displayPhoneNumber,
-                  name: userData.displayName || null,
-                },
-                update: {
-                  name: userData.displayName || null,
-                },
-                select: { phoneNumber: true },
-              });
-            }
+            // No in-memory rate limiting here: backend runs on multiple instances.
 
             // ─── MOBILE APP SYNC (ZOPY-XXXXXX) ──────────────────────────────
-            const mobileSyncMatch = incomingMessage.text?.body?.trim().match(/^ZOPY-(\d{6})$/i);
-            if (mobileSyncMatch && userData.displayPhoneNumber && phoneNumberId) {
+            const mobileSyncMatch = incomingMessage.text?.body
+              ?.trim()
+              .match(/^ZOPY-(\d{6})$/i);
+            if (
+              mobileSyncMatch &&
+              userData.displayPhoneNumber &&
+              phoneNumberId
+            ) {
               const otpCode = mobileSyncMatch[1]!;
               try {
                 const syncRecord = await prisma.mobileSyncOtp.findUnique({
                   where: { otp: otpCode },
                 });
 
-                if (!syncRecord || syncRecord.usedAt || syncRecord.expiresAt.getTime() < Date.now()) {
+                if (
+                  !syncRecord ||
+                  syncRecord.usedAt ||
+                  syncRecord.expiresAt.getTime() < Date.now()
+                ) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
@@ -1109,7 +1162,10 @@ Please try again.`,
 
                 if (waUser?.userId) {
                   // Already has a linked user — reuse
-                  const generated = generateTokenForUser(waUser.userId, "customer");
+                  const generated = generateTokenForUser(
+                    waUser.userId,
+                    "customer",
+                  );
                   resolvedUserId = generated.userId;
                   token = generated.token;
                 } else {
@@ -1149,7 +1205,11 @@ Please try again.`,
                 });
 
                 // Send success with deep link to open the app
-                const API_BASE = (process.env.API_BASE_URL ?? process.env.FRONTEND_BASE_URL ?? "https://zopy.co.in").replace(/\/$/, "");
+                const API_BASE = (
+                  process.env.API_BASE_URL ??
+                  process.env.FRONTEND_BASE_URL ??
+                  "https://zopy.co.in"
+                ).replace(/\/$/, "");
                 const openAppUrl = `${API_BASE}/api/v1/auth/open-app?syncId=${syncRecord.syncId}`;
 
                 await sendWhatsAppTextMessage({
@@ -1157,7 +1217,6 @@ Please try again.`,
                   phoneNumberId,
                   message: `${waBold("Synced successfully")} ✅\nYour Zopy app is now connected!\n\n👉 ${openAppUrl}`,
                 });
-
               } catch (err) {
                 console.error("[mobile-sync-otp] Error:", err);
                 await sendWhatsAppTextMessage({
@@ -1169,51 +1228,7 @@ Please try again.`,
               continue;
             }
 
-            const waUser = userData.displayPhoneNumber
-              ? await prisma.whatsAppUser.findUnique({
-                  where: { phoneNumber: userData.displayPhoneNumber },
-                  select: { userId: true },
-                })
-              : null;
-            const isAuthenticated = !!waUser?.userId;
-
-            if (!isAuthenticated && messageText !== "sync") {
-              if (phoneNumberId && userData.displayPhoneNumber && shouldSendFallbackReply(userData.displayPhoneNumber)) {
-                const syncLink = await getOrCreateWhatsAppSyncLink(
-                  userData.displayPhoneNumber,
-                );
-                if (
-                  messageText === "help" ||
-                  messageText === "menu" ||
-                  messageText === "command" ||
-                  messageText === "commands"
-                ) {
-                  await sendWhatsAppTextMessage({
-                    to: userData.displayPhoneNumber,
-                    phoneNumberId,
-                    message: [
-                      `${waBold("To use this, sync first:")}`,
-                      syncLink ?? "Link unavailable",
-                      `_Link valid for 2 minutes._`,
-                    ].join("\n"),
-                  });
-                } else {
-                  await sendWhatsAppTextMessage({
-                    to: userData.displayPhoneNumber,
-                    phoneNumberId,
-                    message: [
-                      `${waBold("Welcome to Zopy!")} 🚀`,
-                      `Send your ${waBold("PDF, Word, or image files")} here.`,
-                      "",
-                      `${waBold("Sync first to get started:")}`,
-                      syncLink ?? "Link unavailable",
-                      `_Link valid for 2 minutes._`,
-                    ].join("\n"),
-                  });
-                }
-              }
-              continue;
-            }
+            // (unauthenticated early-return handled above)
 
             if (
               messageText === "hi" ||
@@ -1249,7 +1264,10 @@ Please try again.`,
                     `_Send more files anytime before submitting._`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "current", title: "CURRENT" } },
+                    {
+                      type: "reply",
+                      reply: { id: "current", title: "CURRENT" },
+                    },
                   ],
                 });
               }
@@ -1274,7 +1292,10 @@ Please try again.`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "steps", title: "STEPS" } },
-                    { type: "reply", reply: { id: "current", title: "CURRENT" } },
+                    {
+                      type: "reply",
+                      reply: { id: "current", title: "CURRENT" },
+                    },
                   ],
                 });
               }
@@ -1302,8 +1323,7 @@ Please try again.`,
                 if (!jobs.length) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message:
-                      `${waBold("No jobs found yet.")}\n_Send a document to create your first job._ \ud83d\udcc4`,
+                    message: `${waBold("No jobs found yet.")}\n_Send a document to create your first job._ \ud83d\udcc4`,
                     phoneNumberId,
                   });
                 } else {
@@ -1323,8 +1343,14 @@ Please try again.`,
                   });
                 }
               }
-            } else if (messageText === "current" || messageText === "status" || messageText === "merge") {
-              const draftWhere = await getUnifiedDraftWhere(userData.displayPhoneNumber);
+            } else if (
+              messageText === "current" ||
+              messageText === "status" ||
+              messageText === "merge"
+            ) {
+              const draftWhere = await getUnifiedDraftWhere(
+                userData.displayPhoneNumber,
+              );
               const draftJob = await prisma.printJob.findFirst({
                 where: draftWhere,
                 include: {
@@ -1353,9 +1379,9 @@ Please try again.`,
                   });
                 } else {
                   const fileLines = draftJob.files.map(
-                    (file, index) => `${index + 1}. ${file.name}`
+                    (file, index) => `${index + 1}. ${file.name}`,
                   );
-                  
+
                   await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
@@ -1372,7 +1398,9 @@ Please try again.`,
                 }
               }
             } else if (messageText === "clear" || messageText === "discard") {
-              const clearWhere = await getUnifiedDraftWhere(userData.displayPhoneNumber);
+              const clearWhere = await getUnifiedDraftWhere(
+                userData.displayPhoneNumber,
+              );
               const existingJob = await prisma.printJob.findFirst({
                 where: clearWhere,
                 include: {
@@ -1427,32 +1455,22 @@ Please try again.`,
                 userData.displayPhoneNumber,
                 "is trying to edit their job.",
               );
-              const userRecord = await prisma.whatsAppUser.findUnique({
-                where: {
-                  phoneNumber: userData.displayPhoneNumber.toString(),
-                },
-                select: {
-                  lastFileStartedProcessingAt: true,
-                },
-              });
-
-              if (userRecord?.lastFileStartedProcessingAt) {
-                const elapsedMs =
-                  Date.now() - userRecord.lastFileStartedProcessingAt.getTime();
-                if (elapsedMs < 7_000) {
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    await sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      message: `${waBold("Still receiving your file")}
+              // Read from file cache instead of DB — instant, no round-trip
+              if (isFileStillProcessing(userData.displayPhoneNumber)) {
+                if (phoneNumberId && userData.displayPhoneNumber) {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    message: `${waBold("Still receiving your file")}
   Please wait a few seconds, then tap \"Edit job\" again.`,
-                      phoneNumberId,
-                    });
-                  }
-                  continue;
+                    phoneNumberId,
+                  });
                 }
+                continue;
               }
 
-              const editWhere = await getUnifiedDraftWhere(userData.displayPhoneNumber.toString());
+              const editWhere = await getUnifiedDraftWhere(
+                userData.displayPhoneNumber.toString(),
+              );
               const existingJob = await prisma.printJob.findFirst({
                 where: editWhere,
                 select: {
@@ -1495,12 +1513,16 @@ Please try again.`,
                       `_Edit options, confirm, and submit._`,
                     ].join("\n"),
                     buttons: [
-                      { type: "reply", reply: { id: "current", title: "CURRENT" } },
+                      {
+                        type: "reply",
+                        reply: { id: "current", title: "CURRENT" },
+                      },
                     ],
                   });
                 }
               }
-            } else if (messageText === "sync") {
+            } else if (messageText === "sync" || messageText === "sync web") {
+              const isFromWeb = messageText === "sync web";
               if (!FRONTEND_BASE_URL) {
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
@@ -1514,23 +1536,41 @@ Please try again.`,
               }
 
               if (userData.displayPhoneNumber) {
-                const loginUrl = await getOrCreateWhatsAppSyncLink(
+                // Ensure WhatsAppUser exists BEFORE creating the OTP
+                // (the earlier upsert is fire-and-forget and may not have completed yet)
+                await prisma.whatsAppUser.upsert({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  create: {
+                    phoneNumber: userData.displayPhoneNumber,
+                    name: userData.displayName || null,
+                    lastMessageAt: new Date(),
+                  },
+                  update: {},
+                  select: { phoneNumber: true },
+                });
+
+                let loginUrl = await getOrCreateWhatsAppSyncLink(
                   userData.displayPhoneNumber,
                 );
+                // If sync was initiated from the website, append source=web
+                // so the OTP page redirects back to home instead of WhatsApp
+                if (loginUrl && isFromWeb) {
+                  const separator = loginUrl.includes("?") ? "&" : "?";
+                  loginUrl = `${loginUrl}${separator}source=web`;
+                }
                 if (phoneNumberId) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     message: [
-                      `${waBold("Sync using the link below:")}`,
+                      `${waBold("Tap the link below to sync:")}`,
                       loginUrl ?? "Link unavailable",
-                      `_Link valid for 2 minutes._`,
                     ].join("\n"),
                   });
                 }
               }
             } else {
-              if (phoneNumberId && userData.displayPhoneNumber && shouldSendFallbackReply(userData.displayPhoneNumber)) {
+              if (phoneNumberId && userData.displayPhoneNumber) {
                 await sendWhatsAppButtonMessage({
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
@@ -1551,5 +1591,8 @@ Please try again.`,
     }
   }
 
-  res.sendStatus(200);
+  } catch (err) {
+    console.error("[webhook] Unhandled error in async processing:", err);
+  }
+  })();
 };

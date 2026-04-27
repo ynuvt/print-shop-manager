@@ -6,6 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import v1Routes from "./routes/index.js";
+import { initWaTrackingCache } from "./utils/waTrackingCache.js";
+
+// Warm the file-backed tracking cache before handling requests
+initWaTrackingCache();
+
 const app = express();
 
 app.set("trust proxy", 1);

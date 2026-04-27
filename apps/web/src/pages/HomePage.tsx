@@ -1184,9 +1184,17 @@ export default function HomePage({
         </div>
 
         <div className="top-bar-actions">
-          {/* <Link to="/about" className="ghost-link">
-            About Us
-          </Link> */}
+          {!isWhatsappSynced && (
+            <button
+              type="button"
+              className="btn btn-sync-nav"
+              onClick={() => setShowSyncWhatsappModal(true)}
+              title="Connect your WhatsApp"
+            >
+              <MessageCircle size={16} />
+              Sync
+            </button>
+          )}
           <button
             type="button"
             className="theme-btn icon-theme-btn"
@@ -1635,8 +1643,8 @@ export default function HomePage({
         </div>
       </footer>
       {showSyncWhatsappModal && (
-        <div className="modal-shell" role="dialog" aria-modal="true">
-          <div className="modal-card">
+        <div className="modal-shell" role="dialog" aria-modal="true" onClick={() => setShowSyncWhatsappModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "420px" }}>
             <div className="modal-head">
               <div>
                 <h2>Sync WhatsApp</h2>
@@ -1646,23 +1654,31 @@ export default function HomePage({
                 className="icon-btn"
                 onClick={() => setShowSyncWhatsappModal(false)}
               >
-                x
+                <X size={18} />
               </button>
             </div>
-            <p className="modal-helper" style={{ marginTop: "16px", marginBottom: "24px" }}>
-              You have to sync WhatsApp to access this feature.
-            </p>
+            <div style={{ padding: "16px 0 20px" }}>
+              <p style={{ color: "var(--text-muted)", fontSize: "14px", lineHeight: "1.5", margin: "0 0 16px" }}>
+                Connect your WhatsApp to send documents directly from your phone.
+              </p>
+              <ol className="sync-steps">
+                <li>Tap <strong>Sync on WhatsApp</strong> below</li>
+                <li>It opens WhatsApp — just send the message</li>
+                <li>You'll receive a link — tap it to connect</li>
+              </ol>
+            </div>
             <div className="modal-actions">
               <button
                 type="button"
                 className="btn"
                 onClick={() => setShowSyncWhatsappModal(false)}
               >
-                Close
+                Cancel
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
                 onClick={() => {
                   const digits = "918369757906";
                   window.open(
@@ -1673,7 +1689,8 @@ export default function HomePage({
                   setShowSyncWhatsappModal(false);
                 }}
               >
-                Sync
+                <MessageCircle size={16} />
+                Sync on WhatsApp
               </button>
             </div>
           </div>
