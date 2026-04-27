@@ -1,6 +1,8 @@
 import { Server } from "socket.io";
 import connectionManager from "./managers/connectionManager";
 import { jobEvents } from "./events/jobEvents";
+import dotenv from "dotenv";
+dotenv.config();  
 
 // Process-level crash guards — prevent the server from dying on unexpected errors
 process.on("uncaughtException", (err) => {
@@ -11,7 +13,7 @@ process.on("unhandledRejection", (reason) => {
   console.error("[WEBSOCKET UNHANDLED REJECTION]", reason);
 });
 
-const io = new Server(4001, {
+const io = new Server(Number(process.env.PORT) || 4000, {
   cors: { origin: "*" }, // allow cross-origin for testing
 });
 
