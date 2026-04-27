@@ -11,7 +11,7 @@ import type { UserPrintJob, UserPrintJobFile } from "../api/api";
 import { getSocket } from "../services/getSocket";
 import { useNotifications } from "./NotificationCenter";
 
-type JobsTab = "ALL" | "ACTIVE" | "DRAFT" | "COMPLETED" | "REJECTED" | "CANCELED";
+type JobsTab = "ALL" | "ACTIVE" | "COMPLETED" | "REJECTED" | "CANCELED";
 
 const ACTIVE_STATUSES = ["PENDING", "PROCESSING"];
 const COMPLETED_STATUSES = ["COMPLETED"];
@@ -414,9 +414,6 @@ export default function PrintJobsList({
     if (activeTab === "ACTIVE") {
       return jobs.filter((job) => ACTIVE_STATUSES.includes(job.status));
     }
-
-    if (activeTab === "DRAFT") return draftJobs;
-
     if (activeTab === "COMPLETED") {
       return jobs.filter((job) => COMPLETED_STATUSES.includes(job.status));
     }
@@ -452,7 +449,7 @@ export default function PrintJobsList({
   const activeCount = jobs.filter((job) =>
     ACTIVE_STATUSES.includes(job.status),
   ).length;
-  const draftCount = draftJobs.length;
+  // const draftCount = draftJobs.length;
   const completedCount = jobs.filter((job) =>
     COMPLETED_STATUSES.includes(job.status),
   ).length;
@@ -541,7 +538,7 @@ export default function PrintJobsList({
           >
             Active ({activeCount})
           </button>
-          {draftCount > 0 && (
+          {/* {draftCount > 0 && (
             <button
               type="button"
               className={`jobs-tab ${activeTab === "DRAFT" ? "active" : ""}`}
@@ -551,7 +548,7 @@ export default function PrintJobsList({
             >
               Draft ({draftCount})
             </button>
-          )}
+          )} */}
           <button
             type="button"
             className={`jobs-tab ${activeTab === "COMPLETED" ? "active" : ""}`}
