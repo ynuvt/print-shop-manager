@@ -43,8 +43,8 @@ export default function AuthOtpPage() {
           return;
         }
 
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("userId", data.userId);
+        localStorage.setItem("token", data.token || "");
+        localStorage.setItem("userId", data.userId || "");
         setStatus("success");
         setMessage("Synced! Redirecting you now...");
         notify("WhatsApp synced successfully.", { variant: "success" });
