@@ -199,7 +199,7 @@ function flushFileBatch(phoneNumber: string): void {
     waBold(`${totalFiles} file${totalFiles > 1 ? "s" : ""} received`),
     fileLines.join("\n"),
     "",
-    `_Send more files or tap Edit to set print options._`,
+    `_Send more files or tap Edit to set print options & submit._`,
   ].join("\n");
 
   sendWhatsAppButtonMessage({
@@ -207,10 +207,9 @@ function flushFileBatch(phoneNumber: string): void {
     phoneNumberId: batch.phoneNumberId,
     body,
     buttons: [
-      {
-        type: "reply",
-        reply: { id: "edit", title: "Edit" },
-      },
+      { type: "reply", reply: { id: "edit", title: "Edit" } },
+      { type: "reply", reply: { id: "status", title: "Status" } },
+      { type: "reply", reply: { id: "help", title: "Help" } },
     ],
   }).catch((err) => console.error("[file-batch] send error:", err));
 
@@ -602,15 +601,20 @@ Please try again or send a different file.`,
                   existingJob._count.files >= 30
                 ) {
                   if (phoneNumberId && userData.displayPhoneNumber) {
-                    await sendWhatsAppTextMessage({
+                    await sendWhatsAppButtonMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
-                      message: [
+                      body: [
                         `${waBold("Limit reached")}`,
                         `You already have ${existingJob._count.files} files in your draft (max 30).`,
                         "",
-                        `Type ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start a new one.`,
+                        `_Tap Edit to set print options & submit, or Clear to start a new one._`,
                       ].join("\n"),
+                      buttons: [
+                        { type: "reply", reply: { id: "edit", title: "Edit" } },
+                        { type: "reply", reply: { id: "status", title: "Status" } },
+                        { type: "reply", reply: { id: "help", title: "Help" } },
+                      ],
                     });
                   }
                   if (waUser.userId) {
@@ -930,15 +934,20 @@ Please try again.`,
                   existingJob._count.files >= 30
                 ) {
                   if (phoneNumberId && userData.displayPhoneNumber) {
-                    await sendWhatsAppTextMessage({
+                    await sendWhatsAppButtonMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
-                      message: [
+                      body: [
                         `${waBold("Limit reached")}`,
                         `You already have ${existingJob._count.files} files in your draft (max 30).`,
                         "",
-                        `Type ${waBold('"EDIT"')} to submit or ${waBold('"CLEAR"')} to start fresh.`,
+                        `_Tap Edit to set print options & submit, or Clear to start a new one._`,
                       ].join("\n"),
+                      buttons: [
+                        { type: "reply", reply: { id: "edit", title: "Edit" } },
+                        { type: "reply", reply: { id: "status", title: "Status" } },
+                        { type: "reply", reply: { id: "help", title: "Help" } },
+                      ],
                     });
                   }
                   continue;
@@ -1243,10 +1252,15 @@ Please try again.`,
                   body: [
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
-                    `_Type ${waBold('"EDIT"')} when done · ${waBold('"HELP"')} for options_`,
+                    "",
+                    `📝 ${waBold("Edit")} — set print options & submit`,
+                    `📊 ${waBold("Status")} — check your print job status`,
+                    `❓ ${waBold("Help")} — see all available commands`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "help", title: "HELP" } },
+                    { type: "reply", reply: { id: "edit", title: "Edit" } },
+                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
               }
@@ -1259,15 +1273,14 @@ Please try again.`,
                     `${waBold("How it works:")}`,
                     `1) Send documents`,
                     `2) Wait for confirmation`,
-                    `3) Type ${waBold('"EDIT"')}`,
-                    `4) Submit your printout`,
+                    `3) Tap ${waBold("Edit")} to set print options & submit`,
+                    "",
                     `_Send more files anytime before submitting._`,
                   ].join("\n"),
                   buttons: [
-                    {
-                      type: "reply",
-                      reply: { id: "current", title: "CURRENT" },
-                    },
+                    { type: "reply", reply: { id: "edit", title: "Edit" } },
+                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
               }
@@ -1283,19 +1296,17 @@ Please try again.`,
                   phoneNumberId,
                   body: [
                     `${waBold("Here\u2019s what you can do:")}`,
+                    `\u2022 ${waBold("EDIT")} \u2014 Set print options & submit`,
+                    `\u2022 ${waBold("STATUS")} \u2014 View your current documents`,
                     `\u2022 ${waBold("STEPS")} \u2014 How it works`,
-                    `\u2022 ${waBold("CURRENT")} \u2014 View documents`,
-                    `\u2022 ${waBold("EDIT")} \u2014 Review & customize`,
                     `\u2022 ${waBold("SYNC")} \u2014 Sync WhatsApp with web`,
                     `\u2022 ${waBold("CLEAR")} \u2014 Delete draft`,
-                    `_Send files, then type ${waBold('"EDIT"')} when done._`,
+                    `_Send files, then tap ${waBold("Edit")} when done._`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "steps", title: "STEPS" } },
-                    {
-                      type: "reply",
-                      reply: { id: "current", title: "CURRENT" },
-                    },
+                    { type: "reply", reply: { id: "edit", title: "Edit" } },
+                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
               }
@@ -1441,13 +1452,18 @@ Please try again.`,
               );
 
               if (phoneNumberId && userData.displayPhoneNumber) {
-                await sendWhatsAppTextMessage({
+                await sendWhatsAppButtonMessage({
                   to: userData.displayPhoneNumber,
-                  message: [
+                  phoneNumberId,
+                  body: [
                     `${waBold("Draft cleared.")} \u2713`,
                     `_Send files to start a new printout._`,
                   ].join("\n"),
-                  phoneNumberId,
+                  buttons: [
+                    { type: "reply", reply: { id: "edit", title: "Edit" } },
+                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "help", title: "Help" } },
+                  ],
                 });
               }
             } else if (messageText === "edit") {
@@ -1571,10 +1587,15 @@ Please try again.`,
                   body: [
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
-                    `_Type ${waBold('"EDIT"')} when done · ${waBold('"HELP"')} for options_`,
+                    "",
+                    `📝 ${waBold("Edit")} — set print options & submit`,
+                    `📊 ${waBold("Status")} — check your print job status`,
+                    `❓ ${waBold("Help")} — see all available commands`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "help", title: "HELP" } },
+                    { type: "reply", reply: { id: "edit", title: "Edit" } },
+                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
               }

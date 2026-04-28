@@ -172,7 +172,7 @@ model PrintJob {
   estimatedTime    Int
   deleted          Boolean  @default(false)
   status           PrintJobStatus @default(PENDING)
-  verificationCode Int?
+  verificationCode Int?           @unique
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
 }

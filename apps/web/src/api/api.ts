@@ -79,8 +79,9 @@ export async function registerUser(): Promise<{
 }
 
 export async function loginWithWhatsappOtp(code: string): Promise<{
-  token: string;
-  userId: string;
+  token?: string;
+  userId?: string;
+  alreadyVerified?: boolean;
 }> {
   const token = getToken();
   const res = await axios.post(`${BASE_URL}/auth/whatsapp-login`, { code }, {
@@ -88,7 +89,7 @@ export async function loginWithWhatsappOtp(code: string): Promise<{
   });
 
   if (!res.data) throw new Error("Failed to sync with WhatsApp.");
-  return res.data as { token: string; userId: string };
+  return res.data as { token?: string; userId?: string; alreadyVerified?: boolean };
 }
 
 export async function getUserSession(): Promise<UserSession> {

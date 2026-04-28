@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { prisma } from "@printowl/db";
 import { authMiddleware } from "../middleware/authMiddleware.js";
-import { sendWhatsAppTextMessage } from "../modules/whatsappServices.js";
+import { sendWhatsAppTextMessage, sendWhatsAppButtonMessage } from "../modules/whatsappServices.js";
 
 const router = express.Router();
 
@@ -96,7 +96,39 @@ router.post("/whatsapp-login", async (req, res) => {
     }
 
     const now = new Date();
-    if (otp.usedAt || otp.expiresAt.getTime() < now.getTime()) {
+
+    // ── Already verified: redirect user back to WhatsApp with a friendly message ──
+    if (otp.usedAt) {
+      const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+      if (phoneNumberId && otp.whatsAppUser?.phoneNumber) {
+        try {
+          await sendWhatsAppButtonMessage({
+            to: otp.whatsAppUser.phoneNumber,
+            phoneNumberId,
+            body: [
+              "*Already verified* ✅",
+              "Your WhatsApp is already synced! You can send your documents here directly.",
+              "",
+              "⚠️ _If you shared any documents before syncing, please send them again._",
+              "",
+              "📝 *Edit* — set print options & submit",
+              "📊 *Status* — check your print job status",
+              "❓ *Help* — see all available commands",
+            ].join("\n"),
+            buttons: [
+              { type: "reply", reply: { id: "edit", title: "Edit" } },
+              { type: "reply", reply: { id: "status", title: "Status" } },
+              { type: "reply", reply: { id: "help", title: "Help" } },
+            ],
+          });
+        } catch (error) {
+          console.error("Failed to send already-verified WhatsApp message:", error);
+        }
+      }
+      return res.status(200).json({ alreadyVerified: true });
+    }
+
+    if (otp.expiresAt.getTime() < now.getTime()) {
       return res.status(400).json({ error: "Invalid or expired code." });
     }
 
@@ -153,12 +185,27 @@ router.post("/whatsapp-login", async (req, res) => {
         // Send sync success to the user's WhatsApp number
         const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
         if (phoneNumberId) {
-          try {
-            await sendWhatsAppTextMessage({
+           try {
+            await sendWhatsAppButtonMessage({
               to: whatsAppUser.phoneNumber,
               phoneNumberId,
-              message:
-                "*Synced successfully* ✅\nYou can now send your documents directly here on WhatsApp.\n_Start by sending your first file!_",
+              body: [
+                "*Synced successfully* ✅",
+                "You can now send your documents directly here on WhatsApp.",
+                "",
+                "⚠️ _If you shared any documents before syncing, please send them again._",
+                "",
+                "📝 *Edit* — set print options & submit",
+                "📊 *Status* — check your print job status",
+                "❓ *Help* — see all available commands",
+                "",
+                "_Start by sending your first file!_",
+              ].join("\n"),
+              buttons: [
+                { type: "reply", reply: { id: "edit", title: "Edit" } },
+                { type: "reply", reply: { id: "status", title: "Status" } },
+                { type: "reply", reply: { id: "help", title: "Help" } },
+              ],
             });
           } catch (error) {
             console.error(
@@ -215,11 +262,26 @@ router.post("/whatsapp-login", async (req, res) => {
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (phoneNumberId) {
       try {
-        await sendWhatsAppTextMessage({
+        await sendWhatsAppButtonMessage({
           to: whatsAppUser.phoneNumber,
           phoneNumberId,
-          message:
-            "*Synced successfully* ✅\nYou can now send your documents directly here on WhatsApp.\n_Start by sending your first file!_",
+          body: [
+            "*Synced successfully* ✅",
+            "You can now send your documents directly here on WhatsApp.",
+            "",
+            "⚠️ _If you shared any documents before syncing, please send them again._",
+            "",
+            "📝 *Edit* — set print options & submit",
+            "📊 *Status* — check your print job status",
+            "❓ *Help* — see all available commands",
+            "",
+            "_Start by sending your first file!_",
+          ].join("\n"),
+          buttons: [
+            { type: "reply", reply: { id: "edit", title: "Edit" } },
+            { type: "reply", reply: { id: "status", title: "Status" } },
+            { type: "reply", reply: { id: "help", title: "Help" } },
+          ],
         });
       } catch (error) {
         console.error("Failed to send WhatsApp login success message:", error);

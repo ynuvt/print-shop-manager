@@ -31,9 +31,20 @@ export default function AuthOtpPage() {
     }
 
     loginWithWhatsappOtp(code)
-      .then(({ token, userId }) => {
-        localStorage.setItem("token", token);
-        localStorage.setItem("userId", userId);
+      .then((data) => {
+        // Handle already-verified OTP: redirect back to WhatsApp gracefully
+        if (data.alreadyVerified) {
+          setStatus("success");
+          setMessage("Already synced! Redirecting you to WhatsApp...");
+          notify("Your WhatsApp is already synced.", { variant: "success" });
+          setTimeout(() => {
+            window.location.href = "https://wa.me/918369757906";
+          }, 1500);
+          return;
+        }
+
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("userId", data.userId);
         setStatus("success");
         setMessage("Synced! Redirecting you now...");
         notify("WhatsApp synced successfully.", { variant: "success" });
