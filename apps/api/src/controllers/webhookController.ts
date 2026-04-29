@@ -200,7 +200,7 @@ const fileBatchQueue = new Map<string, PendingBatch>();
 const stickerSentForBatch = new Set<string>();
 const limitReachedSent = new Map<string, number>(); // phone → timestamp
 
-const BATCH_WINDOW_MS = 5000;
+const BATCH_WINDOW_MS = 7000;
 
 function friendlyFileName(rawName: string): string {
   // Image-converted files: show "Photo" instead of "whatsapp-image-173849384.pdf"
