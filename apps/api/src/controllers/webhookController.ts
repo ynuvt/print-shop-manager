@@ -12,6 +12,7 @@ import {
   sendWhatsAppButtonMessage,
   sendWhatsAppCtaUrlMessage,
   sendWhatsAppPdfDocument,
+  sendWhatsAppReaction,
 } from "../modules/whatsappServices.js";
 import { getPdfPageCountFromBuffer } from "../utils/pdfPageCount.js";
 import {
@@ -78,6 +79,22 @@ async function generateWhatsAppSyncLink(
   phoneNumber: string,
 ): Promise<string | null> {
   if (!FRONTEND_BASE_URL) {
+    return null;
+  }
+
+  // Ensure the WhatsAppUser record exists BEFORE creating the OTP —
+  // the OTP has a foreign key on phoneNumber, so the user must exist first.
+  // This eliminates the race condition with the fire-and-forget upsert in the
+  // main message handler.
+  try {
+    await prisma.whatsAppUser.upsert({
+      where: { phoneNumber },
+      create: { phoneNumber, lastMessageAt: new Date() },
+      update: {},
+      select: { phoneNumber: true },
+    });
+  } catch (err) {
+    console.error("Failed to ensure WhatsAppUser before OTP creation:", err);
     return null;
   }
 
@@ -152,6 +169,9 @@ async function getOrCreateWhatsAppSyncLink(
 
 const STICKER_FILE_PATH = fileURLToPath(
   new URL("../resource/stickerzopy.webp", import.meta.url),
+);
+const UPLOAD_STICKER_FILE_PATH = fileURLToPath(
+  new URL("../resource/upload.webp", import.meta.url),
 );
 // ── Batched file-received confirmations ──────────────────────────────────────
 // Collects files received within a 3-second window per phone number,
@@ -395,6 +415,15 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                 if (userData.displayPhoneNumber) {
                   // Instant: update file-backed tracking cache (no DB round-trip)
                   trackFileProcessingStarted(userData.displayPhoneNumber);
+
+                  // Send animated upload sticker on the FIRST file only (avoids rate limits)
+                  if (phoneNumberId && !fileBatchQueue.has(userData.displayPhoneNumber)) {
+                    sendWhatsAppStickerFromFile({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      filePath: UPLOAD_STICKER_FILE_PATH,
+                    }).catch((err) => console.error("[upload-sticker] send error:", err));
+                  }
 
                   // Fire-and-forget: persist to DB in background
                   const timestampSeconds = Number(incomingMessage.timestamp);
@@ -1097,34 +1126,62 @@ Please try again.`,
                 const syncLink = await getOrCreateWhatsAppSyncLink(
                   userData.displayPhoneNumber,
                 );
+                if (!syncLink) {
+                  // If sync link generation failed, log and retry once
+                  console.error("[sync-link] Failed to generate sync link for", userData.displayPhoneNumber);
+                }
                 if (
                   messageText === "help" ||
                   messageText === "menu" ||
                   messageText === "command" ||
                   messageText === "commands"
                 ) {
-                  sendWhatsAppTextMessage({
-                    to: userData.displayPhoneNumber,
-                    phoneNumberId,
-                    message: [
-                      `${waBold("To use this, sync first:")}`,
-                      syncLink ?? "Link unavailable",
-                      `_Link valid for 2 minutes._`,
-                    ].join("\n"),
-                  }).catch((err) => console.error("[sync-link] send error:", err));
+                  if (syncLink) {
+                    sendWhatsAppCtaUrlMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      body: `${waBold("To use this, sync first:")}\n_Tap the button below to sync your WhatsApp._`,
+                      buttonText: "Sync Now",
+                      url: syncLink,
+                    }).catch((err) => console.error("[sync-link] send error:", err));
+                  } else {
+                    sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      message: [
+                        `${waBold("To use this, sync first:")}`,
+                        `Please send ${waBold('"sync"')} to get your sync link.`,
+                      ].join("\n"),
+                    }).catch((err) => console.error("[sync-link] send error:", err));
+                  }
                 } else {
-                  sendWhatsAppTextMessage({
-                    to: userData.displayPhoneNumber,
-                    phoneNumberId,
-                    message: [
-                      `${waBold("Welcome to Zopy!")} 🚀`,
-                      `Send your ${waBold("PDF, Word, or image files")} here.`,
-                      "",
-                      `${waBold("Sync first to get started:")}`,
-                      syncLink ?? "Link unavailable",
-                      `_Link valid for 2 minutes._`,
-                    ].join("\n"),
-                  }).catch((err) => console.error("[sync-link] send error:", err));
+                  if (syncLink) {
+                    sendWhatsAppCtaUrlMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      body: [
+                        `${waBold("Welcome to Zopy!")} 🚀`,
+                        `Send your ${waBold("PDF, Word, or image files")} here.`,
+                        "",
+                        `${waBold("Sync first to get started:")}`,
+                        `_Tap the button below to sync your WhatsApp._`,
+                      ].join("\n"),
+                      buttonText: "Sync Now",
+                      url: syncLink,
+                    }).catch((err) => console.error("[sync-link] send error:", err));
+                  } else {
+                    sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      message: [
+                        `${waBold("Welcome to Zopy!")} 🚀`,
+                        `Send your ${waBold("PDF, Word, or image files")} here.`,
+                        "",
+                        `${waBold("Sync first to get started:")}`,
+                        `Please send ${waBold('"sync"')} to get your sync link.`,
+                      ].join("\n"),
+                    }).catch((err) => console.error("[sync-link] send error:", err));
+                  }
                 }
               }
               continue;

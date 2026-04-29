@@ -43,22 +43,33 @@ export default function AuthOtpPage() {
           return;
         }
 
-        localStorage.setItem("token", data.token || "");
-        localStorage.setItem("userId", data.userId || "");
+        // Write token + userId to localStorage
+        const newToken = data.token || "";
+        const newUserId = data.userId || "";
+        localStorage.setItem("token", newToken);
+        localStorage.setItem("userId", newUserId);
+
+        // Verify the write persisted
+        const verifiedToken = localStorage.getItem("token");
+        if (verifiedToken !== newToken) {
+          localStorage.setItem("token", newToken);
+          localStorage.setItem("userId", newUserId);
+        }
+
         setStatus("success");
         setMessage("Synced! Redirecting you now...");
         notify("WhatsApp synced successfully.", { variant: "success" });
+
         setTimeout(() => {
           if (source === "web") {
             navigate("/");
           } else {
             window.location.href = "https://wa.me/918369757906";
           }
-        }, 1000);
+        }, 2000);
       })
       .catch((err) => {
         setStatus("error");
-        // Extract the actual server error message from Axios 400/500 responses
         let errorMsg = "Failed to sync WhatsApp. Please try again.";
         if (axios.isAxiosError(err)) {
           const serverError = err.response?.data?.error;

@@ -30,7 +30,8 @@ function formatPrice(amount: number) {
   return currencyFormatter.format(amount);
 }
 
-function getStatusBadgeClass(status: string) {
+function getStatusBadgeClass(status: string, expired?: boolean) {
+  if (expired) return "status-pill status-pill-expired";
   if (ACTIVE_STATUSES.includes(status)) return "status-pill status-pill-active";
   if (COMPLETED_STATUSES.includes(status)) {
     return "status-pill status-pill-completed";
@@ -41,6 +42,12 @@ function getStatusBadgeClass(status: string) {
   if (REJECTED_STATUSES.includes(status))
     return "status-pill status-pill-rejected";
   return "status-pill";
+}
+
+function getStatusDisplayText(status: string, expired?: boolean) {
+  if (expired && status === "COMPLETED") return "COMPLETED · EXPIRED";
+  if (expired) return `${status} · EXPIRED`;
+  return status;
 }
 
 function FileOptionCard({
@@ -181,10 +188,12 @@ function JobDetailModal({
     );
   }
 
-  const otpDigits = String(job.verificationCode).split("");
-  const canDelete = ACTIVE_STATUSES.includes(job.status);
-  const canResubmit = COMPLETED_STATUSES.includes(job.status);
-  const canViewFiles = !["REJECTED", "CANCELED"].includes(job.status);
+  const displayOtp = job.verificationCode ?? job.oldOtp;
+  const otpDigits = displayOtp ? String(displayOtp).split("") : [];
+  const isExpired = !!job.expired;
+  const canDelete = ACTIVE_STATUSES.includes(job.status) && !isExpired;
+  const canResubmit = COMPLETED_STATUSES.includes(job.status) && !isExpired;
+  const canViewFiles = !["REJECTED", "CANCELED"].includes(job.status) && !isExpired;
 
   const handleRefreshStatus = async () => {
     await loadJob();
@@ -255,20 +264,34 @@ function JobDetailModal({
         </div>
 
         <div className="otp-card">
-          <p className="otp-title">Verification Code</p>
-          <div
-            className="otp-digits"
-            aria-label={`Verification code ${job.verificationCode}`}
-          >
-            {otpDigits.map((digit, idx) => (
-              <div key={`${digit}-${idx}`} className="otp-digit">
-                {digit}
+          <p className="otp-title">
+            {job.verificationCode
+              ? "Verification Code"
+              : isExpired
+                ? "Previous Verification Code"
+                : "Verification Code"}
+          </p>
+          {otpDigits.length > 0 ? (
+            <>
+              <div
+                className="otp-digits"
+                aria-label={`Verification code ${displayOtp}`}
+              >
+                {otpDigits.map((digit, idx) => (
+                  <div key={`${digit}-${idx}`} className="otp-digit">
+                    {digit}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <span className="otp-helper">
-            Show this to the shopkeeper and collect your prints.
-          </span>
+              <span className="otp-helper">
+                {isExpired
+                  ? "This job has expired. Files have been removed."
+                  : "Show this to the shopkeeper and collect your prints."}
+              </span>
+            </>
+          ) : (
+            <span className="otp-helper">OTP no longer available</span>
+          )}
         </div>
 
         <div className="modal-summary">
@@ -276,7 +299,9 @@ function JobDetailModal({
             <p className="modal-label">Total Price</p>
             <h3>{formatPrice(job.totalCost ?? 0)}</h3>
           </div>
-          <span className={getStatusBadgeClass(job.status)}>{job.status}</span>
+          <span className={getStatusBadgeClass(job.status, isExpired)}>
+            {getStatusDisplayText(job.status, isExpired)}
+          </span>
         </div>
 
         <p className="modal-helper summary-meta">
@@ -604,7 +629,9 @@ export default function PrintJobsList({
                     </span>
                     <div className="job-row-details">
                       <p className="job-row-code">
-                        {job.status === "DRAFT" ? "Draft Job" : `OTP: ${job.verificationCode ?? "N/A"}`}
+                        {job.status === "DRAFT"
+                          ? "Draft Job"
+                          : `OTP: ${job.verificationCode ?? job.oldOtp ?? "N/A"}`}
                       </p>
                       <p className="job-row-meta">
                         {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
@@ -622,8 +649,8 @@ export default function PrintJobsList({
                         {formatPrice(job.totalCost ?? 0)}
                       </p>
                     </div>
-                    <span className={getStatusBadgeClass(job.status)}>
-                      {job.status}
+                    <span className={getStatusBadgeClass(job.status, job.expired)}>
+                      {getStatusDisplayText(job.status, job.expired)}
                     </span>
                   </div>
                 </button>

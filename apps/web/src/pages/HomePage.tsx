@@ -549,7 +549,7 @@ export default function HomePage({
     
     const handleJobStatusUpdated = (uid: string, _jobId: string, msg: string) => {
       if (uid === userId) {
-        setError(msg);
+        setToast(msg);
       }
     };
 
@@ -954,11 +954,11 @@ export default function HomePage({
 
       setRefreshTrigger((t) => t + 1);
     } catch (err) {
-      setError(
+      const errMsg =
         err instanceof Error
           ? err.message
-          : "Something went wrong. Please try again.",
-      );
+          : "Something went wrong.";
+      setToast(`${errMsg} Please try again now.`);
 
     } finally {
       setIsSubmitting(false);

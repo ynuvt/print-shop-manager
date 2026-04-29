@@ -158,6 +158,45 @@ export async function sendWhatsAppTextMessage(
   }
 }
 
+/**
+ * Send a reaction emoji to an existing WhatsApp message.
+ * This is the fastest way to acknowledge a user's message — it's
+ * lightweight and appears instantly as a tiny emoji on their message.
+ */
+export async function sendWhatsAppReaction(args: {
+  to: string;
+  phoneNumberId: string;
+  messageId: string;
+  emoji: string;
+}): Promise<void> {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) return; // silently skip if not configured
+
+  try {
+    await fetch(
+      `${WHATSAPP_API_BASE}/${args.phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: args.to,
+          type: "reaction",
+          reaction: {
+            message_id: args.messageId,
+            emoji: args.emoji,
+          },
+        }),
+      },
+    );
+  } catch {
+    // Best-effort — don't fail the main flow for a reaction
+  }
+}
+
 export async function sendWhatsAppStickerFromFile(
   args: SendWhatsAppStickerArgs,
 ): Promise<void> {

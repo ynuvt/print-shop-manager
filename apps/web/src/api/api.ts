@@ -27,6 +27,8 @@ export type UserPrintJob = {
   estimatedTime?: number;
   status: string;
   verificationCode: string | null;
+  oldOtp?: number | null;
+  expired?: boolean;
   createdAt: string;
   source?: string;
   userMetadataId?: string | null;
@@ -288,11 +290,22 @@ export async function submitWhatsappJobReview(input: {
   files: Array<{ id: string; options: PrintFileOption }>;
 }): Promise<{ verificationCode: number }> {
   const token = getToken();
-  const res = await axios.post(`${BASE_URL}/jobs/submit-whatsapp-job`, input, {
-    headers: {
-      authorization: `Bearer ${token}`,
-    },
-  });
+  let res;
+  try {
+    res = await axios.post(`${BASE_URL}/jobs/submit-whatsapp-job`, input, {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const serverError = error.response?.data?.error;
+      if (typeof serverError === "string" && serverError.trim()) {
+        throw new Error(serverError);
+      }
+    }
+    throw error;
+  }
 
   if (!res.data) throw new Error("Failed to update job");
   return res.data as { verificationCode: number };

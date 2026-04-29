@@ -171,8 +171,10 @@ model PrintJob {
   totalPages       Int
   estimatedTime    Int
   deleted          Boolean  @default(false)
+  expired          Boolean  @default(false)
   status           PrintJobStatus @default(PENDING)
   verificationCode Int?           @unique
+  oldOtp           Int?
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
 }

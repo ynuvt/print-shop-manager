@@ -196,18 +196,14 @@ async function generateUniqueVerificationCode(
   tx?: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
 ): Promise<number> {
   const client = tx ?? prisma;
-  const ACTIVE_STATUSES = [
-    PrintJobStatus.DRAFT,
-    PrintJobStatus.PENDING,
-    PrintJobStatus.PROCESSING,
-  ];
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const candidate = Math.floor(1000 + Math.random() * 9000);
+    // Check ALL jobs — verificationCode has a @unique constraint in the schema,
+    // so we must avoid collisions with completed/rejected jobs too.
     const existing = await client.printJob.findFirst({
       where: {
         verificationCode: candidate,
-        status: { in: ACTIVE_STATUSES },
       },
       select: { id: true },
     });
@@ -2095,7 +2091,7 @@ app.post(
       }
 
       console.error("Error submitting whatsapp job review:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      return res.status(500).json({ error: "Failed to submit job. Please try again." });
     }
   },
 );

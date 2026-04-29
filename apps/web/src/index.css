@@ -2043,6 +2043,12 @@ body {
   background: color-mix(in srgb, #c9a33b 14%, transparent);
 }
 
+.status-pill-expired {
+  border-color: color-mix(in srgb, #888 50%, transparent);
+  color: #888;
+  background: color-mix(in srgb, #888 10%, transparent);
+}
+
 .modal-shell {
   position: fixed;
   inset: 0;
