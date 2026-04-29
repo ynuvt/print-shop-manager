@@ -281,7 +281,13 @@ async function flushFileBatch(phoneNumber: string): Promise<void> {
   if (batch.isSynced) {
     bodyParts.push(`_Send more files or tap Edit to set print options & submit._`);
   } else {
-    bodyParts.push(`_Send more files or tap Edit to connect & set print options._`);
+    const syncLink = await getOrCreateWhatsAppSyncLink(phoneNumber);
+    bodyParts.push(
+      `_Send more files or tap Edit to connect & set print options._`,
+      "",
+      `*Sync to edit on the web:*`,
+      syncLink ?? `${FRONTEND_BASE_URL}/`,
+    );
   }
 
   const body = bodyParts.join("\n");
@@ -1208,25 +1214,36 @@ Please try again.`,
               }).catch(() => { /* non-critical */ });
             }
 
-            // ── For unsynced users: intercept "edit" to send sync link ──
-            // All other commands (status, help, clear, etc.) work normally.
-            if (!isAuthenticated && messageText === "edit" && phoneNumberId && userData.displayPhoneNumber) {
-              const syncLink = await getOrCreateWhatsAppSyncLink(
-                userData.displayPhoneNumber,
-                "web", // source=web so OTP page redirects to web dashboard
-              );
-              sendWhatsAppTextMessage({
-                to: userData.displayPhoneNumber,
-                phoneNumberId,
-                message: [
-                  `${waBold("Sync to edit your draft")} 🔗`,
-                  `Your files are saved! To set print options & submit, sync first:`,
-                  "",
-                  syncLink ?? "https://zopy.co.in",
-                  "",
-                  `_Open this link in your browser to sync, then you'll be redirected to edit your draft._`,
-                ].join("\n"),
-              }).catch((err) => console.error("[sync-edit] send error:", err));
+            if (messageText === "edit" && phoneNumberId && userData.displayPhoneNumber) {
+              if (!isAuthenticated) {
+                const syncLink = await getOrCreateWhatsAppSyncLink(
+                  userData.displayPhoneNumber,
+                  "web", // source=web so OTP page redirects to web dashboard
+                );
+                sendWhatsAppTextMessage({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  message: [
+                    `${waBold("Sync to edit your draft")} 🔗`,
+                    `Your files are saved! To set print options & submit, sync first:`,
+                    "",
+                    syncLink ?? "https://zopy.co.in",
+                    "",
+                    `_Open this link in your browser to sync, then you'll be redirected to edit your draft._`,
+                  ].join("\n"),
+                }).catch((err) => console.error("[sync-edit] send error:", err));
+              } else {
+                sendWhatsAppTextMessage({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  message: [
+                    `${waBold("Edit your draft")} 🔗`,
+                    "Tap the link below to set print options and submit your job:",
+                    "",
+                    "https://zopy.co.in",
+                  ].join("\n"),
+                }).catch((err) => console.error("[authenticated-edit] send error:", err));
+              }
               continue;
             }
 
@@ -1445,7 +1462,14 @@ Please try again.`,
                     `▸ ${waBold("Clear")} › delete your draft`,
                     "",
                     `_Send files, then tap ${waBold("Edit")} when done._`,
-                    ...(!isAuthenticated ? ["", `\ud83d\udd17 _You're not synced yet. Type ${waBold('"SYNC"')} to connect._`] : []),
+                    ...(!isAuthenticated
+                      ? [
+                          "",
+                          `\ud83d\udd17 *Sync your WhatsApp:*`,
+                          (await getOrCreateWhatsAppSyncLink(userData.displayPhoneNumber)) ??
+                            `${FRONTEND_BASE_URL}/`,
+                        ]
+                      : []),
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "edit", title: "Edit" } },
@@ -1527,7 +1551,14 @@ Please try again.`,
                     body: [
                       `${waBold("No files added yet.")}`,
                       `_Send your documents and type ${waBold('"EDIT"')} when done._`,
-                      ...(!isAuthenticated ? ["", `_Sync anytime to edit on the web._`] : []),
+                      ...(!isAuthenticated
+                        ? [
+                            "",
+                            `*Sync to edit on the web:*`,
+                            (await getOrCreateWhatsAppSyncLink(userData.displayPhoneNumber)) ??
+                              `${FRONTEND_BASE_URL}/`,
+                          ]
+                        : []),
                     ].join("\n"),
                     buttons: [
                       { type: "reply", reply: { id: "help", title: "Help" } },
@@ -1547,7 +1578,14 @@ Please try again.`,
                       `${waBold("Your current documents:")}`,
                       ...fileLines,
                       `_Send more · Type ${waBold('"EDIT"')} to continue_`,
-                      ...(!isAuthenticated ? ["", `_Sync to edit print options on the web._`] : []),
+                      ...(!isAuthenticated
+                        ? [
+                            "",
+                            `*Sync to edit on the web:*`,
+                            (await getOrCreateWhatsAppSyncLink(userData.displayPhoneNumber)) ??
+                              `${FRONTEND_BASE_URL}/`,
+                          ]
+                        : []),
                     ].join("\n"),
                     buttons: [
                       { type: "reply", reply: { id: "edit", title: "Edit" } },

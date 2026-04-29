@@ -253,22 +253,24 @@ router.post("/whatsapp-login", async (req, res) => {
       });
 
       if (allDrafts.length > 1) {
-        // Keep the oldest draft as the primary, merge files from others into it
-        const primaryDraft = allDrafts[0]!;
+        // Prioritize the WEB draft as the primary one
+        const webDraft = allDrafts.find((d) => d.source === "WEB");
+        const primaryDraft = webDraft || allDrafts[0]!;
         const mergedFileNames: string[] = [];
 
-        for (let i = 1; i < allDrafts.length; i++) {
-          const otherDraft = allDrafts[i]!;
-          if (otherDraft.files.length > 0) {
+        for (const draft of allDrafts) {
+          if (draft.id === primaryDraft.id) continue;
+          
+          if (draft.files.length > 0) {
             // Move files to the primary draft
             await prisma.file.updateMany({
-              where: { printJobId: otherDraft.id },
+              where: { printJobId: draft.id },
               data: { printJobId: primaryDraft.id },
             });
-            mergedFileNames.push(...otherDraft.files.map((f) => f.name));
+            mergedFileNames.push(...draft.files.map((f) => f.name));
           }
-          // Delete the empty duplicate draft
-          await prisma.printJob.delete({ where: { id: otherDraft.id } });
+          // Delete the duplicate draft
+          await prisma.printJob.delete({ where: { id: draft.id } });
         }
 
         // Recalculate totals for the primary draft
@@ -294,8 +296,8 @@ router.post("/whatsapp-login", async (req, res) => {
               to: whatsAppUser.phoneNumber,
               phoneNumberId: mergePhoneNumberId,
               message: [
-                `${"*Files merged*"} 📂`,
-                `Found files from web, added to your draft:`,
+                `${waBold("Files merged")} 📂`,
+                `Files found on web, adding to your draft:`,
                 displayNames.join(", ") + extra,
               ].join("\n"),
             }).catch((err) => console.error("[draft-merge] notify error:", err));
