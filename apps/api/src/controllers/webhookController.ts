@@ -29,10 +29,6 @@ import {
   trackFileProcessingStarted,
   trackMessageReceived,
   isFileStillProcessing,
-  shouldSendUploadSticker,
-  recordUploadStickerSent,
-  shouldSendFileBatch,
-  recordFileBatchSent,
 } from "../utils/waTrackingCache.js";
 
 const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL ?? "").replace(
@@ -217,36 +213,60 @@ function friendlyFileName(rawName: string): string {
 
 async function flushFileBatch(phoneNumber: string): Promise<void> {
   const batch = fileBatchQueue.get(phoneNumber);
-  if (!batch || batch.files.length === 0) {
-    fileBatchQueue.delete(phoneNumber);
-    return;
-  }
+  if (!batch) return;
 
+  // 1) Fetch the current WhatsApp user to check last batch timing
+  const waUser = await prisma.whatsAppUser.findUnique({
+    where: { phoneNumber },
+    select: { lastFileBatchSentAt: true },
+  });
+
+  const now = Date.now();
+  const lastSentAt = waUser?.lastFileBatchSentAt?.getTime() || 0;
+  
   // Cross-process synchronization: only send one message per 4s window
-  if (!shouldSendFileBatch(phoneNumber)) {
-    console.log(`[file-batch] Skipping redundant flush for ${phoneNumber}`);
+  if (now - lastSentAt < 4000) {
+    console.log(`[file-batch] Skipping redundant flush for ${phoneNumber} (DB-synced)`);
     fileBatchQueue.delete(phoneNumber);
     return;
   }
-  recordFileBatchSent(phoneNumber);
 
-  // Fetch real-time total from DB (shared across processes)
-  let totalFiles = batch.files.length;
+  // 2) Update DB immediately to "lock" this batch for this user
+  await prisma.whatsAppUser.update({
+    where: { phoneNumber },
+    data: { lastFileBatchSentAt: new Date() },
+  });
+
+  // 3) Fetch ALL files for this job from DB (ensures we see files from ALL cores)
+  let totalFiles = 0;
+  let fileList: { name: string; pages: number }[] = [];
+  
   if (batch.jobId) {
     try {
-      totalFiles = await prisma.file.count({
-        where: { printJobId: batch.jobId }
+      const dbFiles = await prisma.file.findMany({
+        where: { printJobId: batch.jobId },
+        orderBy: { createdAt: "asc" },
+        select: { name: true, pages: true },
       });
+      totalFiles = dbFiles.length;
+      fileList = dbFiles;
     } catch (err) {
-      console.error("[file-batch] DB count error:", err);
+      console.error("[file-batch] DB fetch error:", err);
+      totalFiles = batch.files.length;
+      fileList = batch.files;
     }
   }
 
-  // Build file list from the local batch (recent files)
+  if (totalFiles === 0) {
+    fileBatchQueue.delete(phoneNumber);
+    return;
+  }
+
+  // 4) Build file list for the message
   const MAX_LISTED = 15;
-  const listedFiles = batch.files.slice(0, MAX_LISTED);
+  const listedFiles = fileList.slice(0, MAX_LISTED);
   const fileLines = listedFiles.map((f, i) => {
-    return `${i + 1}. ${f.displayName} \u2022 ${f.pages} pg`;
+    return `${i + 1}. ${friendlyFileName(f.name)} \u2022 ${f.pages} pg`;
   });
   if (totalFiles > MAX_LISTED) {
     fileLines.push(`... and ${totalFiles - MAX_LISTED} more`);
@@ -423,15 +443,25 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
               const mimeType = incomingMessage.document?.mime_type || "";
               console.log("Received document:", incomingMessage.document);
 
-              // Send sticker IMMEDIATELY — before any DB queries or processing
-              if (phoneNumberId && userData.displayPhoneNumber && shouldSendUploadSticker(userData.displayPhoneNumber)) {
-                recordUploadStickerSent(userData.displayPhoneNumber);
-                sendWhatsAppStickerFromFile({
-                  to: userData.displayPhoneNumber,
-                  phoneNumberId,
-                  filePath: UPLOAD_STICKER_FILE_PATH,
-                }).catch((err) => console.error("[upload-sticker] send error:", err));
-              }
+              // Send sticker IMMEDIATELY — coordinate via DB
+                const waUserForSticker = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { lastUploadStickerSentAt: true },
+                });
+                const lastStickerSentAt = waUserForSticker?.lastUploadStickerSentAt?.getTime() || 0;
+
+                if (phoneNumberId && userData.displayPhoneNumber && (Date.now() - lastStickerSentAt > 15000)) {
+                  await prisma.whatsAppUser.update({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    data: { lastUploadStickerSentAt: new Date() },
+                  }).catch(() => {});
+
+                  sendWhatsAppStickerFromFile({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    filePath: UPLOAD_STICKER_FILE_PATH,
+                  }).catch((err) => console.error("[upload-sticker] send error:", err));
+                }
 
               const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
               const rawFileName =
@@ -820,15 +850,25 @@ Please try again.`,
 
               console.log("Received image:", imageData);
 
-              // Send sticker IMMEDIATELY — before any DB queries or processing
-              if (phoneNumberId && userData.displayPhoneNumber && shouldSendUploadSticker(userData.displayPhoneNumber)) {
-                recordUploadStickerSent(userData.displayPhoneNumber);
-                sendWhatsAppStickerFromFile({
-                  to: userData.displayPhoneNumber,
-                  phoneNumberId,
-                  filePath: UPLOAD_STICKER_FILE_PATH,
-                }).catch((err) => console.error("[upload-sticker] send error:", err));
-              }
+              // Send sticker IMMEDIATELY — coordinate via DB
+                const waUserForSticker = await prisma.whatsAppUser.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber },
+                  select: { lastUploadStickerSentAt: true },
+                });
+                const lastStickerSentAt = waUserForSticker?.lastUploadStickerSentAt?.getTime() || 0;
+
+                if (phoneNumberId && userData.displayPhoneNumber && (Date.now() - lastStickerSentAt > 15000)) {
+                  await prisma.whatsAppUser.update({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    data: { lastUploadStickerSentAt: new Date() },
+                  }).catch(() => {});
+
+                  sendWhatsAppStickerFromFile({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    filePath: UPLOAD_STICKER_FILE_PATH,
+                  }).catch((err) => console.error("[upload-sticker] send error:", err));
+                }
 
               // ── Ensure WhatsApp user record exists (auto-create for unsynced users) ──
               if (userData.displayPhoneNumber) {
