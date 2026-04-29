@@ -25,9 +25,14 @@ import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import socket from "../config/socket.js";
 import {
-  trackMessageReceived,
+  initWaTrackingCache,
   trackFileProcessingStarted,
+  trackMessageReceived,
   isFileStillProcessing,
+  shouldSendUploadSticker,
+  recordUploadStickerSent,
+  shouldSendFileBatch,
+  recordFileBatchSent,
 } from "../utils/waTrackingCache.js";
 
 const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL ?? "").replace(
@@ -197,10 +202,9 @@ interface PendingBatch {
 }
 
 const fileBatchQueue = new Map<string, PendingBatch>();
-const stickerSentForBatch = new Set<string>();
 const limitReachedSent = new Map<string, number>(); // phone → timestamp
 
-const BATCH_WINDOW_MS = 7000;
+const BATCH_WINDOW_MS = 5000;
 
 function friendlyFileName(rawName: string): string {
   // Image-converted files: show "Photo" instead of "whatsapp-image-173849384.pdf"
@@ -211,17 +215,34 @@ function friendlyFileName(rawName: string): string {
   return rawName.replace(/\.pdf$/i, "");
 }
 
-function flushFileBatch(phoneNumber: string): void {
+async function flushFileBatch(phoneNumber: string): Promise<void> {
   const batch = fileBatchQueue.get(phoneNumber);
   if (!batch || batch.files.length === 0) {
     fileBatchQueue.delete(phoneNumber);
-    stickerSentForBatch.delete(phoneNumber);
     return;
   }
 
-  const totalFiles = batch.files.length;
+  // Cross-process synchronization: only send one message per 4s window
+  if (!shouldSendFileBatch(phoneNumber)) {
+    console.log(`[file-batch] Skipping redundant flush for ${phoneNumber}`);
+    fileBatchQueue.delete(phoneNumber);
+    return;
+  }
+  recordFileBatchSent(phoneNumber);
 
-  // Build file list but truncate if too many (WhatsApp body max = 1024 chars)
+  // Fetch real-time total from DB (shared across processes)
+  let totalFiles = batch.files.length;
+  if (batch.jobId) {
+    try {
+      totalFiles = await prisma.file.count({
+        where: { printJobId: batch.jobId }
+      });
+    } catch (err) {
+      console.error("[file-batch] DB count error:", err);
+    }
+  }
+
+  // Build file list from the local batch (recent files)
   const MAX_LISTED = 15;
   const listedFiles = batch.files.slice(0, MAX_LISTED);
   const fileLines = listedFiles.map((f, i) => {
@@ -245,7 +266,7 @@ function flushFileBatch(phoneNumber: string): void {
 
   const body = bodyParts.join("\n");
 
-  sendWhatsAppButtonMessage({
+  await sendWhatsAppButtonMessage({
     to: batch.to,
     phoneNumberId: batch.phoneNumberId,
     body,
@@ -264,7 +285,6 @@ function flushFileBatch(phoneNumber: string): void {
   }
 
   fileBatchQueue.delete(phoneNumber);
-  stickerSentForBatch.delete(phoneNumber);
 }
 
 function queueFileConfirmation(args: {
@@ -404,8 +424,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
               console.log("Received document:", incomingMessage.document);
 
               // Send sticker IMMEDIATELY — before any DB queries or processing
-              if (phoneNumberId && userData.displayPhoneNumber && !stickerSentForBatch.has(userData.displayPhoneNumber)) {
-                stickerSentForBatch.add(userData.displayPhoneNumber);
+              if (phoneNumberId && userData.displayPhoneNumber && shouldSendUploadSticker(userData.displayPhoneNumber)) {
+                recordUploadStickerSent(userData.displayPhoneNumber);
                 sendWhatsAppStickerFromFile({
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
@@ -801,8 +821,8 @@ Please try again.`,
               console.log("Received image:", imageData);
 
               // Send sticker IMMEDIATELY — before any DB queries or processing
-              if (phoneNumberId && userData.displayPhoneNumber && !stickerSentForBatch.has(userData.displayPhoneNumber)) {
-                stickerSentForBatch.add(userData.displayPhoneNumber);
+              if (phoneNumberId && userData.displayPhoneNumber && shouldSendUploadSticker(userData.displayPhoneNumber)) {
+                recordUploadStickerSent(userData.displayPhoneNumber);
                 sendWhatsAppStickerFromFile({
                   to: userData.displayPhoneNumber,
                   phoneNumberId,

@@ -5,6 +5,8 @@
  *   • lastMessageAt          — tracks when a user last messaged us (20h window)
  *   • lastFileProcessingAt   — tracks when we started processing their last file
  *                               (used to gate the "EDIT" command for 7 seconds)
+ *   • lastUploadStickerSentAt — tracks when we last sent an "upload" sticker
+ *   • lastFileBatchSentAt    — tracks when we last sent a batched confirmation
  *
  * What is NOT stored here (critical data — stays in the DB):
  *   • phone → userId mapping
@@ -18,7 +20,7 @@
  *   • In-memory Map is the source-of-truth for the current process.
  *   • Every mutation coalesces writes and flushes to disk asynchronously.
  *   • On startup the file is loaded into memory.
- *   • A periodic reload (every 5 s) picks up writes from sibling processes.
+ *   • A periodic reload (every 500ms) picks up writes from sibling processes.
  */
 
 import fs from "node:fs";
@@ -32,6 +34,10 @@ export interface WaTrackingEntry {
   lastMessageAt: string | null;
   /** ISO timestamp: when we started processing the user's last file */
   lastFileProcessingAt: string | null;
+  /** ISO timestamp: when we last sent an "uploading" sticker to this user */
+  lastUploadStickerSentAt?: string | null;
+  /** ISO timestamp: when we last flushed a file batch message for this user */
+  lastFileBatchSentAt?: string | null;
 }
 
 type CacheData = Record<string, WaTrackingEntry>; // keyed by phoneNumber
@@ -94,7 +100,12 @@ function loadFromDisk(): void {
     for (const [phone, entry] of Object.entries(data)) {
       const existing = cache.get(phone);
       if (!existing) {
-        cache.set(phone, entry);
+        cache.set(phone, {
+          lastMessageAt: entry.lastMessageAt || null,
+          lastFileProcessingAt: entry.lastFileProcessingAt || null,
+          lastUploadStickerSentAt: entry.lastUploadStickerSentAt || null,
+          lastFileBatchSentAt: entry.lastFileBatchSentAt || null,
+        });
       } else {
         // Keep the more-recent timestamp for each field
         if (
@@ -110,6 +121,20 @@ function loadFromDisk(): void {
             entry.lastFileProcessingAt > existing.lastFileProcessingAt)
         ) {
           existing.lastFileProcessingAt = entry.lastFileProcessingAt;
+        }
+        if (
+          entry.lastUploadStickerSentAt &&
+          (!existing.lastUploadStickerSentAt ||
+            entry.lastUploadStickerSentAt > existing.lastUploadStickerSentAt)
+        ) {
+          existing.lastUploadStickerSentAt = entry.lastUploadStickerSentAt;
+        }
+        if (
+          entry.lastFileBatchSentAt &&
+          (!existing.lastFileBatchSentAt ||
+            entry.lastFileBatchSentAt > existing.lastFileBatchSentAt)
+        ) {
+          existing.lastFileBatchSentAt = entry.lastFileBatchSentAt;
         }
       }
     }
@@ -133,6 +158,8 @@ export function trackMessageReceived(phoneNumber: string): void {
     cache.set(phoneNumber, {
       lastMessageAt: now,
       lastFileProcessingAt: null,
+      lastUploadStickerSentAt: null,
+      lastFileBatchSentAt: null,
     });
   }
   scheduleFlush();
@@ -151,6 +178,8 @@ export function trackFileProcessingStarted(phoneNumber: string): void {
     cache.set(phoneNumber, {
       lastMessageAt: null,
       lastFileProcessingAt: now,
+      lastUploadStickerSentAt: null,
+      lastFileBatchSentAt: null,
     });
   }
   scheduleFlush();
@@ -165,6 +194,60 @@ export function isFileStillProcessing(phoneNumber: string): boolean {
   if (!entry?.lastFileProcessingAt) return false;
   const elapsed = Date.now() - new Date(entry.lastFileProcessingAt).getTime();
   return elapsed < 7_000;
+}
+
+/**
+ * Check if we should send an "upload" sticker.
+ * Returns true if no sticker was sent in the last 15 seconds.
+ */
+export function shouldSendUploadSticker(phoneNumber: string): boolean {
+  const entry = cache.get(phoneNumber);
+  if (!entry?.lastUploadStickerSentAt) return true;
+  const elapsed = Date.now() - new Date(entry.lastUploadStickerSentAt).getTime();
+  return elapsed > 15_000; // Only one sticker per 15s batch
+}
+
+export function recordUploadStickerSent(phoneNumber: string): void {
+  const now = new Date().toISOString();
+  const existing = cache.get(phoneNumber);
+  if (existing) {
+    existing.lastUploadStickerSentAt = now;
+  } else {
+    cache.set(phoneNumber, {
+      lastMessageAt: null,
+      lastFileProcessingAt: null,
+      lastUploadStickerSentAt: now,
+      lastFileBatchSentAt: null,
+    });
+  }
+  scheduleFlush();
+}
+
+/**
+ * Check if we should send a file batch confirmation message.
+ * Returns true if no batch message was sent in the last 4 seconds.
+ */
+export function shouldSendFileBatch(phoneNumber: string): boolean {
+  const entry = cache.get(phoneNumber);
+  if (!entry?.lastFileBatchSentAt) return true;
+  const elapsed = Date.now() - new Date(entry.lastFileBatchSentAt).getTime();
+  return elapsed > 4_000; // Small buffer to prevent double-flushes across processes
+}
+
+export function recordFileBatchSent(phoneNumber: string): void {
+  const now = new Date().toISOString();
+  const existing = cache.get(phoneNumber);
+  if (existing) {
+    existing.lastFileBatchSentAt = now;
+  } else {
+    cache.set(phoneNumber, {
+      lastMessageAt: null,
+      lastFileProcessingAt: null,
+      lastUploadStickerSentAt: null,
+      lastFileBatchSentAt: now,
+    });
+  }
+  scheduleFlush();
 }
 
 /**
@@ -202,7 +285,8 @@ export function initWaTrackingCache(): void {
   );
 
   // Periodically reload from disk to pick up writes from sibling processes
+  // 500ms interval for more responsive cross-process batching
   setInterval(() => {
     loadFromDisk();
-  }, 5_000);
+  }, 500);
 }
