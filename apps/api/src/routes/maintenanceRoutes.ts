@@ -48,7 +48,7 @@ app.post(
 
     try {
       // Find all non-expired jobs older than 24h with terminal/stale statuses
-      const jobs = await prisma.printJob.findMany({
+      const jobs = (await prisma.printJob.findMany({
         where: {
           createdAt: { lt: cutoff },
           expired: false,
@@ -61,7 +61,7 @@ app.post(
               PrintJobStatus.CANCELED,
             ],
           },
-        },
+        } as any,
         select: {
           id: true,
           createdAt: true,
@@ -74,7 +74,7 @@ app.post(
             },
           },
         },
-      });
+      })) as any[];
 
       if (jobs.length === 0) {
         return res.status(200).json({
@@ -91,7 +91,7 @@ app.post(
       // 1) Delete files from R2 (best-effort, batched)
       const fileUrls = uniqueStrings(
         jobs
-          .flatMap((j) => j.files.map((f) => f.url))
+          .flatMap((j) => (j.files as any[]).map((f) => f.url))
           .filter(
             (url): url is string => typeof url === "string" && url.length > 0,
           )
@@ -138,7 +138,7 @@ app.post(
         await prisma.printJob.update({
           where: { id: job.id },
           data: updateData,
-        });
+        } as any);
 
         if (job.verificationCode != null) {
           otpsFreed++;
@@ -146,7 +146,7 @@ app.post(
         expiredCount++;
 
         // 3) Clear file URLs for this job (keep file records for analytics)
-        const fileIds = job.files.map((f) => f.id);
+        const fileIds = (job.files as any[]).map((f) => f.id);
         if (fileIds.length > 0) {
           await prisma.file.updateMany({
             where: { id: { in: fileIds } },
@@ -190,7 +190,7 @@ app.delete(
     }
 
     try {
-      const jobs = await prisma.printJob.findMany({
+      const jobs = (await prisma.printJob.findMany({
         where: {
           createdAt: { lt: cutoff },
           expired: false,
@@ -203,7 +203,7 @@ app.delete(
               PrintJobStatus.CANCELED,
             ],
           },
-        },
+        } as any,
         select: {
           id: true,
           createdAt: true,
@@ -216,7 +216,7 @@ app.delete(
             },
           },
         },
-      });
+      })) as any[];
 
       if (jobs.length === 0) {
         return res.status(200).json({
@@ -232,7 +232,7 @@ app.delete(
 
       const fileUrls = uniqueStrings(
         jobs
-          .flatMap((j) => j.files.map((f) => f.url))
+          .flatMap((j) => (j.files as any[]).map((f) => f.url))
           .filter(
             (url): url is string => typeof url === "string" && url.length > 0,
           )
@@ -275,14 +275,14 @@ app.delete(
         await prisma.printJob.update({
           where: { id: job.id },
           data: updateData,
-        });
+        } as any);
 
         if (job.verificationCode != null) {
           otpsFreed++;
         }
         expiredCount++;
 
-        const fileIds = job.files.map((f) => f.id);
+        const fileIds = (job.files as any[]).map((f) => f.id);
         if (fileIds.length > 0) {
           await prisma.file.updateMany({
             where: { id: { in: fileIds } },
@@ -337,7 +337,7 @@ app.delete(
 
     try {
       // Find all DRAFT jobs
-      const drafts = await prisma.printJob.findMany({
+      const drafts = (await prisma.printJob.findMany({
         where: {
           status: PrintJobStatus.DRAFT,
         },
@@ -352,7 +352,7 @@ app.delete(
             orderBy: { createdAt: "desc" },
           },
         },
-      });
+      })) as any[];
 
       // Filter: keep only drafts where the LAST file is older than 24h,
       // or drafts with no files that are themselves older than 24h.
@@ -362,7 +362,7 @@ app.delete(
           return draft.createdAt < cutoff;
         }
         // Non-empty draft — stale if the newest file is old
-        const latestFileDate = draft.files[0]!.createdAt;
+        const latestFileDate = (draft.files[0] as any).createdAt;
         return latestFileDate < cutoff;
       });
 
@@ -380,7 +380,7 @@ app.delete(
       const draftIds = staleDrafts.map((d) => d.id);
       const fileUrls = uniqueStrings(
         staleDrafts
-          .flatMap((d) => d.files.map((f) => f.url))
+          .flatMap((d) => (d.files as any[]).map((f) => f.url))
           .filter(
             (url): url is string => typeof url === "string" && url.length > 0,
           )

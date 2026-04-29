@@ -22,7 +22,6 @@ coverage
 .vercel
 dist-electron/
 native/
-resources/
 
 # Build Outputs
 .next/
