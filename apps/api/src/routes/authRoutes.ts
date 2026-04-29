@@ -7,6 +7,9 @@ import { authMiddleware } from "../middleware/authMiddleware.js";
 import { sendWhatsAppTextMessage, sendWhatsAppButtonMessage } from "../modules/whatsappServices.js";
 
 const router = express.Router();
+function waBold(text: string): string {
+  return `*${text}*`;
+}
 
 router.get("/register", async (req, res) => {
   // In version 1, no real registration logic

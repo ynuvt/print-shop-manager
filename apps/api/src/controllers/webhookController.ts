@@ -183,7 +183,7 @@ export const UPLOAD_STICKER_FILE_PATH = fileURLToPath(
 // then sends ONE consolidated WhatsApp message listing all of them.
 
 interface QueuedFile {
-  displayName: string;
+  name: string;
   pages: number;
 }
 
@@ -328,7 +328,7 @@ function queueFileConfirmation(args: {
 
   if (existing) {
     // Add to the existing batch and reset the timer
-    existing.files.push({ displayName, pages: args.pages });
+    existing.files.push({ name: displayName, pages: args.pages });
     existing.isSynced = args.isSynced;
     existing.jobId = args.jobId;
     existing.userId = args.userId;
@@ -340,7 +340,7 @@ function queueFileConfirmation(args: {
     fileBatchQueue.set(args.phoneNumber, {
       to: args.to,
       phoneNumberId: args.phoneNumberId,
-      files: [{ displayName, pages: args.pages }],
+      files: [{ name: displayName, pages: args.pages }],
       timer,
       isSynced: args.isSynced,
       jobId: args.jobId,
