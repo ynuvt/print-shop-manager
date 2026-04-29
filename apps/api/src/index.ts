@@ -11,6 +11,15 @@ import { initWaTrackingCache } from "./utils/waTrackingCache.js";
 // Warm the file-backed tracking cache before handling requests
 initWaTrackingCache();
 
+import { warmupStickerCache } from "./modules/whatsappServices.js";
+import { STICKER_FILE_PATH, UPLOAD_STICKER_FILE_PATH } from "./controllers/webhookController.js";
+
+const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+if (phoneNumberId) {
+  warmupStickerCache(STICKER_FILE_PATH, phoneNumberId).catch(() => {});
+  warmupStickerCache(UPLOAD_STICKER_FILE_PATH, phoneNumberId).catch(() => {});
+}
+
 const app = express();
 
 app.set("trust proxy", 1);

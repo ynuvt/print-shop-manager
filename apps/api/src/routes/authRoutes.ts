@@ -2,6 +2,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { prisma } from "@printowl/db";
+import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import { sendWhatsAppTextMessage, sendWhatsAppButtonMessage } from "../modules/whatsappServices.js";
 
@@ -109,15 +110,13 @@ router.post("/whatsapp-login", async (req, res) => {
               "*Already verified* ✅",
               "Your WhatsApp is already synced! You can send your documents here directly.",
               "",
-              "⚠️ _If you shared any documents before syncing, please send them again._",
-              "",
-              "📝 *Edit* — set print options & submit",
-              "📊 *Status* — check your print job status",
-              "❓ *Help* — see all available commands",
+              "▸ *Edit* › set print options & submit",
+              "▸ *Current* › check your print job",
+              "▸ *Help* › see all commands",
             ].join("\n"),
             buttons: [
               { type: "reply", reply: { id: "edit", title: "Edit" } },
-              { type: "reply", reply: { id: "status", title: "Status" } },
+              { type: "reply", reply: { id: "status", title: "Current" } },
               { type: "reply", reply: { id: "help", title: "Help" } },
             ],
           });
@@ -191,19 +190,17 @@ router.post("/whatsapp-login", async (req, res) => {
               phoneNumberId,
               body: [
                 "*Synced successfully* ✅",
-                "You can now send your documents directly here on WhatsApp.",
+                "Your WhatsApp is now connected! All your files are ready.",
                 "",
-                "⚠️ _If you shared any documents before syncing, please send them again._",
+                "▸ *Edit* › set print options & submit",
+                "▸ *Current* › check your print job",
+                "▸ *Help* › see all commands",
                 "",
-                "📝 *Edit* — set print options & submit",
-                "📊 *Status* — check your print job status",
-                "❓ *Help* — see all available commands",
-                "",
-                "_Start by sending your first file!_",
+                "_Tap Edit to review your files & submit!_",
               ].join("\n"),
               buttons: [
                 { type: "reply", reply: { id: "edit", title: "Edit" } },
-                { type: "reply", reply: { id: "status", title: "Status" } },
+                { type: "reply", reply: { id: "status", title: "Current" } },
                 { type: "reply", reply: { id: "help", title: "Help" } },
               ],
             });
@@ -245,6 +242,71 @@ router.post("/whatsapp-login", async (req, res) => {
       data: { userId: resolvedUserId },
     });
 
+    // ── Draft merge: if user has both a WhatsApp draft and web draft, merge them ──
+    try {
+      const allDrafts = await prisma.printJob.findMany({
+        where: { userId: resolvedUserId, status: PrintJobStatus.DRAFT },
+        include: {
+          files: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (allDrafts.length > 1) {
+        // Keep the oldest draft as the primary, merge files from others into it
+        const primaryDraft = allDrafts[0]!;
+        const mergedFileNames: string[] = [];
+
+        for (let i = 1; i < allDrafts.length; i++) {
+          const otherDraft = allDrafts[i]!;
+          if (otherDraft.files.length > 0) {
+            // Move files to the primary draft
+            await prisma.file.updateMany({
+              where: { printJobId: otherDraft.id },
+              data: { printJobId: primaryDraft.id },
+            });
+            mergedFileNames.push(...otherDraft.files.map((f) => f.name));
+          }
+          // Delete the empty duplicate draft
+          await prisma.printJob.delete({ where: { id: otherDraft.id } });
+        }
+
+        // Recalculate totals for the primary draft
+        const updatedFiles = await prisma.file.findMany({
+          where: { printJobId: primaryDraft.id },
+          select: { pages: true },
+        });
+        const totalPages = updatedFiles.reduce((sum, f) => sum + (f.pages ?? 0), 0);
+        await prisma.printJob.update({
+          where: { id: primaryDraft.id },
+          data: { totalPages, totalCost: totalPages * 2 },
+        });
+
+        // Notify user about the merge
+        if (mergedFileNames.length > 0) {
+          const mergePhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+          if (mergePhoneNumberId) {
+            const displayNames = mergedFileNames
+              .slice(0, 10)
+              .map((n) => n.replace(/\.pdf$/i, ""));
+            const extra = mergedFileNames.length > 10 ? `\n... and ${mergedFileNames.length - 10} more` : "";
+            sendWhatsAppTextMessage({
+              to: whatsAppUser.phoneNumber,
+              phoneNumberId: mergePhoneNumberId,
+              message: [
+                `${"*Files merged*"} 📂`,
+                `Found files from web, added to your draft:`,
+                displayNames.join(", ") + extra,
+              ].join("\n"),
+            }).catch((err) => console.error("[draft-merge] notify error:", err));
+          }
+        }
+      }
+    } catch (mergeErr) {
+      console.error("[draft-merge] error:", mergeErr);
+      // Non-critical — don't block the sync
+    }
+
     await prisma.user.upsert({
       where: { id: resolvedUserId },
       create: { id: resolvedUserId },
@@ -267,19 +329,17 @@ router.post("/whatsapp-login", async (req, res) => {
           phoneNumberId,
           body: [
             "*Synced successfully* ✅",
-            "You can now send your documents directly here on WhatsApp.",
+            "Your WhatsApp is now connected! All your files are ready.",
             "",
-            "⚠️ _If you shared any documents before syncing, please send them again._",
+            "▸ *Edit* › set print options & submit",
+            "▸ *Current* › check your print job",
+            "▸ *Help* › see all commands",
             "",
-            "📝 *Edit* — set print options & submit",
-            "📊 *Status* — check your print job status",
-            "❓ *Help* — see all available commands",
-            "",
-            "_Start by sending your first file!_",
+            "_Tap Edit to review your files & submit!_",
           ].join("\n"),
           buttons: [
             { type: "reply", reply: { id: "edit", title: "Edit" } },
-            { type: "reply", reply: { id: "status", title: "Status" } },
+            { type: "reply", reply: { id: "status", title: "Current" } },
             { type: "reply", reply: { id: "help", title: "Help" } },
           ],
         });

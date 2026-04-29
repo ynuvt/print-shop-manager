@@ -132,15 +132,18 @@ const syncLinkCache = new Map<string, string>();
 
 async function getOrCreateWhatsAppSyncLink(
   phoneNumber: string,
+  source?: string,
 ): Promise<string | null> {
   if (!FRONTEND_BASE_URL) {
     return null;
   }
 
+  const suffix = source ? `&source=${source}` : "";
+
   // 1) Check in-memory cache first (instant, zero DB cost)
   const cached = syncLinkCache.get(phoneNumber);
   if (cached) {
-    return cached;
+    return cached + suffix;
   }
 
   try {
@@ -157,20 +160,21 @@ async function getOrCreateWhatsAppSyncLink(
     if (active?.code) {
       const link = `${FRONTEND_BASE_URL}/auth/otp?code=${active.code}`;
       syncLinkCache.set(phoneNumber, link);
-      return link;
+      return link + suffix;
     }
     // 3) No active OTP — create a new one
-    return generateWhatsAppSyncLink(phoneNumber);
+    const baseLink = await generateWhatsAppSyncLink(phoneNumber);
+    return baseLink ? baseLink + suffix : null;
   } catch (err) {
     console.error("Failed to get/create WhatsApp sync link:", err);
     return null;
   }
 }
 
-const STICKER_FILE_PATH = fileURLToPath(
+export const STICKER_FILE_PATH = fileURLToPath(
   new URL("../resource/stickerzopy.webp", import.meta.url),
 );
-const UPLOAD_STICKER_FILE_PATH = fileURLToPath(
+export const UPLOAD_STICKER_FILE_PATH = fileURLToPath(
   new URL("../resource/upload.webp", import.meta.url),
 );
 // ── Batched file-received confirmations ──────────────────────────────────────
@@ -187,9 +191,14 @@ interface PendingBatch {
   phoneNumberId: string;
   files: QueuedFile[];
   timer: ReturnType<typeof setTimeout>;
+  isSynced: boolean;
+  jobId: string;
+  userId: string | null;
 }
 
 const fileBatchQueue = new Map<string, PendingBatch>();
+const stickerSentForBatch = new Set<string>();
+const limitReachedSent = new Map<string, number>(); // phone → timestamp
 
 const BATCH_WINDOW_MS = 3000;
 
@@ -206,21 +215,35 @@ function flushFileBatch(phoneNumber: string): void {
   const batch = fileBatchQueue.get(phoneNumber);
   if (!batch || batch.files.length === 0) {
     fileBatchQueue.delete(phoneNumber);
+    stickerSentForBatch.delete(phoneNumber);
     return;
   }
 
-  const fileLines = batch.files.map((f, i) => {
-    return `${i + 1}. ${f.displayName} \u2022 ${f.pages} pg`;
-  });
-
   const totalFiles = batch.files.length;
 
-  const body = [
+  // Build file list but truncate if too many (WhatsApp body max = 1024 chars)
+  const MAX_LISTED = 15;
+  const listedFiles = batch.files.slice(0, MAX_LISTED);
+  const fileLines = listedFiles.map((f, i) => {
+    return `${i + 1}. ${f.displayName} \u2022 ${f.pages} pg`;
+  });
+  if (totalFiles > MAX_LISTED) {
+    fileLines.push(`... and ${totalFiles - MAX_LISTED} more`);
+  }
+
+  const bodyParts = [
     waBold(`${totalFiles} file${totalFiles > 1 ? "s" : ""} received`),
     fileLines.join("\n"),
     "",
-    `_Send more files or tap Edit to set print options & submit._`,
-  ].join("\n");
+  ];
+
+  if (batch.isSynced) {
+    bodyParts.push(`_Send more files or tap Edit to set print options & submit._`);
+  } else {
+    bodyParts.push(`_Send more files or tap Edit to connect & set print options._`);
+  }
+
+  const body = bodyParts.join("\n");
 
   sendWhatsAppButtonMessage({
     to: batch.to,
@@ -228,12 +251,20 @@ function flushFileBatch(phoneNumber: string): void {
     body,
     buttons: [
       { type: "reply", reply: { id: "edit", title: "Edit" } },
-      { type: "reply", reply: { id: "status", title: "Status" } },
-      { type: "reply", reply: { id: "help", title: "Help" } },
+      { type: "reply", reply: { id: "status", title: "Current" } },
+      { type: "reply", reply: { id: "steps", title: "Steps" } },
     ],
   }).catch((err) => console.error("[file-batch] send error:", err));
 
+  if (batch.jobId) {
+    socket.emit("job-file-added", batch.jobId);
+  }
+  if (batch.userId) {
+    socket.emit("job-file-added", batch.userId);
+  }
+
   fileBatchQueue.delete(phoneNumber);
+  stickerSentForBatch.delete(phoneNumber);
 }
 
 function queueFileConfirmation(args: {
@@ -242,14 +273,19 @@ function queueFileConfirmation(args: {
   phoneNumberId: string;
   fileName: string;
   pages: number;
+  isSynced: boolean;
+  jobId: string;
+  userId: string | null;
 }): void {
   const existing = fileBatchQueue.get(args.phoneNumber);
-
   const displayName = friendlyFileName(args.fileName);
 
   if (existing) {
     // Add to the existing batch and reset the timer
     existing.files.push({ displayName, pages: args.pages });
+    existing.isSynced = args.isSynced;
+    existing.jobId = args.jobId;
+    existing.userId = args.userId;
     clearTimeout(existing.timer);
     existing.timer = setTimeout(() => flushFileBatch(args.phoneNumber), BATCH_WINDOW_MS);
   } else {
@@ -260,6 +296,9 @@ function queueFileConfirmation(args: {
       phoneNumberId: args.phoneNumberId,
       files: [{ displayName, pages: args.pages }],
       timer,
+      isSynced: args.isSynced,
+      jobId: args.jobId,
+      userId: args.userId,
     });
   }
 }
@@ -364,6 +403,16 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
               const mimeType = incomingMessage.document?.mime_type || "";
               console.log("Received document:", incomingMessage.document);
 
+              // Send sticker IMMEDIATELY — before any DB queries or processing
+              if (phoneNumberId && userData.displayPhoneNumber && !stickerSentForBatch.has(userData.displayPhoneNumber)) {
+                stickerSentForBatch.add(userData.displayPhoneNumber);
+                sendWhatsAppStickerFromFile({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  filePath: UPLOAD_STICKER_FILE_PATH,
+                }).catch((err) => console.error("[upload-sticker] send error:", err));
+              }
+
               const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
               const rawFileName =
                 incomingMessage.document?.filename || "whatsapp-file";
@@ -382,48 +431,23 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                 rawFileName.toLowerCase().endsWith(".docx") ||
                 rawFileName.toLowerCase().endsWith(".doc");
 
-              // ── Sync check FIRST: don't process files for unsynced users ──
-              try {
-                const syncCheckUser = await prisma.whatsAppUser.findUnique({
+              // ── Ensure WhatsApp user record exists (auto-create for unsynced users) ──
+              if (userData.displayPhoneNumber) {
+                await prisma.whatsAppUser.upsert({
                   where: { phoneNumber: userData.displayPhoneNumber },
-                  select: { userId: true },
-                });
-                if (!syncCheckUser || !syncCheckUser.userId) {
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    const syncLink = await getOrCreateWhatsAppSyncLink(
-                      userData.displayPhoneNumber,
-                    );
-                    sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      message: [
-                        `${waBold("Sync required!")} \ud83d\udd17`,
-                        `To print your files, connect your WhatsApp first:`,
-                        syncLink ?? "https://zopy.co.in",
-                        "",
-                        `_Once synced, just send your files here and edit print options on the website._`,
-                      ].join("\n"),
-                    }).catch((err) => console.error("[sync-prompt] send error:", err));
-                  }
-                  continue;
-                }
-              } catch {
-                // If the check fails, proceed — the later waUser lookup will handle it
+                  create: {
+                    phoneNumber: userData.displayPhoneNumber,
+                    name: userData.displayName || null,
+                  },
+                  update: {},
+                  select: { phoneNumber: true },
+                }).catch(() => { /* non-critical */ });
               }
 
               try {
                 if (userData.displayPhoneNumber) {
                   // Instant: update file-backed tracking cache (no DB round-trip)
                   trackFileProcessingStarted(userData.displayPhoneNumber);
-
-                  // Send animated upload sticker on the FIRST file only (avoids rate limits)
-                  if (phoneNumberId && !fileBatchQueue.has(userData.displayPhoneNumber)) {
-                    sendWhatsAppStickerFromFile({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      filePath: UPLOAD_STICKER_FILE_PATH,
-                    }).catch((err) => console.error("[upload-sticker] send error:", err));
-                  }
 
                   // Fire-and-forget: persist to DB in background
                   const timestampSeconds = Number(incomingMessage.timestamp);
@@ -629,8 +653,12 @@ Please try again or send a different file.`,
                   existingJob._count &&
                   existingJob._count.files >= 30
                 ) {
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    await sendWhatsAppButtonMessage({
+                  // Only send the limit message once per 30 seconds to avoid rate limits
+                  const lastSent = limitReachedSent.get(userData.displayPhoneNumber || "") ?? 0;
+                  const now = Date.now();
+                  if (phoneNumberId && userData.displayPhoneNumber && now - lastSent > 30000) {
+                    limitReachedSent.set(userData.displayPhoneNumber, now);
+                    sendWhatsAppButtonMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
                       body: [
@@ -641,10 +669,10 @@ Please try again or send a different file.`,
                       ].join("\n"),
                       buttons: [
                         { type: "reply", reply: { id: "edit", title: "Edit" } },
-                        { type: "reply", reply: { id: "status", title: "Status" } },
+                        { type: "reply", reply: { id: "status", title: "Current" } },
                         { type: "reply", reply: { id: "help", title: "Help" } },
                       ],
-                    });
+                    }).catch((err) => console.error("[limit-reached] send error:", err));
                   }
                   if (waUser.userId) {
                     socket.emit(
@@ -728,29 +756,27 @@ Please try again or send a different file.`,
                 });
 
                 if (phoneNumberId && userData.displayPhoneNumber) {
-                  socket.emit("job-file-added", printJobId);
-                  if (waUser.userId) {
-                    socket.emit("job-file-added", waUser.userId);
-                  }
-
                   queueFileConfirmation({
                     phoneNumber: userData.displayPhoneNumber,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     fileName: pdfFileName,
                     pages,
+                    isSynced: !!waUser.userId,
+                    jobId: printJobId,
+                    userId: waUser.userId ?? null,
                   });
                 }
               } catch (error) {
                 console.log("Failed to process document:", error);
                 if (phoneNumberId && userData.displayPhoneNumber) {
-                  await sendWhatsAppTextMessage({
+                  sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message: `${waBold("Error")}
 Failed to process ${waBold(rawFileName)}.
 Please try again.`,
                     phoneNumberId,
-                  });
+                  }).catch((err) => console.error("[doc-error-notify] send error:", err));
                 }
               }
 
@@ -774,33 +800,27 @@ Please try again.`,
 
               console.log("Received image:", imageData);
 
-              // ── Sync check FIRST: don't process images for unsynced users ──
-              try {
-                const syncCheckUser = await prisma.whatsAppUser.findUnique({
+              // Send sticker IMMEDIATELY — before any DB queries or processing
+              if (phoneNumberId && userData.displayPhoneNumber && !stickerSentForBatch.has(userData.displayPhoneNumber)) {
+                stickerSentForBatch.add(userData.displayPhoneNumber);
+                sendWhatsAppStickerFromFile({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  filePath: UPLOAD_STICKER_FILE_PATH,
+                }).catch((err) => console.error("[upload-sticker] send error:", err));
+              }
+
+              // ── Ensure WhatsApp user record exists (auto-create for unsynced users) ──
+              if (userData.displayPhoneNumber) {
+                await prisma.whatsAppUser.upsert({
                   where: { phoneNumber: userData.displayPhoneNumber },
-                  select: { userId: true },
-                });
-                if (!syncCheckUser || !syncCheckUser.userId) {
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    const syncLink = await getOrCreateWhatsAppSyncLink(
-                      userData.displayPhoneNumber,
-                    );
-                    sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      message: [
-                        `${waBold("Sync required!")} \ud83d\udd17`,
-                        `To print your files, connect your WhatsApp first:`,
-                        syncLink ?? "https://zopy.co.in",
-                        "",
-                        `_Once synced, just send your files here and edit print options on the website._`,
-                      ].join("\n"),
-                    }).catch((err) => console.error("[sync-prompt] send error:", err));
-                  }
-                  continue;
-                }
-              } catch {
-                // If the check fails, proceed — the later waUser lookup will handle it
+                  create: {
+                    phoneNumber: userData.displayPhoneNumber,
+                    name: userData.displayName || null,
+                  },
+                  update: {},
+                  select: { phoneNumber: true },
+                }).catch(() => { /* non-critical */ });
               }
 
               try {
@@ -974,7 +994,7 @@ Please try again.`,
                       ].join("\n"),
                       buttons: [
                         { type: "reply", reply: { id: "edit", title: "Edit" } },
-                        { type: "reply", reply: { id: "status", title: "Status" } },
+                        { type: "reply", reply: { id: "status", title: "Current" } },
                         { type: "reply", reply: { id: "help", title: "Help" } },
                       ],
                     });
@@ -1011,10 +1031,6 @@ Please try again.`,
                       option: { create: defaultOptions },
                     },
                   });
-
-                  if (waUser.userId) {
-                    socket.emit("files-added", waUser.userId, existingJob.id);
-                  }
                 } else if (waUser.userId) {
                   // No verificationCode for drafts — OTP is generated on submission from the web.
                   const newJob = await prisma.printJob.create({
@@ -1048,18 +1064,19 @@ Please try again.`,
                   });
 
                   existingJob = { ...newJob, files: [], _count: { files: 0 } };
-
-                  socket.emit("files-added", waUser.userId, newJob.id);
                 }
 
                 // Queue confirmation — batched with other files arriving within 3s
-                if (phoneNumberId && userData.displayPhoneNumber) {
+                if (phoneNumberId && userData.displayPhoneNumber && existingJob) {
                   queueFileConfirmation({
                     phoneNumber: userData.displayPhoneNumber,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     fileName: pdfFileName,
                     pages,
+                    isSynced: !!waUser?.userId,
+                    jobId: existingJob.id,
+                    userId: waUser.userId ?? null,
                   });
                 }
               } catch (imageError) {
@@ -1118,71 +1135,79 @@ Please try again.`,
             }
             const isAuthenticated = !!waUserMeta?.userId;
 
-            // If not authenticated, reply with sync link AS FAST AS POSSIBLE.
-            // We run the auth check above (already done) and the OTP lookup
-            // was started in parallel where possible.
-            if (!isAuthenticated && messageText !== "sync" && messageText !== "sync web") {
+            // Ensure WhatsApp user record exists for unsynced users too
+            if (!waUserMeta && userData.displayPhoneNumber) {
+              await prisma.whatsAppUser.upsert({
+                where: { phoneNumber: userData.displayPhoneNumber },
+                create: {
+                  phoneNumber: userData.displayPhoneNumber,
+                  name: userData.displayName || null,
+                },
+                update: {},
+                select: { phoneNumber: true },
+              }).catch(() => { /* non-critical */ });
+            }
+
+            // ── For unsynced users: intercept "edit" to send sync link ──
+            // All other commands (status, help, clear, etc.) work normally.
+            if (!isAuthenticated && messageText === "edit" && phoneNumberId && userData.displayPhoneNumber) {
+              const syncLink = await getOrCreateWhatsAppSyncLink(
+                userData.displayPhoneNumber,
+                "web", // source=web so OTP page redirects to web dashboard
+              );
+              sendWhatsAppTextMessage({
+                to: userData.displayPhoneNumber,
+                phoneNumberId,
+                message: [
+                  `${waBold("Sync to edit your draft")} 🔗`,
+                  `Your files are saved! To set print options & submit, sync first:`,
+                  "",
+                  syncLink ?? "https://zopy.co.in",
+                  "",
+                  `_Open this link in your browser to sync, then you'll be redirected to edit your draft._`,
+                ].join("\n"),
+              }).catch((err) => console.error("[sync-edit] send error:", err));
+              continue;
+            }
+
+            // ── For unsynced users: show welcome for unknown messages ──
+            if (
+              !isAuthenticated &&
+              messageText !== "sync" &&
+              messageText !== "sync web" &&
+              messageText !== "status" &&
+              messageText !== "help" &&
+              messageText !== "menu" &&
+              messageText !== "command" &&
+              messageText !== "commands" &&
+              messageText !== "clear" &&
+              messageText !== "edit" &&
+              !incomingMessage.text?.body?.trim().match(/^ZOPY-\d{6}$/i)
+            ) {
               if (phoneNumberId && userData.displayPhoneNumber) {
                 const syncLink = await getOrCreateWhatsAppSyncLink(
                   userData.displayPhoneNumber,
                 );
-                if (!syncLink) {
-                  // If sync link generation failed, log and retry once
-                  console.error("[sync-link] Failed to generate sync link for", userData.displayPhoneNumber);
-                }
-                if (
-                  messageText === "help" ||
-                  messageText === "menu" ||
-                  messageText === "command" ||
-                  messageText === "commands"
-                ) {
-                  if (syncLink) {
-                    sendWhatsAppCtaUrlMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      body: `${waBold("To use this, sync first:")}\n_Tap the button below to sync your WhatsApp._`,
-                      buttonText: "Sync Now",
-                      url: syncLink,
-                    }).catch((err) => console.error("[sync-link] send error:", err));
-                  } else {
-                    sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      message: [
-                        `${waBold("To use this, sync first:")}`,
-                        `Please send ${waBold('"sync"')} to get your sync link.`,
-                      ].join("\n"),
-                    }).catch((err) => console.error("[sync-link] send error:", err));
-                  }
-                } else {
-                  if (syncLink) {
-                    sendWhatsAppCtaUrlMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      body: [
-                        `${waBold("Welcome to Zopy!")} 🚀`,
-                        `Send your ${waBold("PDF, Word, or image files")} here.`,
-                        "",
-                        `${waBold("Sync first to get started:")}`,
-                        `_Tap the button below to sync your WhatsApp._`,
-                      ].join("\n"),
-                      buttonText: "Sync Now",
-                      url: syncLink,
-                    }).catch((err) => console.error("[sync-link] send error:", err));
-                  } else {
-                    sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      phoneNumberId,
-                      message: [
-                        `${waBold("Welcome to Zopy!")} 🚀`,
-                        `Send your ${waBold("PDF, Word, or image files")} here.`,
-                        "",
-                        `${waBold("Sync first to get started:")}`,
-                        `Please send ${waBold('"sync"')} to get your sync link.`,
-                      ].join("\n"),
-                    }).catch((err) => console.error("[sync-link] send error:", err));
-                  }
-                }
+                sendWhatsAppButtonMessage({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  body: [
+                    `${waBold("Welcome to Zopy!")} 🚀`,
+                    `Send your ${waBold("PDF, Word, or image files")} here.`,
+                    "",
+                    `▸ ${waBold("Edit")} › set print options & submit`,
+                    `▸ ${waBold("Current")} › check your print job`,
+                    `▸ ${waBold("Help")} › see all commands`,
+                    "",
+                    `${waBold("Sync anytime")} to edit print options on the web:`,
+                    syncLink ?? "https://zopy.co.in",
+                  ].join("\n"),
+                  buttons: [
+                    { type: "reply", reply: { id: "edit", title: "Edit" } },
+                    { type: "reply", reply: { id: "status", title: "Current" } },
+                    { type: "reply", reply: { id: "help", title: "Help" } },
+                  ],
+                }).catch((err) => console.error("[welcome] send error:", err));
               }
               continue;
             }
@@ -1310,13 +1335,13 @@ Please try again.`,
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
                     "",
-                    `📝 ${waBold("Edit")} — set print options & submit`,
-                    `📊 ${waBold("Status")} — check your print job status`,
-                    `❓ ${waBold("Help")} — see all available commands`,
+                    `▸ ${waBold("Edit")} › set print options & submit`,
+                    `▸ ${waBold("Current")} › check your print job`,
+                    `▸ ${waBold("Help")} › see all commands`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "edit", title: "Edit" } },
-                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "status", title: "Current" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
@@ -1336,7 +1361,7 @@ Please try again.`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "edit", title: "Edit" } },
-                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "status", title: "Current" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
@@ -1353,17 +1378,19 @@ Please try again.`,
                   phoneNumberId,
                   body: [
                     `${waBold("Here\u2019s what you can do:")}`,
-                    `\u2022 ${waBold("EDIT")} \u2014 Set print options & submit`,
-                    `\u2022 ${waBold("STATUS")} \u2014 View your current documents`,
-                    `\u2022 ${waBold("STEPS")} \u2014 How it works`,
-                    `\u2022 ${waBold("SYNC")} \u2014 Sync WhatsApp with web`,
-                    `\u2022 ${waBold("CLEAR")} \u2014 Delete draft`,
+                    `▸ ${waBold("Edit")} › set print options & submit`,
+                    `▸ ${waBold("Current")} › check your print job`,
+                    `▸ ${waBold("Steps")} › how it works`,
+                    `▸ ${waBold("Sync")} › connect WhatsApp to web`,
+                    `▸ ${waBold("Clear")} › delete your draft`,
+                    "",
                     `_Send files, then tap ${waBold("Edit")} when done._`,
+                    ...(!isAuthenticated ? ["", `\ud83d\udd17 _You're not synced yet. Type ${waBold('"SYNC"')} to connect._`] : []),
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "edit", title: "Edit" } },
-                    { type: "reply", reply: { id: "status", title: "Status" } },
-                    { type: "reply", reply: { id: "help", title: "Help" } },
+                    { type: "reply", reply: { id: "status", title: "Current" } },
+                    { type: "reply", reply: { id: "steps", title: "Steps" } },
                   ],
                 });
               }
@@ -1440,9 +1467,12 @@ Please try again.`,
                     body: [
                       `${waBold("No files added yet.")}`,
                       `_Send your documents and type ${waBold('"EDIT"')} when done._`,
+                      ...(!isAuthenticated ? ["", `_Sync anytime to edit on the web._`] : []),
                     ].join("\n"),
                     buttons: [
-                      { type: "reply", reply: { id: "steps", title: "STEPS" } },
+                      { type: "reply", reply: { id: "help", title: "Help" } },
+                      { type: "reply", reply: { id: "steps", title: "Steps" } },
+                      { type: "reply", reply: { id: "sync", title: "Sync" } },
                     ],
                   });
                 } else {
@@ -1457,10 +1487,11 @@ Please try again.`,
                       `${waBold("Your current documents:")}`,
                       ...fileLines,
                       `_Send more · Type ${waBold('"EDIT"')} to continue_`,
+                      ...(!isAuthenticated ? ["", `_Sync to edit print options on the web._`] : []),
                     ].join("\n"),
                     buttons: [
-                      { type: "reply", reply: { id: "edit", title: "EDIT" } },
-                      { type: "reply", reply: { id: "clear", title: "CLEAR" } },
+                      { type: "reply", reply: { id: "edit", title: "Edit" } },
+                      { type: "reply", reply: { id: "help", title: "Help" } },
                     ],
                   });
                 }
@@ -1517,8 +1548,7 @@ Please try again.`,
                     `_Send files to start a new printout._`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "edit", title: "Edit" } },
-                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "status", title: "Current" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });
@@ -1645,13 +1675,13 @@ Please try again.`,
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
                     "",
-                    `📝 ${waBold("Edit")} — set print options & submit`,
-                    `📊 ${waBold("Status")} — check your print job status`,
-                    `❓ ${waBold("Help")} — see all available commands`,
+                    `▸ ${waBold("Edit")} › set print options & submit`,
+                    `▸ ${waBold("Current")} › check your print job`,
+                    `▸ ${waBold("Help")} › see all commands`,
                   ].join("\n"),
                   buttons: [
                     { type: "reply", reply: { id: "edit", title: "Edit" } },
-                    { type: "reply", reply: { id: "status", title: "Status" } },
+                    { type: "reply", reply: { id: "status", title: "Current" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
                 });

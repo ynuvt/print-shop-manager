@@ -205,36 +205,44 @@ export async function sendWhatsAppStickerFromFile(
     throw new Error("WHATSAPP_ACCESS_TOKEN is not configured.");
   }
 
-  const { readFile } = await import("node:fs/promises");
-  const buffer = await readFile(args.filePath);
-  const mimeType = args.mimeType ?? "image/webp";
+  // Use cached media ID if available (avoids slow re-upload each time)
+  let mediaId = stickerMediaCache.get(args.filePath);
+  if (!mediaId) {
+    const { readFile } = await import("node:fs/promises");
+    const buffer = await readFile(args.filePath);
+    const mimeType = args.mimeType ?? "image/webp";
 
-  const form = new FormData();
-  form.append("messaging_product", "whatsapp");
-  form.append("type", mimeType);
-  form.append("file", new Blob([buffer], { type: mimeType }), "sticker.webp");
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", mimeType);
+    form.append("file", new Blob([buffer], { type: mimeType }), "sticker.webp");
 
-  const uploadResponse = await fetch(
-    `${WHATSAPP_API_BASE}/${args.phoneNumberId}/media`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
+    const uploadResponse = await fetch(
+      `${WHATSAPP_API_BASE}/${args.phoneNumberId}/media`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: form,
       },
-      body: form,
-    },
-  );
-
-  if (!uploadResponse.ok) {
-    const errorText = await uploadResponse.text();
-    throw new Error(
-      `Failed to upload WhatsApp sticker: ${uploadResponse.status} ${errorText}`,
     );
-  }
 
-  const uploadData = (await uploadResponse.json()) as { id?: string };
-  if (!uploadData.id) {
-    throw new Error("WhatsApp media upload did not return an id.");
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      throw new Error(
+        `Failed to upload WhatsApp sticker: ${uploadResponse.status} ${errorText}`,
+      );
+    }
+
+    const uploadData = (await uploadResponse.json()) as { id?: string };
+    if (!uploadData.id) {
+      throw new Error("WhatsApp media upload did not return an id.");
+    }
+
+    mediaId = uploadData.id;
+    stickerMediaCache.set(args.filePath, mediaId);
+    console.log(`[sticker] Uploaded and cached media ID for ${args.filePath}`);
   }
 
   const messageResponse = await fetch(
@@ -250,7 +258,7 @@ export async function sendWhatsAppStickerFromFile(
         to: args.to,
         type: "sticker",
         sticker: {
-          id: uploadData.id,
+          id: mediaId,
         },
       }),
     },
@@ -258,9 +266,50 @@ export async function sendWhatsAppStickerFromFile(
 
   if (!messageResponse.ok) {
     const errorText = await messageResponse.text();
+    // If the cached media expired (WhatsApp keeps media for ~30 days), clear cache and retry
+    if (messageResponse.status === 400 && errorText.includes("media")) {
+      stickerMediaCache.delete(args.filePath);
+    }
     throw new Error(
       `Failed to send WhatsApp sticker: ${messageResponse.status} ${errorText}`,
     );
+  }
+}
+
+// Cache uploaded media IDs so stickers send instantly (skip re-upload)
+const stickerMediaCache = new Map<string, string>();
+
+/**
+ * Pre-upload a sticker file to WhatsApp on server startup.
+ * After this, all sticker sends are instant (1 API call, no upload).
+ */
+export async function warmupStickerCache(filePath: string, phoneNumberId: string): Promise<void> {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) return;
+
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const buffer = await readFile(filePath);
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", "image/webp");
+    form.append("file", new Blob([buffer], { type: "image/webp" }), "sticker.webp");
+
+    const res = await fetch(`${WHATSAPP_API_BASE}/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { id?: string };
+      if (data.id) {
+        stickerMediaCache.set(filePath, data.id);
+        console.log(`[sticker-warmup] Pre-uploaded ${filePath} → ${data.id}`);
+      }
+    }
+  } catch (err) {
+    console.error("[sticker-warmup] Failed:", err);
   }
 }
 
