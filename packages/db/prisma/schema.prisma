@@ -177,6 +177,7 @@ model PrintJob {
   status           PrintJobStatus @default(PENDING)
   verificationCode Int?           @unique
   oldOtp           Int?
+  colorMode        ColorMode      @default(BW)
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
 }

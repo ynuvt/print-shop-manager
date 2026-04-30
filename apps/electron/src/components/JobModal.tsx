@@ -65,7 +65,7 @@ export default function JobModal({
     if (modes.length === 0) return "B/W";
     if (modes.every((m) => m === "BW")) return "B/W";
     if (modes.every((m) => m === "COLOR")) return "Color";
-    return "Mixed";
+    return "B/W";
   }, [job.files]);
 
   // Download progress computations

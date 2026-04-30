@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import HomePage from "./pages/HomePage";
-// import ReviewPage from "./pages/ReviewPage";
 import TermsPage from "./pages/TermsPage";
 import AboutPage from "./pages/AboutPage";
 import AuthOtpPage from "./pages/AuthOtpPage";
@@ -57,7 +56,6 @@ export default function App() {
               />
             }
           />
-          {/* <Route path="/review/:jobId" element={<ReviewPage />} /> */}
           <Route path="/auth/otp" element={<AuthOtpPage />} />
         </Routes>
       </BrowserRouter>

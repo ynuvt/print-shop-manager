@@ -36,9 +36,11 @@
     },
     {
       "name": "Auth",
+      "description": "Authentication and synchronization endpoints for customers, admins, and WhatsApp users.",
       "item": [
         {
           "name": "Register (customer token)",
+          "description": "Generates a unique anonymous customer ID and JWT token for new users. This token is used to identify the user across sessions until they sync with WhatsApp.",
           "event": [
             {
               "listen": "test",
@@ -65,6 +67,7 @@
         },
         {
           "name": "Admin Login",
+          "description": "Authenticates an administrator using email and password. Returns an admin JWT for restricted operations.",
           "event": [
             {
               "listen": "test",
@@ -95,6 +98,7 @@
         },
         {
           "name": "WhatsApp Login (OTP)",
+          "description": "Syncs a web user session with a WhatsApp account. Requires a 6-digit OTP code sent via WhatsApp.",
           "event": [
             {
               "listen": "test",
@@ -128,6 +132,7 @@
         },
         {
           "name": "Mobile Sync — Generate OTP",
+          "description": "Generates a unique sync ID and a 6-digit OTP to link a mobile device with the current user account.",
           "request": {
             "method": "POST",
             "header": [],
@@ -140,6 +145,7 @@
         },
         {
           "name": "Mobile Sync — Poll Status",
+          "description": "Checks if the mobile sync OTP has been successfully verified and returns the user token if linked.",
           "request": {
             "method": "GET",
             "header": [],
@@ -153,6 +159,7 @@
         },
         {
           "name": "Open App (deep link redirect)",
+          "description": "A redirect page that tries to open the mobile app via deep link, falling back to the website.",
           "request": {
             "method": "GET",
             "header": [],
@@ -168,9 +175,11 @@
     },
     {
       "name": "Users",
+      "description": "User profile and session management.",
       "item": [
         {
           "name": "Get Session",
+          "description": "Retrieves the current user's session data, including sync status and onboarding progress.",
           "request": {
             "method": "GET",
             "header": [
@@ -220,9 +229,11 @@
     },
     {
       "name": "Jobs",
+      "description": "Print job management, including creation, status updates, and retrieval.",
       "item": [
         {
           "name": "Presign Uploads",
+          "description": "Generates presigned URLs for uploading files directly to Cloudflare R2 storage. Supports PDF, Office docs, and Images.",
           "request": {
             "method": "POST",
             "header": [
@@ -242,6 +253,7 @@
         },
         {
           "name": "Create with URLs",
+          "description": "Creates a new print job from a list of publicly accessible URLs (usually from R2).",
           "event": [
             {
               "listen": "test",
@@ -510,9 +522,11 @@
     },
     {
       "name": "Files",
+      "description": "Operations on individual files within a print job.",
       "item": [
         {
           "name": "Add File to Job",
+          "description": "Adds a single file to an existing DRAFT job.",
           "request": {
             "method": "POST",
             "header": [
@@ -572,9 +586,11 @@
     },
     {
       "name": "Analysis",
+      "description": "Analytics and summary reports for administrators.",
       "item": [
         {
           "name": "Summary (overall)",
+          "description": "Returns deep business insights including revenue, AOV, conversion funnels (Draft -> Completed), source attribution (Web vs WhatsApp), and WhatsApp performance metrics.",
           "request": {
             "method": "GET",
             "header": [
@@ -589,6 +605,7 @@
         },
         {
           "name": "Summary (by date)",
+          "description": "Returns deep business insights (revenue, conversion, etc.) filtered by a specific date (YYYY-MM-DD).",
           "request": {
             "method": "GET",
             "header": [
@@ -604,6 +621,7 @@
         },
         {
           "name": "Users (overall)",
+          "description": "Returns user-centric metrics such as activation rates (users creating jobs), onboarding completion/skip rates, and customer retention (repeat users).",
           "request": {
             "method": "GET",
             "header": [
@@ -618,6 +636,7 @@
         },
         {
           "name": "Users (by date)",
+          "description": "Returns user-centric metrics (acquisition, onboarding) filtered by a specific date (YYYY-MM-DD).",
           "request": {
             "method": "GET",
             "header": [
@@ -630,19 +649,51 @@
               "query": [{ "key": "date", "value": "{{analysisDate}}" }]
             }
           }
+        },
+        {
+          "name": "User Activity (by ID)",
+          "description": "Returns a detailed summary of a specific user's print jobs, including completion rates and creation timestamps.",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analysis/user-activity/7aa55cf0-af2c-407f-91ca-f49fc0840306",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "analysis", "user-activity", "7aa55cf0-af2c-407f-91ca-f49fc0840306"]
+            }
+          }
         }
       ]
     },
     {
       "name": "Maintenance",
+      "description": "System administration and cleanup tasks.",
       "item": [
         {
-          "name": "Cleanup Old PrintJobs (24h+)",
+          "name": "Expire Old PrintJobs (24h+)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "description": "Expires jobs older than 24 hours. Marks them as expired, frees up their 4-digit verification codes, and deletes their files from R2 storage.",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/maintenance/expire-old-printjobs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "maintenance", "expire-old-printjobs"]
+            }
+          }
+        },
+        {
+          "name": "Cleanup Old PrintJobs (DELETE alias)",
           "request": {
             "method": "DELETE",
             "header": [
               { "key": "Authorization", "value": "Bearer {{adminToken}}" }
             ],
+            "description": "Alias for expire-old-printjobs for backwards compatibility.",
             "url": {
               "raw": "{{baseUrl}}/api/v1/maintenance/cleanup-old-printjobs",
               "host": ["{{baseUrl}}"],
@@ -657,10 +708,26 @@
             "header": [
               { "key": "Authorization", "value": "Bearer {{adminToken}}" }
             ],
+            "description": "Permanently deletes DRAFT jobs that haven't been updated in 24 hours.",
             "url": {
               "raw": "{{baseUrl}}/api/v1/maintenance/cleanup-stale-drafts",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "maintenance", "cleanup-stale-drafts"]
+            }
+          }
+        },
+        {
+          "name": "OTP Availability",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" }
+            ],
+            "description": "Shows the current utilization of the 4-digit verification codes (1000-9999).",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/maintenance/otp-availability",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "maintenance", "otp-availability"]
             }
           }
         }

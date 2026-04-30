@@ -846,6 +846,7 @@ app.post(
     }
 
     let incomingFiles: UrlFileForAppend[] = [];
+    const { colorMode } = req.body;
 
     try {
       incomingFiles = parseUrlFilesForAppend(req.body.files);
@@ -893,14 +894,17 @@ app.post(
             totalCost: 0,
             totalPages: 0,
             estimatedTime: 0,
+            colorMode: colorMode === "COLOR" ? "COLOR" : "BW",
           },
           include: { _count: { select: { files: true } } },
         });
       }
 
+      const jobColorMode = colorMode || (job as any).colorMode || "BW";
+
       const defaultOptions = optionsSchema.parse({
         paperSize: "A4",
-        colorMode: "BW",
+        colorMode: jobColorMode === "COLOR" ? "COLOR" : "BW",
         orientation: "PORTRAIT",
         scaleMode: "FIT",
         pageRange: "ALL",
@@ -1358,7 +1362,7 @@ app.get("/all", authMiddleware(["admin"]), async (req, res) => {
   try {
     const jobs = await prisma.printJob.findMany({
       orderBy: { createdAt: "desc" },
-      take: 100,
+      take: 1000,
     });
     res.status(200).json(jobs);
   } catch (error) {
@@ -1507,6 +1511,43 @@ app.post(
     res.status(500).json({ error: "Failed to sync jobs." });
   } 
   },
+);
+
+app.post(
+  "/update-color-mode/:id",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    const { id } = req.params;
+    const { colorMode } = req.body;
+    
+    if (!id || typeof id !== "string") return res.status(400).json({ error: "ID required" });
+    if (!["BW", "COLOR"].includes(colorMode)) return res.status(400).json({ error: "Invalid mode" });
+
+    try {
+      const job = await prisma.printJob.findUnique({
+        where: { id },
+        include: { files: { include: { option: true } } }
+      });
+      if (!job || job.status !== PrintJobStatus.DRAFT) return res.status(404).json({ error: "Not found" });
+
+      await prisma.$transaction(async (tx) => {
+        await tx.printJob.update({
+            where: { id },
+            data: { colorMode: colorMode === "COLOR" ? "COLOR" : "BW" }
+        });
+
+        for (const file of job.files) {
+            await tx.printOption.update({
+                where: { id: file.option!.id },
+                data: { colorMode: colorMode === "COLOR" ? "COLOR" : "BW" }
+            });
+        }
+      });
+      res.status(200).json({ message: "Updated" });
+    } catch (e) {
+      res.status(500).json({ error: "Update failed" });
+    }
+  }
 );
 
 app.get("/review/:id", async (req, res) => {
@@ -1796,9 +1837,10 @@ app.post(
   "/submit-whatsapp-job",
   authMiddleware(["customer"]),
   async (req: ExtendedRequest, res) => {
-    const { jobId, files } = req.body as {
+    const { jobId, files, globalColorMode } = req.body as {
       jobId?: string;
       files?: Array<{ id: string; options: unknown }>;
+      globalColorMode?: "BW" | "COLOR";
     };
     const userId = req.user!.uid;
 
@@ -1878,6 +1920,8 @@ app.post(
         return res.status(404).json({ error: "Job not found." });
       }
 
+      const finalColorMode = globalColorMode || (job as any).colorMode || "BW";
+
       if (job.status !== PrintJobStatus.DRAFT) {
         return res
           .status(403)
@@ -1932,7 +1976,7 @@ app.post(
 
         const cost = calculateFileCost(existing.pages, {
           paperSize: file.options.paperSize,
-          colorMode: file.options.colorMode,
+          colorMode: finalColorMode || file.options.colorMode,
           orientation: file.options.orientation,
           scaleMode: file.options.scaleMode,
           pageRange: file.options.pageRange,
@@ -1966,7 +2010,7 @@ app.post(
             where: { id: entry.optionId },
             data: {
               copies: entry.options.copies,
-              colorMode: mapColorModeToEnum(entry.options.colorMode),
+              colorMode: mapColorModeToEnum(finalColorMode || entry.options.colorMode),
               orientation: mapOrientationToEnum(entry.options.orientation),
               scaleMode: mapScaleModeToEnum(entry.options.scaleMode),
               duplex: mapDuplexToEnum(entry.options.duplex),
@@ -2001,6 +2045,7 @@ app.post(
             totalCost,
             estimatedTime: calculateEstimatedTime(totalPages),
             status: PrintJobStatus.PENDING,
+            colorMode: finalColorMode === "COLOR" ? "COLOR" : "BW",
             verificationCode: code,
           },
         });
@@ -2284,6 +2329,59 @@ app.put(
       return res.status(200).json({ message: "Job submitted again." });
     } catch (error) {
       return res.status(500).json({ error: "Failed to resubmit job." });
+    }
+  },
+);
+
+app.put(
+  "/:jobId/global-color-mode",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    const { jobId } = req.params;
+    const { colorMode } = req.body;
+
+    if (!jobId || typeof jobId !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+
+    if (colorMode !== "BW" && colorMode !== "COLOR") {
+      return res.status(400).json({
+        error: "Invalid color mode. Must be 'BW' or 'COLOR'.",
+      });
+    }
+
+    try {
+      const job = await prisma.printJob.findUnique({
+        where: { id: jobId },
+        select: { id: true, userId: true },
+      });
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      if (req.user?.role !== "admin" && job.userId !== req.user?.uid) {
+        return res
+          .status(403)
+          .json({ error: "You do not have access to this job." });
+      }
+
+      await prisma.printJob.update({
+        where: { id: jobId },
+        data: {
+          colorMode:
+            colorMode === "COLOR" ? ColorMode.COLOR : ColorMode.BW,
+        },
+      });
+
+      return res.status(200).json({
+        message: `Global color mode updated to ${colorMode}.`,
+      });
+    } catch (error) {
+      console.error("Failed to update global color mode:", error);
+      return res
+        .status(500)
+        .json({ error: "Failed to update global color mode." });
     }
   },
 );

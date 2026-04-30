@@ -274,11 +274,12 @@ export async function getWebDraftJob(): Promise<UserPrintJob | null> {
 
 export async function addFilesToWebDraft(
   files: Array<{ name: string; url: string }>,
+  colorMode?: "BW" | "COLOR",
 ): Promise<{ job: UserPrintJob }> {
   const token = getToken();
   const res = await axios.post(
     `${BASE_URL}/jobs/web-draft/add-files`,
-    { files },
+    { files, colorMode },
     { headers: { authorization: `Bearer ${token}` } },
   );
   if (!res.data) throw new Error("Failed to append files");
@@ -288,6 +289,7 @@ export async function addFilesToWebDraft(
 export async function submitWhatsappJobReview(input: {
   jobId: string;
   files: Array<{ id: string; options: PrintFileOption }>;
+  globalColorMode?: "BW" | "COLOR";
 }): Promise<{ verificationCode: number }> {
   const token = getToken();
   let res;
@@ -418,6 +420,7 @@ export async function confirmReviewJob(jobId: string): Promise<{ userCost: numbe
 export async function addFilesToJobFromUrls(
   jobId: string,
   files: Array<{ name: string; url: string }>,
+  colorMode?: "BW" | "COLOR",
 ): Promise<{
   addedFilesCount: number;
   addedPages: number;
@@ -430,7 +433,7 @@ export async function addFilesToJobFromUrls(
 
   const res = await axios.post(
     `${BASE_URL}/jobs/${jobId}/add-files-from-urls`,
-    { files },
+    { files, colorMode },
     {
       headers: {
         authorization: `Bearer ${token}`,
@@ -481,4 +484,22 @@ export async function resubmitCompletedPrintJob(id: string): Promise<void> {
   );
 
   if (!res.data) throw new Error("Failed to submit job again");
+}
+
+export async function updateGlobalColorMode(
+  jobId: string,
+  colorMode: "BW" | "COLOR",
+): Promise<void> {
+  const token = getToken();
+  const res = await axios.put(
+    `${BASE_URL}/jobs/${jobId}/global-color-mode`,
+    { colorMode },
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!res.data) throw new Error("Failed to update global color mode");
 }

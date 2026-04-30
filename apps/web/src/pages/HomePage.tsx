@@ -29,7 +29,9 @@ import {
   uploadFileToR2,
   deleteUserFile,
   deleteUserPrintJob,
+  updateGlobalColorMode,
 } from "../api/api";
+import { useNotifications } from "../components/NotificationCenter";
 // import ReviewPage from "./ReviewPage";
 import PrintJobsList from "../components/PrintJobsList";
 import {
@@ -276,15 +278,7 @@ export default function HomePage({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToastRaw] = useState<string | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const setToast = useCallback((msg: string | null) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToastRaw(msg);
-    if (msg) {
-      toastTimerRef.current = setTimeout(() => setToastRaw(null), 4000);
-    }
-  }, []);
+  const { notify } = useNotifications();
   const [isWhatsappSynced, setIsWhatsappSynced] = useState(false);
   const [showSyncWhatsappModal, setShowSyncWhatsappModal] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -549,7 +543,7 @@ export default function HomePage({
     
     const handleJobStatusUpdated = (uid: string, _jobId: string, msg: string) => {
       if (uid === userId) {
-        setToast(msg);
+        notify(msg, { variant: "success" });
       }
     };
 
@@ -677,16 +671,16 @@ export default function HomePage({
       const availableSlots = MAX_FILES - existingCount;
 
       if (availableSlots <= 0) {
-        setToast(
-          `You already have ${MAX_FILES} files. Remove some before adding more.`,
-        );
+        const msg = `You already have ${MAX_FILES} files. Remove some before adding more.`;
+        notify(msg, { variant: "error" });
+        setError(msg);
         return;
       }
 
       if (files.length > availableSlots) {
-        setToast(
-          `Cannot upload more than ${MAX_FILES} documents. You can add ${availableSlots} more file(s). Please reselect and upload again.`,
-        );
+        const msg = `Cannot upload more than ${MAX_FILES} documents. You can add ${availableSlots} more file(s). Please reselect and upload again.`;
+        notify(msg, { variant: "error" },);
+        setError(msg);
         return;
       }
 
@@ -725,7 +719,10 @@ export default function HomePage({
           url: uploads[index]!.publicUrl,
         }));
 
-        const { job } = await addFilesToWebDraft(urlFiles);
+        const { job } = await addFilesToWebDraft(
+          urlFiles,
+          globalColorMode === "MIXED" ? undefined : globalColorMode
+        );
         setDraftJobId(job.id);
         
         setPrintFiles(
@@ -757,16 +754,30 @@ export default function HomePage({
   );
 
   const applyGlobalColorMode = useCallback(
-    (mode: PrintOptions["colorMode"]) => {
+    async (mode: PrintOptions["colorMode"]) => {
       setGlobalColorMode(mode);
-      setPrintFiles((prev) =>
-        prev.map((file) => ({
-          ...file,
-          options: { ...file.options, colorMode: mode },
-        })),
-      );
+      const nextFiles = printFiles.map((file) => ({
+        ...file,
+        options: { ...file.options, colorMode: mode },
+      }));
+      setPrintFiles(nextFiles);
+
+      if (draftJobId) {
+        try {
+          await updateGlobalColorMode(draftJobId, mode);
+          // Mark as persisted to skip individual saves
+          nextFiles.forEach((f) => {
+            if (f.id) lastPersistedOptionsRef.current[f.id] = f.options;
+          });
+          notify(`All files updated to ${mode === "COLOR" ? "Color" : "B/W"}`, {
+            variant: "success",
+          });
+        } catch (err) {
+          notify("Failed to update global color mode.", { variant: "error" });
+        }
+      }
     },
-    [],
+    [printFiles, draftJobId],
   );
 
   const toggleGlobalFileSelection = useCallback((idx: number) => {
@@ -807,8 +818,10 @@ export default function HomePage({
         };
       }),
     );
-    setToast(`Applied global options to ${globalSelectedFiles.size} file(s)`);
-  }, [globalSelectedFiles, globalOptions, setToast]);
+    notify(`Applied global options to ${globalSelectedFiles.size} file(s)`, {
+      variant: "success",
+    });
+  }, [globalSelectedFiles, globalOptions, notify]);
 
   const onFilesSelected = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -945,6 +958,7 @@ export default function HomePage({
           id: pf.id!,
           options: pf.options,
         })),
+        globalColorMode,
       });
 
       setVerificationCode(String(result.verificationCode));
@@ -958,7 +972,7 @@ export default function HomePage({
         err instanceof Error
           ? err.message
           : "Something went wrong.";
-      setToast(`${errMsg} Please try again now.`);
+      notify(`${errMsg} Please try again now.`, { variant: "error" });
 
     } finally {
       setIsSubmitting(false);
@@ -1211,11 +1225,6 @@ export default function HomePage({
 
       <main className="main-wrap">
         {error && <div className="banner-error">{error}</div>}
-        {toast && (
-          <div className="toast-notification" onClick={() => setToast(null)}>
-            {toast}
-          </div>
-        )}
 
           <>
             <section className="hero-panel">
