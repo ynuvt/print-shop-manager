@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
-import { loginWithWhatsappOtp } from "../api/api";
+import { loginWithWhatsappOtp, storage } from "../api/api";
 import { useNotifications } from "../components/NotificationCenter";
 
 export default function AuthOtpPage() {
@@ -43,18 +43,14 @@ export default function AuthOtpPage() {
           return;
         }
 
-        // Write token + userId to localStorage
+        // Write token + userId to robust storage
         const newToken = data.token || "";
         const newUserId = data.userId || "";
-        localStorage.setItem("token", newToken);
-        localStorage.setItem("userId", newUserId);
+        
+        storage.set("token", newToken);
+        storage.set("userId", newUserId);
 
-        // Verify the write persisted
-        const verifiedToken = localStorage.getItem("token");
-        if (verifiedToken !== newToken) {
-          localStorage.setItem("token", newToken);
-          localStorage.setItem("userId", newUserId);
-        }
+
 
         setStatus("success");
         setMessage("Synced! Redirecting you now...");

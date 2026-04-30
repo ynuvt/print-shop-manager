@@ -65,10 +65,59 @@ export type UserSession = {
   whatsappSynced?: boolean;
 };
 
-// Helper to get token from localStorage
+/**
+ * Robust storage helpers that use both localStorage and Cookies.
+ * This fixes session loss on some iPhones/Browsers (like WhatsApp IAB) 
+ * where localStorage might not persist correctly or be blocked.
+ */
+export const storage = {
+  get(key: string): string | null {
+    try {
+      const val = localStorage.getItem(key);
+      if (val) return val;
+    } catch (e) {}
+
+    // Fallback to cookie
+    try {
+      const name = key + "=";
+      const ca = document.cookie.split(";");
+      for (let i = 0; i < ca.length; i++) {
+        let c = ca[i].trim();
+        if (c.indexOf(name) === 0) return c.substring(name.length, c.length);
+      }
+    } catch (e) {}
+    
+    return null;
+  },
+
+  set(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {}
+
+    // Always set cookie as backup (1 year expiry)
+    try {
+      const expires = new Date();
+      expires.setTime(expires.getTime() + 365 * 24 * 60 * 60 * 1000);
+      document.cookie = `${key}=${value};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
+    } catch (e) {}
+  },
+
+  remove(key: string): void {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {}
+    try {
+      document.cookie = `${key}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`;
+    } catch (e) {}
+  }
+};
+
+// Helper to get token
 function getToken() {
-  return localStorage.getItem("token");
+  return storage.get("token");
 }
+
 
 // POST /register - gets a unique token
 export async function registerUser(): Promise<{

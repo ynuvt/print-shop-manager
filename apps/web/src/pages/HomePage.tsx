@@ -30,6 +30,7 @@ import {
   deleteUserFile,
   deleteUserPrintJob,
   updateGlobalColorMode,
+  storage,
 } from "../api/api";
 import { useNotifications } from "../components/NotificationCenter";
 // import ReviewPage from "./ReviewPage";
@@ -262,7 +263,7 @@ export default function HomePage({
 }) {
   const [showSteps, setShowSteps] = useState(false);
   const [userId, setUserId] = useState<string | null>(() =>
-    localStorage.getItem("userId"),
+    storage.get("userId"),
   );
   const [walkthroughStep, setWalkthroughStep] =
     useState<WalkthroughStep | null>(null);
@@ -327,12 +328,22 @@ export default function HomePage({
   // }, []);
 
   useEffect(() => {
+    // If we already have a userId in state, we're good.
     if (userId) return;
 
+    // Double check storage in case it was just set (e.g. during redirect)
+    const storedUserId = storage.get("userId");
+    const storedToken = storage.get("token");
+    if (storedUserId && storedToken) {
+      setUserId(storedUserId);
+      return;
+    }
+
+    // Only register if we truly have no session
     registerUser()
       .then(({ token, userId }) => {
-        localStorage.setItem("userId", userId);
-        localStorage.setItem("token", token);
+        storage.set("userId", userId);
+        storage.set("token", token);
         setUserId(userId);
       })
       .catch(() => {
@@ -340,9 +351,10 @@ export default function HomePage({
       });
   }, [userId]);
 
+
   useEffect(() => {
     if (!userId) return;
-    if (!localStorage.getItem("token")) return;
+    if (!storage.get("token")) return;
 
     getUserSession()
       .then((session) => {
@@ -371,10 +383,10 @@ export default function HomePage({
   }, [isWhatsappSynced]);
 
   useEffect(() => {
-    const stored = localStorage.getItem("lastReviewVerificationCode");
+    const stored = storage.get("lastReviewVerificationCode");
     if (stored) {
       setVerificationCode(stored);
-      localStorage.removeItem("lastReviewVerificationCode");
+      storage.remove("lastReviewVerificationCode");
     }
   }, []);
 
@@ -407,7 +419,7 @@ export default function HomePage({
     }), [printFiles]);
 
   const persistCurrentOptionsNow = useCallback(async (useKeepAlive: boolean) => {
-    const token = localStorage.getItem("token");
+    const token = storage.get("token");
     if (!token) return;
 
     const pendingFiles = getPendingFiles();
