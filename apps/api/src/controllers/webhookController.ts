@@ -61,11 +61,11 @@ async function getUnifiedDraftWhere(phoneNumber: string) {
   if (waUser?.userId) {
     // Check if a draft exists for this userId
     const byUser = await prisma.printJob.findFirst({
-      where: { userId: waUser.userId, status: PrintJobStatus.DRAFT },
+      where: { userId: waUser.userId, status: PrintJobStatus.DRAFT, expired: false },
       select: { id: true },
     });
     if (byUser) {
-      return { userId: waUser.userId, status: PrintJobStatus.DRAFT };
+      return { userId: waUser.userId, status: PrintJobStatus.DRAFT, expired: false };
     }
   }
 
@@ -73,6 +73,7 @@ async function getUnifiedDraftWhere(phoneNumber: string) {
   return {
     userMetadata: { phoneNumber },
     status: PrintJobStatus.DRAFT,
+    expired: false,
   };
 }
 
@@ -665,6 +666,7 @@ Please try again or send a different file.`,
                     where: {
                       userId: waUser.userId,
                       status: PrintJobStatus.DRAFT,
+                      expired: false,
                     },
                     select: {
                       id: true,
@@ -688,6 +690,7 @@ Please try again or send a different file.`,
                         phoneNumber: userData.displayPhoneNumber,
                       },
                       status: PrintJobStatus.DRAFT,
+                      expired: false,
                     },
                     select: {
                       id: true,
@@ -1027,6 +1030,7 @@ Please try again.`,
                     where: {
                       userId: waUser.userId,
                       status: PrintJobStatus.DRAFT,
+                      expired: false,
                     },
                     select: {
                       id: true,
@@ -1622,11 +1626,22 @@ Please try again.`,
                 continue;
               }
 
-              await prisma.printJob.delete({
+              await prisma.printJob.update({
                 where: {
                   id: existingJob.id,
                 },
+                data: {
+                  expired: true,
+                },
               });
+
+              const fileIds = existingJob.files.map((f: any) => f.id);
+              if (fileIds.length > 0) {
+                await prisma.file.updateMany({
+                  where: { id: { in: fileIds } },
+                  data: { url: "" },
+                });
+              }
 
               await Promise.all(
                 existingJob.files.map((file) =>

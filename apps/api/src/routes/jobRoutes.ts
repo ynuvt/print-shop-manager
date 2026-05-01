@@ -819,6 +819,7 @@ app.get(
         where: {
           userId: req.user.uid,
           status: PrintJobStatus.DRAFT,
+          expired: false,
         },
         include: {
           files: {
@@ -860,6 +861,7 @@ app.post(
         where: {
           userId: req.user.uid,
           status: PrintJobStatus.DRAFT,
+          expired: false,
         },
         include: { _count: { select: { files: true } } },
       });
@@ -1102,7 +1104,7 @@ app.post(
         return res.status(404).json({ error: "Job not found." });
       }
 
-      if (job.status !== PrintJobStatus.DRAFT) {
+      if (job.status !== PrintJobStatus.DRAFT || job.expired) {
         return res
           .status(403)
           .json({ error: "This job is not available for review." });
@@ -1528,7 +1530,7 @@ app.post(
         where: { id },
         include: { files: { include: { option: true } } }
       });
-      if (!job || job.status !== PrintJobStatus.DRAFT) return res.status(404).json({ error: "Not found" });
+      if (!job || job.status !== PrintJobStatus.DRAFT || job.expired) return res.status(404).json({ error: "Not found" });
 
       await prisma.$transaction(async (tx) => {
         await tx.printJob.update({
@@ -1558,7 +1560,7 @@ app.get("/review/:id", async (req, res) => {
 
   try {
     const job = await prisma.printJob.findFirst({
-      where: { id, status: PrintJobStatus.DRAFT },
+      where: { id, status: PrintJobStatus.DRAFT, expired: false },
       include: {
         files: {
           include: {
@@ -2228,20 +2230,14 @@ app.delete(
           .filter((id): id is string => !!id);
 
         await prisma.$transaction(async (tx) => {
-          await tx.file.deleteMany({
-            where: { printJobId: existingJob.id },
+          await tx.printJob.update({
+            where: { id: existingJob.id },
+            data: { expired: true },
           });
 
-          if (optionIds.length) {
-            await tx.printOption.deleteMany({
-              where: {
-                id: { in: optionIds },
-              },
-            });
-          }
-
-          await tx.printJob.delete({
-            where: { id: existingJob.id },
+          await tx.file.updateMany({
+            where: { printJobId: existingJob.id },
+            data: { url: "" },
           });
         });
 

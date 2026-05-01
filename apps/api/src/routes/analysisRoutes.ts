@@ -111,12 +111,14 @@ app.get("/summary", async (req, res) => {
         _sum: { totalCost: true, totalPages: true },
         _count: { _all: true },
       }),
-      // 4. Expired jobs
-      prisma.printJob.count({
+      // 4. Expired jobs breakdown
+      prisma.printJob.groupBy({
+        by: ["status"],
         where: {
           ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
           expired: true,
         },
+        _count: { _all: true },
       }),
       // 5. Daily trends (for charting)
       prisma.printJob.findMany({
@@ -140,6 +142,13 @@ app.get("/summary", async (req, res) => {
         where: { userId: { not: null } },
       }),
     ]);
+
+    // Format expired breakdown
+    const expiredBreakdown = (expiredCount as any[]).reduce<Record<string, number>>((acc, g) => {
+      acc[g.status] = g._count._all;
+      return acc;
+    }, {});
+    const totalExpired = (expiredCount as any[]).reduce((sum, g) => sum + g._count._all, 0);
 
     // Format status breakdown
     const statusBreakdown = statusGroups.reduce<Record<string, any>>((acc, g) => {
@@ -180,7 +189,12 @@ app.get("/summary", async (req, res) => {
     const totalCount = totals._count._all;
     const completedCount = statusBreakdown[PrintJobStatus.COMPLETED]?.count || 0;
     const draftCount = statusBreakdown[PrintJobStatus.DRAFT]?.count || 0;
-    const pendingCount = statusBreakdown[PrintJobStatus.PENDING]?.count || 0;
+
+    // For pendingCount, include currently active PENDING jobs
+    // AND jobs that were PENDING but got expired (status changed to CANCELED + expired=true)
+    const activePending = statusBreakdown[PrintJobStatus.PENDING]?.count || 0;
+    const expiredPending = expiredBreakdown[PrintJobStatus.CANCELED] || 0;
+    const pendingCount = activePending + expiredPending;
 
     // 8. File type breakdown (extension based as mimeType might be generic)
     const fileStats = await prisma.file.findMany({
@@ -216,7 +230,10 @@ app.get("/summary", async (req, res) => {
       },
       status: {
         ...statusBreakdown,
-        EXPIRED: { count: expiredCount },
+        EXPIRED: {
+          count: totalExpired,
+          breakdown: expiredBreakdown,
+        },
       },
       sources: sourceBreakdown,
       files: {

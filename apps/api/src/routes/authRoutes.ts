@@ -248,7 +248,7 @@ router.post("/whatsapp-login", async (req, res) => {
     // ── Draft merge: if user has both a WhatsApp draft and web draft, merge them ──
     try {
       const allDrafts = await prisma.printJob.findMany({
-        where: { userId: resolvedUserId, status: PrintJobStatus.DRAFT },
+        where: { userId: resolvedUserId, status: PrintJobStatus.DRAFT, expired: false },
         include: {
           files: { select: { id: true, name: true } },
         },

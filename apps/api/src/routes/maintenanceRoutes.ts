@@ -1,4 +1,4 @@
-import express from "express";
+import express, { RequestHandler } from "express";
 import { prisma } from "@printowl/db";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import { deleteObjectFromR2ByUrl } from "../utils/r2Storage.js";
@@ -36,7 +36,7 @@ app.post(
   "/expire-old-printjobs",
   authMiddleware(["admin"]),
   async (req, res) => {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
 
     const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
     if (!r2PublicBase) {
@@ -179,7 +179,7 @@ app.delete(
   authMiddleware(["admin"]),
   async (req, res) => {
     // Redirect to the new expiration logic by calling it internally
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
 
     const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
     if (!r2PublicBase) {
@@ -310,124 +310,140 @@ app.delete(
 );
 
 /**
- * DELETE /api/v1/maintenance/cleanup-stale-drafts
+ * POST /api/v1/maintenance/cleanup-stale-drafts
  *
- * Deletes DRAFT PrintJobs where the most recent file was uploaded more
+ * Marks DRAFT PrintJobs as expired where the most recent file was uploaded more
  * than 24 hours ago. Drafts with zero files that are themselves older
  * than 24h are also cleaned up.
  *
  * - Deletes associated files from Cloudflare R2 (best-effort).
- * - Frees up verification codes (drafts shouldn't have them, but just in case).
+ * - Clears file URLs (sets to empty string).
+ * - Sets expired = true.
+ * - Does NOT delete job records — preserves them for analytics.
  *
  * Admin-only.
  */
-app.delete(
-  "/cleanup-stale-drafts",
-  authMiddleware(["admin"]),
-  async (req, res) => {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+const cleanupStaleDraftsHandler: RequestHandler = async (req, res) => {
+  const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
 
-    const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
-    if (!r2PublicBase) {
-      return res.status(500).json({
-        error:
-          "R2_PUBLIC_BUCKET_URL is missing; cannot safely delete R2 objects.",
-      });
-    }
+  const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
+  if (!r2PublicBase) {  
+    return res.status(500).json({
+      error:
+        "R2_PUBLIC_BUCKET_URL is missing; cannot safely delete R2 objects.",
+    });
+  }
 
-    try {
-      // Find all DRAFT jobs
-      const drafts = (await prisma.printJob.findMany({
-        where: {
-          status: PrintJobStatus.DRAFT,
-        },
-        select: {
-          id: true,
-          createdAt: true,
-          files: {
-            select: {
-              url: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: "desc" },
+  try {
+    // Find all non-expired DRAFT jobs
+    const drafts = (await prisma.printJob.findMany({
+      where: {
+        status: PrintJobStatus.DRAFT,
+        expired: false,
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        files: {
+          select: {
+            id: true,
+            url: true,
+            createdAt: true,
           },
+          orderBy: { createdAt: "desc" },
         },
-      })) as any[];
+      },
+    })) as any[];
 
-      // Filter: keep only drafts where the LAST file is older than 24h,
-      // or drafts with no files that are themselves older than 24h.
-      const staleDrafts = drafts.filter((draft) => {
-        if (draft.files.length === 0) {
-          // Empty draft — stale if the job itself is old
-          return draft.createdAt < cutoff;
-        }
-        // Non-empty draft — stale if the newest file is old
-        const latestFileDate = (draft.files[0] as any).createdAt;
-        return latestFileDate < cutoff;
-      });
-
-      if (staleDrafts.length === 0) {
-        return res.status(200).json({
-          cutoff,
-          matchedDrafts: 0,
-          deletedDrafts: 0,
-          matchedFileUrls: 0,
-          r2Deleted: 0,
-          r2Failed: 0,
-        });
+    // Filter: keep only drafts where the LAST file is older than 24h,
+    // or drafts with no files that are themselves older than 24h.
+    const staleDrafts = drafts.filter((draft) => {
+      if (draft.files.length === 0) {
+        // Empty draft — stale if the job itself is old
+        return draft.createdAt < cutoff;
       }
+      // Non-empty draft — stale if the newest file is old
+      const latestFileDate = (draft.files[0] as any).createdAt;
+      return latestFileDate < cutoff;
+    });
 
-      const draftIds = staleDrafts.map((d) => d.id);
-      const fileUrls = uniqueStrings(
-        staleDrafts
-          .flatMap((d) => (d.files as any[]).map((f) => f.url))
-          .filter(
-            (url): url is string => typeof url === "string" && url.length > 0,
-          )
-          .filter((url) => url.startsWith(`${r2PublicBase}/`)),
-      );
-
-      // Delete R2 objects (best-effort, batched)
-      let r2Deleted = 0;
-      let r2Failed = 0;
-
-      const CONCURRENCY = 10;
-      for (let i = 0; i < fileUrls.length; i += CONCURRENCY) {
-        const chunk = fileUrls.slice(i, i + CONCURRENCY);
-        const results = await Promise.allSettled(
-          chunk.map(async (url) => deleteObjectFromR2ByUrl(url)),
-        );
-        for (const result of results) {
-          if (result.status === "fulfilled") {
-            r2Deleted++;
-          } else {
-            r2Failed++;
-            console.error("Failed to delete R2 object:", result.reason);
-          }
-        }
-      }
-
-      // Delete the draft jobs (cascading deletes should handle files + options)
-      const deleted = await prisma.printJob.deleteMany({
-        where: { id: { in: draftIds } },
-      });
-
+    if (staleDrafts.length === 0) {
       return res.status(200).json({
         cutoff,
-        matchedDrafts: staleDrafts.length,
-        deletedDrafts: deleted.count,
-        matchedFileUrls: fileUrls.length,
-        r2Deleted,
-        r2Failed,
+        matchedDrafts: 0,
+        expiredDrafts: 0,
+        matchedFileUrls: 0,
+        r2Deleted: 0,
+        r2Failed: 0,
       });
-    } catch (error) {
-      console.error("[cleanup-stale-drafts] Failed:", error);
-      return res
-        .status(500)
-        .json({ error: "Failed to cleanup stale drafts." });
     }
-  },
-);
+
+    // 1) Delete files from R2 (best-effort, batched)
+    const fileUrls = uniqueStrings(
+      staleDrafts
+        .flatMap((d) => (d.files as any[]).map((f) => f.url))
+        .filter(
+          (url): url is string => typeof url === "string" && url.length > 0,
+        )
+        .filter((url) => url.startsWith(`${r2PublicBase}/`)),
+    );
+
+    let r2Deleted = 0;
+    let r2Failed = 0;
+
+    const CONCURRENCY = 10;
+    for (let i = 0; i < fileUrls.length; i += CONCURRENCY) {
+      const chunk = fileUrls.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        chunk.map(async (url) => deleteObjectFromR2ByUrl(url)),
+      );
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          r2Deleted++;
+        } else {
+          r2Failed++;
+          console.error("Failed to delete R2 object:", result.reason);
+        }
+      }
+    }
+
+    // 2) For each stale draft: mark expired and clear file URLs
+    let expiredCount = 0;
+    for (const draft of staleDrafts) {
+      await prisma.printJob.update({
+        where: { id: draft.id },
+        data: { expired: true },
+      });
+
+      const fileIds = (draft.files as any[]).map((f) => f.id);
+      if (fileIds.length > 0) {
+        await prisma.file.updateMany({
+          where: { id: { in: fileIds } },
+          data: { url: "" },
+        });
+      }
+      expiredCount++;
+    }
+
+    return res.status(200).json({
+      cutoff,
+      matchedDrafts: staleDrafts.length,
+      expiredDrafts: expiredCount,
+      matchedFileUrls: fileUrls.length,
+      r2Deleted,
+      r2Failed,
+    });
+  } catch (error) {
+    console.error("[cleanup-stale-drafts] Failed:", error);
+    return res
+      .status(500)
+      .json({ error: "Failed to cleanup stale drafts." });
+  }
+};
+
+app.post("/cleanup-stale-drafts", authMiddleware(["admin"]), cleanupStaleDraftsHandler);
+app.delete("/cleanup-stale-drafts", authMiddleware(["admin"]), cleanupStaleDraftsHandler);
+
 
 /**
  * GET /api/v1/maintenance/otp-availability
