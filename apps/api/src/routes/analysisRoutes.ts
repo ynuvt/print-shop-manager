@@ -14,42 +14,36 @@ type DateRange = {
   end: Date;
 };
 
-function parseDateQuery(dateQuery: unknown): DateRange | null {
-  if (dateQuery === undefined || dateQuery === "" || dateQuery === "null") {
-    return null;
+function parseDateQuery(reqQuery: any): DateRange | null {
+  const MIN_DATE = new Date("2026-04-25T00:00:00.000Z"); // April 25, 2026
+
+  if (reqQuery.startDate && reqQuery.endDate) {
+    let start = new Date(reqQuery.startDate);
+    let end = new Date(reqQuery.endDate);
+    end.setHours(23, 59, 59, 999);
+
+    if (start < MIN_DATE) start = MIN_DATE;
+
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+      return { start, end };
+    }
   }
 
-  if (typeof dateQuery !== "string") {
-    throw new Error(
-      "Query param 'date' must be a string in YYYY-MM-DD format.",
-    );
+  if (reqQuery.date && typeof reqQuery.date === "string" && reqQuery.date !== "null") {
+    const trimmed = reqQuery.date.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split("-").map(Number);
+      let start = new Date(year, month - 1, day, 0, 0, 0, 0);
+      let end = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
+      
+      if (start < MIN_DATE) start = MIN_DATE;
+      
+      return { start, end };
+    }
   }
 
-  const trimmed = dateQuery.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    throw new Error("Invalid date format. Use YYYY-MM-DD.");
-  }
-
-  const [yearString, monthString, dayString] = trimmed.split("-");
-  const year = Number(yearString);
-  const month = Number(monthString);
-  const day = Number(dayString);
-
-  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
-  const end = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
-
-  if (
-    Number.isNaN(start.getTime()) ||
-    start.getFullYear() !== year ||
-    start.getMonth() !== month - 1 ||
-    start.getDate() !== day
-  ) {
-    throw new Error(
-      "Invalid date value. Use a real calendar date in YYYY-MM-DD.",
-    );
-  }
-
-  return { start, end };
+  // Default to MIN_DATE to now
+  return { start: MIN_DATE, end: new Date() };
 }
 
 function buildCreatedAtFilter(range: DateRange | null) {
@@ -67,79 +61,68 @@ app.get("/summary", async (req, res) => {
   let dateRange: DateRange | null;
 
   try {
-    dateRange = parseDateQuery(req.query.date);
+    dateRange = parseDateQuery(req.query);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Invalid date query.";
+    const message = error instanceof Error ? error.message : "Invalid date query.";
     return res.status(400).json({ error: message });
   }
 
   const createdAtFilter = buildCreatedAtFilter(dateRange);
 
   try {
-    const [
-      statusGroups,
-      sourceGroups,
-      totals,
-      expiredCount,
-      dailyStats,
-      otpStats,
-      syncStats,
-    ] = await Promise.all([
-      // 1. Status breakdown
-      prisma.printJob.groupBy({
-        by: ["status"],
-        where: createdAtFilter ? { createdAt: createdAtFilter } : {},
-        _count: { _all: true },
-        _sum: { totalCost: true, totalPages: true },
-      }),
-      // 2. Source breakdown (Web vs WhatsApp)
-      prisma.printJob.groupBy({
-        by: ["source"],
-        where: createdAtFilter ? { createdAt: createdAtFilter } : {},
-        _count: { _all: true },
-        _sum: { totalCost: true, totalPages: true },
-      }),
-      // 3. Overall aggregate for the period
-      prisma.printJob.aggregate({
-        where: {
-          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
-          status: PrintJobStatus.COMPLETED,
-        },
-        _sum: { totalCost: true, totalPages: true },
-        _count: { _all: true },
-      }),
-      // 4. Expired jobs breakdown
-      prisma.printJob.groupBy({
-        by: ["status"],
-        where: {
-          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
-          expired: true,
-        },
-        _count: { _all: true },
-      }),
-      // 5. Daily trends (for charting)
-      prisma.printJob.findMany({
-        where: {
-          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
-          status: PrintJobStatus.COMPLETED,
-        },
-        select: {
-          createdAt: true,
-          totalCost: true,
-          totalPages: true,
-        },
-      }),
-      // 6. WhatsApp Login success rate
-      prisma.whatsAppLoginOtp.aggregate({
-        where: createdAtFilter ? { createdAt: createdAtFilter } : {},
-        _count: { _all: true, usedAt: true },
-      }),
-      // 7. Sync penetration
-      prisma.whatsAppUser.count({
-        where: { userId: { not: null } },
-      }),
-    ]);
+    // 1. Status breakdown
+    const statusGroups = await prisma.printJob.groupBy({
+      by: ["status"],
+      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      _count: { _all: true },
+      _sum: { totalCost: true, totalPages: true },
+    });
+    // 2. Source breakdown (Web vs WhatsApp)
+    const sourceGroups = await prisma.printJob.groupBy({
+      by: ["source"],
+      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      _count: { _all: true },
+      _sum: { totalCost: true, totalPages: true },
+    });
+    // 3. Overall aggregate for the period
+    const totals = await prisma.printJob.aggregate({
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        status: PrintJobStatus.COMPLETED,
+      },
+      _sum: { totalCost: true, totalPages: true },
+      _count: { _all: true },
+    });
+    // 4. Expired jobs breakdown
+    const expiredCount = await prisma.printJob.groupBy({
+      by: ["status"],
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        expired: true,
+      },
+      _count: { _all: true },
+    });
+    // 5. Daily trends (for charting)
+    const dailyStats = await prisma.printJob.findMany({
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        status: PrintJobStatus.COMPLETED,
+      },
+      select: {
+        createdAt: true,
+        totalCost: true,
+        totalPages: true,
+      },
+    });
+    // 6. WhatsApp Login success rate
+    const otpStats = await prisma.whatsAppLoginOtp.aggregate({
+      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      _count: { _all: true, usedAt: true },
+    });
+    // 7. Sync penetration
+    const syncStats = await prisma.whatsAppUser.count({
+      where: { userId: { not: null } },
+    });
 
     // Format expired breakdown
     const expiredBreakdown = (expiredCount as any[]).reduce<Record<string, number>>((acc, g) => {
@@ -267,86 +250,76 @@ app.get("/users", async (req, res) => {
   let dateRange: DateRange | null;
 
   try {
-    dateRange = parseDateQuery(req.query.date);
+    dateRange = parseDateQuery(req.query);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Invalid date query.";
+    const message = error instanceof Error ? error.message : "Invalid date query.";
     return res.status(400).json({ error: message });
   }
 
   const createdAtFilter = buildCreatedAtFilter(dateRange);
 
   try {
-    const [
-      totalUsers,
-      onboardingGroups,
-      skippedCount,
-      activeUsers,
-      activatedNewUsers,
-      repeatUsers,
-    ] = await Promise.all([
-      // 1. New users created in the period
-      prisma.user.count({
-        where: createdAtFilter ? { createdAt: createdAtFilter } : {},
-      }),
-      // 2. Onboarding status breakdown for NEW users created in this period
-      prisma.user.groupBy({
-        by: ["onboardingCompleted"],
-        where: createdAtFilter ? { createdAt: createdAtFilter } : {},
-        _count: { _all: true },
-      }),
-      // 3. Skip events in the period
-      prisma.userEvent.count({
-        where: {
-          type: UserEventType.ONBOARDING_SKIPPED,
-          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+    // 1. New users created in the period
+    const totalUsers = await prisma.user.count({
+      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+    });
+    // 2. Onboarding status breakdown for NEW users created in this period
+    const onboardingGroups = await prisma.user.groupBy({
+      by: ["onboardingCompleted"],
+      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      _count: { _all: true },
+    });
+    // 3. Skip events in the period
+    const skippedCount = await prisma.userEvent.count({
+      where: {
+        type: UserEventType.ONBOARDING_SKIPPED,
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+    });
+    // 4. Total unique users who were active (created a job) in this period
+    const activeUsers = await prisma.printJob.groupBy({
+      by: ["userId"],
+      where: {
+        userId: { not: null },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+    });
+    // 5. New users created in this period who also did a job in this same period (Activation)
+    const activatedNewUsers = await prisma.printJob.groupBy({
+      by: ["userId"],
+      where: {
+        userId: { not: null },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        user: {
+          createdAt: createdAtFilter ? createdAtFilter : undefined,
         },
-      }),
-      // 4. Total unique users who were active (created a job) in this period
+      },
+    });
+    // 6. Repeat customers active in this period
+    // (Completed a job in period AND had at least one completed job before the period)
+    // If overall, just users with > 1 completed job total.
+    const repeatUsers = await (!dateRange ? 
+      prisma.printJob.groupBy({
+        by: ["userId"],
+        where: { userId: { not: null }, status: PrintJobStatus.COMPLETED },
+        having: { userId: { _count: { gt: 1 } } }
+      }) :
       prisma.printJob.groupBy({
         by: ["userId"],
         where: {
           userId: { not: null },
-          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
-        },
-      }),
-      // 5. New users created in this period who also did a job in this same period (Activation)
-      prisma.printJob.groupBy({
-        by: ["userId"],
-        where: {
-          userId: { not: null },
-          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+          status: PrintJobStatus.COMPLETED,
+          createdAt: createdAtFilter,
           user: {
-            createdAt: createdAtFilter ? createdAtFilter : undefined,
-          },
-        },
-      }),
-      // 6. Repeat customers active in this period
-      // (Completed a job in period AND had at least one completed job before the period)
-      // If overall, just users with > 1 completed job total.
-      !dateRange ? 
-        prisma.printJob.groupBy({
-          by: ["userId"],
-          where: { userId: { not: null }, status: PrintJobStatus.COMPLETED },
-          having: { userId: { _count: { gt: 1 } } }
-        }) :
-        prisma.printJob.groupBy({
-          by: ["userId"],
-          where: {
-            userId: { not: null },
-            status: PrintJobStatus.COMPLETED,
-            createdAt: createdAtFilter,
-            user: {
-              printJobs: {
-                some: {
-                  status: PrintJobStatus.COMPLETED,
-                  createdAt: { lt: dateRange.start }
-                }
+            printJobs: {
+              some: {
+                status: PrintJobStatus.COMPLETED,
+                createdAt: { lt: dateRange.start }
               }
             }
           }
-        })
-    ]);
+        }
+      }));
 
     const onboardingCompleted = onboardingGroups.find(g => g.onboardingCompleted)?._count._all || 0;
     const onboardingPending = onboardingGroups.find(g => !g.onboardingCompleted)?._count._all || 0;
@@ -429,6 +402,88 @@ app.get("/user-activity/:userId", async (req, res) => {
   } catch (error) {
     console.error("[analysis/user-activity] Error:", error);
     res.status(500).json({ error: "Failed to fetch user activity." });
+  }
+});
+
+app.get("/insights", async (req, res) => {
+  let dateRange: DateRange | null;
+  try {
+    dateRange = parseDateQuery(req.query);
+  } catch (error) {
+    return res.status(400).json({ error: "Invalid date query." });
+  }
+  const createdAtFilter = buildCreatedAtFilter(dateRange);
+
+  try {
+    const allJobs = await prisma.printJob.findMany({
+      where: { 
+        status: PrintJobStatus.COMPLETED,
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {})
+      },
+      select: { createdAt: true, totalCost: true },
+    });
+    
+    const allUsers = await prisma.user.findMany({
+      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      select: { id: true, createdAt: true, printJobs: { select: { createdAt: true } } },
+    });
+
+    const totalRevenueData = await prisma.printJob.aggregate({
+      where: { 
+        status: PrintJobStatus.COMPLETED,
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {})
+      },
+      _sum: { totalCost: true },
+    });
+
+    // Peak Hours Calculation
+    const peakHours = new Array(24).fill(0);
+    allJobs.forEach((job) => {
+      const hour = job.createdAt.getHours();
+      peakHours[hour]++;
+    });
+
+    // ARPU (Average Revenue Per User)
+    const totalRevenue = totalRevenueData._sum.totalCost || 0;
+    const totalUsersCount = allUsers.length || 1;
+    const arpu = totalRevenue / totalUsersCount;
+
+    // Churn Rate (Inactive for > 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    let activeUsers = 0;
+    let churnedUsers = 0;
+
+    allUsers.forEach((user) => {
+      const latestJob = user.printJobs.sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+      )[0];
+      
+      if (latestJob && latestJob.createdAt > thirtyDaysAgo) {
+        activeUsers++;
+      } else {
+        churnedUsers++;
+      }
+    });
+
+    const churnRate =
+      allUsers.length > 0 ? (churnedUsers / allUsers.length) * 100 : 0;
+
+    res.status(200).json({
+      peakHours,
+      arpu: arpu.toFixed(2),
+      churnRate: churnRate.toFixed(2),
+      totalRevenue,
+      userMetrics: {
+        total: allUsers.length,
+        active: activeUsers,
+        churned: churnedUsers,
+      },
+    });
+  } catch (error) {
+    console.error("[analysis/insights] Error:", error);
+    res.status(500).json({ error: "Failed to fetch advanced insights." });
   }
 });
 

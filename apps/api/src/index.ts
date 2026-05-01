@@ -48,6 +48,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const webDistPath = path.resolve(__dirname, "../../web/dist");
 const webIndexPath = path.join(webDistPath, "index.html");
+const analyticsDistPath = path.resolve(__dirname, "../../analytics/dist");
+const analyticsIndexPath = path.join(analyticsDistPath, "index.html");
 
 app.get("/healthz", (req, res) => {
   res.json({ message: "The backend is healthy!" });
@@ -57,11 +59,19 @@ app.use("/api/v1/auth", authLimiter);
 app.use("/api/v1", apiLimiter);
 app.use("/api/v1", v1Routes);
 
+if (fs.existsSync(analyticsDistPath)) {
+  app.use("/analysis", express.static(analyticsDistPath));
+
+  app.get(/^\/analysis(?:\/.*)?$/, (req, res) => {
+    res.sendFile(analyticsIndexPath);
+  });
+}
+
 if (fs.existsSync(webDistPath)) {
   app.use(express.static(webDistPath));
 
   // Let React Router handle non-API routes in the browser.
-  app.get(/^(?!\/api\/v1|\/healthz).*/, (req, res) => {
+  app.get(/^(?!\/api\/v1|\/healthz|\/analysis).*/, (req, res) => {
     res.sendFile(webIndexPath);
   });
 }
