@@ -1,6 +1,5 @@
 import express from "express";
 import { prisma } from "@printowl/db";
-import { authMiddleware } from "../middleware/authMiddleware.js";
 import {
   PrintJobStatus,
   UserEventType,
@@ -9,7 +8,6 @@ import {
 
 const app = express.Router();
 
-app.use(authMiddleware(["admin"]));
 
 type DateRange = {
   start: Date;
@@ -283,43 +281,71 @@ app.get("/users", async (req, res) => {
       totalUsers,
       onboardingGroups,
       skippedCount,
-      usersWithJobs,
+      activeUsers,
+      activatedNewUsers,
       repeatUsers,
     ] = await Promise.all([
+      // 1. New users created in the period
       prisma.user.count({
         where: createdAtFilter ? { createdAt: createdAtFilter } : {},
       }),
+      // 2. Onboarding status breakdown for NEW users created in this period
       prisma.user.groupBy({
         by: ["onboardingCompleted"],
         where: createdAtFilter ? { createdAt: createdAtFilter } : {},
         _count: { _all: true },
       }),
+      // 3. Skip events in the period
       prisma.userEvent.count({
         where: {
           type: UserEventType.ONBOARDING_SKIPPED,
           ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
         },
       }),
-      // Users who created at least one job in this period
+      // 4. Total unique users who were active (created a job) in this period
       prisma.printJob.groupBy({
         by: ["userId"],
         where: {
           userId: { not: null },
           ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
         },
-        _count: { _all: true },
       }),
-      // Repeat customers (users with more than 1 completed job total)
+      // 5. New users created in this period who also did a job in this same period (Activation)
       prisma.printJob.groupBy({
         by: ["userId"],
         where: {
           userId: { not: null },
-          status: PrintJobStatus.COMPLETED,
-        },
-        having: {
-          userId: { _count: { gt: 1 } },
+          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+          user: {
+            createdAt: createdAtFilter ? createdAtFilter : undefined,
+          },
         },
       }),
+      // 6. Repeat customers active in this period
+      // (Completed a job in period AND had at least one completed job before the period)
+      // If overall, just users with > 1 completed job total.
+      !dateRange ? 
+        prisma.printJob.groupBy({
+          by: ["userId"],
+          where: { userId: { not: null }, status: PrintJobStatus.COMPLETED },
+          having: { userId: { _count: { gt: 1 } } }
+        }) :
+        prisma.printJob.groupBy({
+          by: ["userId"],
+          where: {
+            userId: { not: null },
+            status: PrintJobStatus.COMPLETED,
+            createdAt: createdAtFilter,
+            user: {
+              printJobs: {
+                some: {
+                  status: PrintJobStatus.COMPLETED,
+                  createdAt: { lt: dateRange.start }
+                }
+              }
+            }
+          }
+        })
     ]);
 
     const onboardingCompleted = onboardingGroups.find(g => g.onboardingCompleted)?._count._all || 0;
@@ -332,8 +358,9 @@ app.get("/users", async (req, res) => {
       },
       acquisition: {
         totalNewUsers: totalUsers,
-        usersWithAtLeastOneJob: usersWithJobs.length,
-        activationRate: totalUsers > 0 ? (usersWithJobs.length / totalUsers).toFixed(2) : 0,
+        totalActiveUsers: activeUsers.length,
+        usersWithAtLeastOneJob: activatedNewUsers.length, // This is now cohort-based "Activated New Users"
+        activationRate: totalUsers > 0 ? (activatedNewUsers.length / totalUsers).toFixed(2) : 0,
       },
       onboarding: {
         completed: onboardingCompleted,
@@ -343,9 +370,10 @@ app.get("/users", async (req, res) => {
       },
       retention: {
         repeatCustomers: repeatUsers.length,
-        webUsersWithWhatsApp: await prisma.whatsAppUser.count({
+        webUsersWithWhatsApp: await prisma.user.count({
           where: { 
-            userId: { not: null }
+            ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+            whatsAppUser: { isNot: null }
           }
         }),
       }

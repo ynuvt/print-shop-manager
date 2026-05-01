@@ -36,7 +36,7 @@ app.post(
   "/expire-old-printjobs",
   authMiddleware(["admin"]),
   async (req, res) => {
-    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
     if (!r2PublicBase) {
@@ -179,7 +179,7 @@ app.delete(
   authMiddleware(["admin"]),
   async (req, res) => {
     // Redirect to the new expiration logic by calling it internally
-    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
     if (!r2PublicBase) {
@@ -324,7 +324,7 @@ app.delete(
  * Admin-only.
  */
 const cleanupStaleDraftsHandler: RequestHandler = async (req, res) => {
-  const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
   const r2PublicBase = normalizeUrlBase(process.env.R2_PUBLIC_BUCKET_URL);
   if (!r2PublicBase) {  
