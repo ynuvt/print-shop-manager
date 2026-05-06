@@ -11,7 +11,7 @@ import type { UserPrintJob, UserPrintJobFile } from "../api/api";
 import { getSocket } from "../services/getSocket";
 import { useNotifications } from "./NotificationCenter";
 
-type JobsTab = "ALL" | "ACTIVE" | "COMPLETED" | "REJECTED" | "CANCELED";
+type JobsTab = "ACTIVE" | "COMPLETED" | "HISTORY";
 
 const ACTIVE_STATUSES = ["PENDING", "PROCESSING"];
 const COMPLETED_STATUSES = ["COMPLETED"];
@@ -165,43 +165,19 @@ function JobDetailModal({
     };
   }, [jobId, loadJob]);
 
-  if (loading) {
-    return (
-      <div className="modal-shell" role="dialog" aria-modal="true">
-        <div className="modal-card">
-          <p className="modal-helper">Loading job details...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !job) {
-    return (
-      <div className="modal-shell" role="dialog" aria-modal="true">
-        <div className="modal-card">
-          <p className="modal-error">{error ?? "Job not found."}</p>
-          <button type="button" className="btn btn-primary" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const displayOtp = job.verificationCode ?? job.oldOtp;
+  const displayOtp = job?.verificationCode ?? job?.oldOtp;
   const otpDigits = displayOtp ? String(displayOtp).split("") : [];
-  const isExpired = !!job.expired;
-  const canDelete = ACTIVE_STATUSES.includes(job.status) && !isExpired;
-  const canResubmit = COMPLETED_STATUSES.includes(job.status) && !isExpired;
-  const canViewFiles = !["REJECTED", "CANCELED"].includes(job.status) && !isExpired;
+  const isExpired = !!job?.expired;
+  const canDelete = job ? (ACTIVE_STATUSES.includes(job.status) && !isExpired) : false;
+  const canResubmit = job ? (COMPLETED_STATUSES.includes(job.status) && !isExpired) : false;
+  const canViewFiles = job ? (!["REJECTED", "CANCELED"].includes(job.status) && !isExpired) : false;
 
   const handleRefreshStatus = async () => {
     await loadJob();
-    notify("Status refreshed", { variant: "success" });
   };
 
   const handleDeleteJob = async () => {
-    if (!canDelete || isDeleting) return;
+    if (!job || !canDelete || isDeleting) return;
 
     const confirmed = window.confirm(
       "Are you sure you want to delete this print job? This will permanently remove the job and its files from cloud storage.",
@@ -224,7 +200,7 @@ function JobDetailModal({
   };
 
   const handleSubmitAgain = async () => {
-    if (!canResubmit || isResubmitting) return;
+    if (!job || !canResubmit || isResubmitting) return;
 
     setIsResubmitting(true);
     try {
@@ -254,99 +230,151 @@ function JobDetailModal({
           <div>
             <p className="modal-label">Print Job</p>
             <h2>Job Details</h2>
-            <p className="modal-helper">
-              {new Date(job.createdAt).toLocaleString()}
-            </p>
+            {job && (
+              <p className="modal-helper">
+                {new Date(job.createdAt).toLocaleString()}
+              </p>
+            )}
+            {loading && <div className="skeleton skeleton-title" style={{ marginTop: "8px" }}></div>}
           </div>
           <button type="button" className="icon-btn" onClick={onClose}>
             x
           </button>
         </div>
 
-        <div className="otp-card">
-          <p className="otp-title">
-            {job.verificationCode
-              ? "Verification Code"
-              : isExpired
-                ? "Previous Verification Code"
-                : "Verification Code"}
-          </p>
-          {otpDigits.length > 0 ? (
-            <>
-              <div
-                className="otp-digits"
-                aria-label={`Verification code ${displayOtp}`}
-              >
-                {otpDigits.map((digit, idx) => (
-                  <div key={`${digit}-${idx}`} className="otp-digit">
-                    {digit}
-                  </div>
-                ))}
-              </div>
-              <span className="otp-helper">
-                {isExpired
-                  ? "This job has expired. Files have been removed."
-                  : "Show this to the shopkeeper and collect your prints."}
-              </span>
-            </>
-          ) : (
-            <span className="otp-helper">OTP no longer available</span>
-          )}
-        </div>
-
-        <div className="modal-summary">
-          <div>
-            <p className="modal-label">Total Price</p>
-            <h3>{formatPrice(job.totalCost ?? 0)}</h3>
+        {error && (
+          <div style={{ padding: "20px 0" }}>
+            <p className="modal-error">{error}</p>
+            <button type="button" className="btn btn-primary" style={{ marginTop: "12px" }} onClick={onClose}>
+              Close
+            </button>
           </div>
-          <span className={getStatusBadgeClass(job.status, isExpired)}>
-            {getStatusDisplayText(job.status, isExpired)}
-          </span>
-        </div>
+        )}
 
-        <p className="modal-helper summary-meta">
-          {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
-        </p>
+        {!error && (
+          <>
+            <div className="otp-card">
+              {loading ? (
+                <div className="skeleton skeleton-modal-otp" style={{ margin: 0 }}></div>
+              ) : job ? (
+                <>
+                  <p className="otp-title">
+                    {job.verificationCode
+                      ? "Verification Code"
+                      : isExpired
+                        ? "Previous Verification Code"
+                        : "Verification Code"}
+                  </p>
+                  {otpDigits.length > 0 ? (
+                    <>
+                      <div
+                        className="otp-digits"
+                        aria-label={`Verification code ${displayOtp}`}
+                      >
+                        {otpDigits.map((digit, idx) => (
+                          <div key={`${digit}-${idx}`} className="otp-digit">
+                            {digit}
+                          </div>
+                        ))}
+                      </div>
+                      <span className="otp-helper">
+                        {isExpired
+                          ? "This job has expired. Files have been removed."
+                          : "Show this to the shopkeeper and collect your prints."}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="otp-helper">OTP no longer available</span>
+                  )}
+                </>
+              ) : null}
+            </div>
 
-        <div className="modal-actions">
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void handleRefreshStatus()}
-          >
-            Refresh Status
-          </button>
-          {canResubmit && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => void handleSubmitAgain()}
-              disabled={isResubmitting}
-            >
-              {isResubmitting ? "Submitting..." : "Submit For Print Again"}
-            </button>
-          )}
-          {canDelete && (
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={() => void handleDeleteJob()}
-              disabled={isDeleting}
-            >
-              {isDeleting ? "Deleting..." : "Delete Job"}
-            </button>
-          )}
-        </div>
+            <div className="modal-summary">
+              {loading ? (
+                <div className="skeleton skeleton-text" style={{ height: "40px", margin: 0 }}></div>
+              ) : job ? (
+                <>
+                  <div>
+                    <p className="modal-label">Total Price</p>
+                    <h3>{formatPrice(job.totalCost ?? 0)}</h3>
+                  </div>
+                  <span className={getStatusBadgeClass(job.status, isExpired)}>
+                    {getStatusDisplayText(job.status, isExpired)}
+                  </span>
+                </>
+              ) : null}
+            </div>
 
-        <div className="modal-files-list">
-          {job.files.map((file) => (
-            <FileOptionCard
-              key={file.id}
-              file={file}
-              canViewFile={canViewFiles}
-            />
-          ))}
-        </div>
+            <div style={{ marginTop: "12px" }}>
+              {loading ? (
+                <div className="skeleton skeleton-text" style={{ width: "30%" }}></div>
+              ) : job ? (
+                <p className="modal-helper summary-meta">
+                  {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
+                </p>
+              ) : null}
+            </div>
+
+            <div className="modal-actions">
+              {loading ? (
+                <>
+                  <div className="skeleton" style={{ height: "42px", flex: 1, borderRadius: "10px" }}></div>
+                  <div className="skeleton" style={{ height: "42px", flex: 1, borderRadius: "10px" }}></div>
+                </>
+              ) : job ? (
+                <>
+                  {!isExpired && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => void handleRefreshStatus()}
+                    >
+                      Refresh Status
+                    </button>
+                  )}
+                  {canResubmit && (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void handleSubmitAgain()}
+                      disabled={isResubmitting}
+                    >
+                      {isResubmitting ? "Submitting..." : "Submit For Print Again"}
+                    </button>
+                  )}
+                  {canDelete && (
+                    <button
+                      type="button"
+                      className="btn btn-danger"
+                      onClick={() => void handleDeleteJob()}
+                      disabled={isDeleting}
+                    >
+                      {isDeleting ? "Deleting..." : "Delete Job"}
+                    </button>
+                  )}
+                </>
+              ) : null}
+            </div>
+
+            <div className="modal-files-list">
+              {loading ? (
+                <>
+                  <div className="skeleton skeleton-file-card"></div>
+                  <div className="skeleton skeleton-file-card"></div>
+                </>
+              ) : job ? (
+                job.files.map((file) => (
+                  <FileOptionCard
+                    key={file.id}
+                    file={file}
+                    canViewFile={canViewFiles}
+                  />
+                ))
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -363,9 +391,8 @@ export default function PrintJobsList({
   const [loading, setLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [showLinkWhatsappModal, setShowLinkWhatsappModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<JobsTab>("ALL");
+  const [activeTab, setActiveTab] = useState<JobsTab>("ACTIVE");
   const [currentPage, setCurrentPage] = useState(1);
-  const { notify } = useNotifications();
   const navigate = useNavigate();
 
   const handleJobUpdated = useCallback((updatedJob: UserPrintJob) => {
@@ -380,13 +407,7 @@ export default function PrintJobsList({
   }, []);
 
   const load = useCallback(
-    async ({
-      notification = false,
-      msg,
-    }: {
-      notification?: boolean;
-      msg?: string;
-    }) => {
+    async () => {
       if (!userId) return;
       setLoading(true);
       try {
@@ -397,25 +418,22 @@ export default function PrintJobsList({
         );
         setJobs(sorted);
 
-        if (notification && msg) {
-          notify(msg, { variant: "info" });
-        }
       } finally {
         setLoading(false);
       }
     },
-    [notify, userId],
+    [userId],
   );
 
   useEffect(() => {
-    void load({ notification: false });
+    void load();
   }, [load, refreshTrigger]);
 
   useEffect(() => {
     const socket = getSocket();
 
-    const handler = (_userId: string, updatedJobId: string, msg: string) => {
-      void load({ notification: true, msg });
+    const handler = (_userId: string, updatedJobId: string) => {
+      void load();
 
       if (selectedJobId !== updatedJobId) {
         setSelectedJobId(updatedJobId);
@@ -428,27 +446,34 @@ export default function PrintJobsList({
     };
   }, [load, selectedJobId]);
 
-  const draftJobs = useMemo(() => 
-    jobs.filter((job) => job.status === "DRAFT"),
-  [jobs]);
-  const allJobs = useMemo(() => jobs.filter(job => job.status !== "DRAFT"), [jobs]);
-
   const filteredJobs = useMemo(() => {
-    if (activeTab === "ALL") return allJobs;
+    const nonDraftJobs = jobs.filter((job) => job.status !== "DRAFT");
 
     if (activeTab === "ACTIVE") {
-      return jobs.filter((job) => ACTIVE_STATUSES.includes(job.status));
+      return nonDraftJobs.filter((job) => ACTIVE_STATUSES.includes(job.status) && !job.expired);
     }
+    
     if (activeTab === "COMPLETED") {
-      return jobs.filter((job) => COMPLETED_STATUSES.includes(job.status));
+      const completed = nonDraftJobs.filter((job) => COMPLETED_STATUSES.includes(job.status));
+      // Sort: Not expired first, then by date desc
+      return completed.sort((a, b) => {
+        if (!!a.expired === !!b.expired) {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        return a.expired ? 1 : -1;
+      });
     }
 
-    if (activeTab === "REJECTED") {
-      return jobs.filter((job) => REJECTED_STATUSES.includes(job.status));
+    if (activeTab === "HISTORY") {
+      return nonDraftJobs.filter((job) => 
+        REJECTED_STATUSES.includes(job.status) || 
+        CANCELED_STATUSES.includes(job.status) || 
+        (job.expired && !COMPLETED_STATUSES.includes(job.status))
+      );
     }
 
-    return jobs.filter((job) => CANCELED_STATUSES.includes(job.status));
-  }, [activeTab, jobs, allJobs, draftJobs]);
+    return [];
+  }, [activeTab, jobs]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -470,19 +495,18 @@ export default function PrintJobsList({
     return filteredJobs.slice(start, start + JOBS_PER_PAGE);
   }, [currentPage, filteredJobs]);
 
-  const allCount = allJobs.length;
   const activeCount = jobs.filter((job) =>
-    ACTIVE_STATUSES.includes(job.status),
+    ACTIVE_STATUSES.includes(job.status) && !job.expired && job.status !== "DRAFT"
   ).length;
-  // const draftCount = draftJobs.length;
   const completedCount = jobs.filter((job) =>
-    COMPLETED_STATUSES.includes(job.status),
+    COMPLETED_STATUSES.includes(job.status) && job.status !== "DRAFT"
   ).length;
-  const rejectedCount = jobs.filter((job) =>
-    REJECTED_STATUSES.includes(job.status),
-  ).length;
-  const canceledCount = jobs.filter((job) =>
-    CANCELED_STATUSES.includes(job.status),
+  const historyCount = jobs.filter((job) =>
+    job.status !== "DRAFT" && (
+      REJECTED_STATUSES.includes(job.status) || 
+      CANCELED_STATUSES.includes(job.status) || 
+      (job.expired && !COMPLETED_STATUSES.includes(job.status))
+    )
   ).length;
 
   return (
@@ -533,7 +557,7 @@ export default function PrintJobsList({
             <button
               type="button"
               className="ghost-link"
-              onClick={() => void load({ notification: false })}
+              onClick={() => void load()}
             >
               Refresh
             </button>
@@ -547,15 +571,6 @@ export default function PrintJobsList({
         >
           <button
             type="button"
-            className={`jobs-tab ${activeTab === "ALL" ? "active" : ""}`}
-            onClick={() => setActiveTab("ALL")}
-            role="tab"
-            aria-selected={activeTab === "ALL"}
-          >
-            All ({allCount})
-          </button>
-          <button
-            type="button"
             className={`jobs-tab ${activeTab === "ACTIVE" ? "active" : ""}`}
             onClick={() => setActiveTab("ACTIVE")}
             role="tab"
@@ -563,17 +578,6 @@ export default function PrintJobsList({
           >
             Active ({activeCount})
           </button>
-          {/* {draftCount > 0 && (
-            <button
-              type="button"
-              className={`jobs-tab ${activeTab === "DRAFT" ? "active" : ""}`}
-              onClick={() => setActiveTab("DRAFT")}
-              role="tab"
-              aria-selected={activeTab === "DRAFT"}
-            >
-              Draft ({draftCount})
-            </button>
-          )} */}
           <button
             type="button"
             className={`jobs-tab ${activeTab === "COMPLETED" ? "active" : ""}`}
@@ -585,26 +589,21 @@ export default function PrintJobsList({
           </button>
           <button
             type="button"
-            className={`jobs-tab ${activeTab === "REJECTED" ? "active" : ""}`}
-            onClick={() => setActiveTab("REJECTED")}
+            className={`jobs-tab ${activeTab === "HISTORY" ? "active" : ""}`}
+            onClick={() => setActiveTab("HISTORY")}
             role="tab"
-            aria-selected={activeTab === "REJECTED"}
+            aria-selected={activeTab === "HISTORY"}
           >
-            Rejected ({rejectedCount})
-          </button>
-          <button
-            type="button"
-            className={`jobs-tab ${activeTab === "CANCELED" ? "active" : ""}`}
-            onClick={() => setActiveTab("CANCELED")}
-            role="tab"
-            aria-selected={activeTab === "CANCELED"}
-          >
-            Canceled ({canceledCount})
+            History ({historyCount})
           </button>
         </div>
 
         {loading ? (
-          <p className="jobs-empty">Loading jobs...</p>
+          <div className="jobs-list">
+            <div className="skeleton skeleton-job-card"></div>
+            <div className="skeleton skeleton-job-card"></div>
+            <div className="skeleton skeleton-job-card"></div>
+          </div>
         ) : filteredJobs.length === 0 ? (
           <p className="jobs-empty">No jobs found for this view.</p>
         ) : (

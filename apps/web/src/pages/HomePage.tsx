@@ -8,11 +8,9 @@ import {
   Copy,
   FileText,
   MessageCircle,
-  Moon,
   Plus,
   RefreshCw,
   SlidersHorizontal,
-  Sun,
   Trash2,
   Upload,
   X,
@@ -44,6 +42,7 @@ import { defaultPrintOptions } from "../printing/types";
 import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
 import type { ThemeMode } from "../App";
+import Navbar from "../components/Navbar";
 
 const MAX_JOB_UPLOAD_MB = 50;
 const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
@@ -1199,41 +1198,12 @@ export default function HomePage({
         </div>
       )}
       
-      <header className="top-bar">
-        <div className="brand-row" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div>
-            <p className="brand-title" style={{ margin: 0, fontSize: "1.5rem", fontWeight: "bold" }}>ZOPY</p>
-            <span className="brand-subtitle" style={{ fontSize: "0.85rem", opacity: 0.8 }}>
-              PRINT FROM ANYWHERE
-            </span>
-          </div>
-        </div>
-
-        <div className="top-bar-actions">
-          {!isWhatsappSynced && (
-            <button
-              type="button"
-              className="btn btn-sync-nav"
-              onClick={() => setShowSyncWhatsappModal(true)}
-              title="Connect your WhatsApp"
-            >
-              <MessageCircle size={16} />
-              Sync
-            </button>
-          )}
-          <button
-            type="button"
-            className="theme-btn icon-theme-btn"
-            onClick={onToggleTheme}
-            aria-label={
-              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
-            }
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-      </header>
+      <Navbar 
+        theme={theme} 
+        onToggleTheme={onToggleTheme} 
+        isWhatsappSynced={isWhatsappSynced}
+        onSyncClick={() => setShowSyncWhatsappModal(true)}
+      />
 
       <main className="main-wrap">
         {error && <div className="banner-error">{error}</div>}

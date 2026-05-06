@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
-import { Moon, Sun } from "lucide-react";
 import type { ThemeMode } from "../App";
+import Navbar from "../components/Navbar";
 
 export default function TermsPage({
   theme,
@@ -11,42 +11,10 @@ export default function TermsPage({
 }) {
   return (
     <div className="app-shell">
-      <header className="top-bar">
-        <Link to="/" className="brand-row">
-          <div className="brand-mark" aria-hidden="true">
-            <img
-              className="brand-icon brand-icon--light"
-              src="/img/IconBlack.png"
-              alt=""
-            />
-            <img
-              className="brand-icon brand-icon--dark"
-              src="/img/iconWhite.png"
-              alt=""
-            />
-          </div>
-          <div>
-            <p className="brand-title">ZOPY</p>
-            <span className="brand-subtitle">TERMS & POLICIES</span>
-          </div>
-        </Link>
-        <div className="top-bar-actions">
-          <Link to="/about" className="ghost-link">
-            About Us
-          </Link>
-          <button
-            type="button"
-            className="theme-btn icon-theme-btn"
-            onClick={onToggleTheme}
-            aria-label={
-              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
-            }
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-      </header>
+      <Navbar 
+        theme={theme} 
+        onToggleTheme={onToggleTheme} 
+      />
 
       <main className="main-wrap legal-wrap">
         <section className="hero-panel legal-card">

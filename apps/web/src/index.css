@@ -91,11 +91,11 @@ body {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 8px;
+  gap: 12px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(12px);
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
 }
 
 .brand-row {
@@ -2930,4 +2930,67 @@ body {
 
 [data-theme="dark"] .steps-modal {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+}
+
+/* ── Skeleton Loader ─────────────────────────── */
+@keyframes shimmer {
+  0% { background-position: -468px 0; }
+  100% { background-position: 468px 0; }
+}
+
+.skeleton {
+  background: color-mix(in srgb, var(--panel-muted) 80%, var(--border));
+  background-image: linear-gradient(to right, 
+    rgba(255, 255, 255, 0) 0%, 
+    rgba(255, 255, 255, 0.2) 20%, 
+    rgba(255, 255, 255, 0.5) 40%, 
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+}
+
+[data-theme="dark"] .skeleton {
+  background: #2a2a2a;
+  background-image: linear-gradient(to right, 
+    rgba(255, 255, 255, 0) 0%, 
+    rgba(255, 255, 255, 0.05) 20%, 
+    rgba(255, 255, 255, 0.1) 40%, 
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+.skeleton-text {
+  height: 14px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.skeleton-title {
+  height: 20px;
+  width: 60%;
+  margin-bottom: 12px;
+}
+
+.skeleton-job-card {
+  height: 120px;
+  width: 100%;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.skeleton-file-card {
+  height: 90px;
+  width: 100%;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.skeleton-modal-otp {
+  height: 160px;
+  width: 100%;
+  border-radius: 12px;
+  margin-bottom: 20px;
 }
