@@ -265,10 +265,17 @@ export default function App() {
         console.log("=== END PRINTER LIST ===");
         setPrinters(printerList);
 
-        // Set color printer (COLOUR A/4 is our color printer)
-        const colorPrinterName = "COLOUR   A/4";
-        setSelectedColorPrinter(colorPrinterName);
-        console.log("Color printer set to:", colorPrinterName);
+        // Set color printer — prefer persisted selection, fall back to the
+        // default color printer name for first-time setup.
+        const savedColorPrinter = localStorage.getItem("printowl_color_printer");
+        if (savedColorPrinter) {
+          setSelectedColorPrinter(savedColorPrinter);
+          console.log("Color printer restored from storage:", savedColorPrinter);
+        } else {
+          const defaultColorPrinterName = "COLOUR   A/4";
+          setSelectedColorPrinter(defaultColorPrinterName);
+          console.log("Color printer defaulting to:", defaultColorPrinterName);
+        }
 
         const savedPrinter = localStorage.getItem("printowl_selected_printer");
         if (savedPrinter) {
@@ -396,7 +403,7 @@ export default function App() {
 
   // ── Background print pipeline ───────────────────────────
   const executePrintJob = useCallback(
-    async (job: PrintJob, printerName: string) => {
+    async (job: PrintJob, bwPrinterName: string, colorPrinterName: string) => {
       const printRunId = `run-${Date.now()}-${job.id}`;
 
       // Initialize per-file progress
@@ -430,6 +437,7 @@ export default function App() {
         path: string;
         fileIndex: number;
         options: any;
+        isColor: boolean;
       }[] = [];
 
       try {
@@ -452,6 +460,7 @@ export default function App() {
             copies: 1,
           };
 
+          const isColor = fileOption.colorMode === "COLOR";
           const customPages =
             fileOption.pageRange === "CUSTOM"
               ? fileOption.customRange?.trim()
@@ -463,7 +472,7 @@ export default function App() {
             paperSize: "A4",
             side: isDuplex ? "duplexlong" : "simplex",
             duplex: isDuplex ? "Duplex" : "Simplex",
-            monochrome: fileOption.colorMode !== "COLOR",
+            monochrome: !isColor,
             orientation:
               fileOption.orientation === "LANDSCAPE" ? "landscape" : "portrait",
             scale:
@@ -472,10 +481,11 @@ export default function App() {
                 : fileOption.scaleMode === "SHRINK"
                   ? "shrink"
                   : "fit",
+            pagesPerSheet: Math.max(1, Number(fileOption.pagesPerSheet) || 1),
             ...(customPages ? { pages: customPages } : {}),
           };
 
-          return { path: filePath, fileIndex: i, options };
+          return { path: filePath, fileIndex: i, options, isColor };
         });
 
         const results = await Promise.all(downloadPromises);
@@ -483,7 +493,7 @@ export default function App() {
           if (r) downloadedFiles.push(r);
         }
 
-        // Phase 2: Print all files at once
+        // Phase 2: Print all files — route by colorMode
         updatePrintJob(printRunId, (prev) => ({
           ...prev,
           phase: "printing",
@@ -497,12 +507,19 @@ export default function App() {
         }));
 
         const printPromises = downloadedFiles.map(
-          ({ path, fileIndex, options }) =>
-            window.electronAPI.printPDF(path, printerName, options, {
+          ({ path, fileIndex, options, isColor }) => {
+            // Route color files to color printer, BW files to BW printer.
+            // Fall back gracefully if a printer is not set.
+            const targetPrinter =
+              isColor && colorPrinterName
+                ? colorPrinterName
+                : bwPrinterName;
+            return window.electronAPI.printPDF(path, targetPrinter, options, {
               fileIndex,
               totalFiles: job.files.length,
               printRunId,
-            }),
+            });
+          },
         );
 
         await Promise.all(printPromises);
@@ -563,8 +580,8 @@ export default function App() {
   );
 
   const handleStartPrint = useCallback(
-    (job: PrintJob, printerName: string) => {
-      void executePrintJob(job, printerName);
+    (job: PrintJob, bwPrinterName: string, colorPrinterName: string) => {
+      void executePrintJob(job, bwPrinterName, colorPrinterName);
     },
     [executePrintJob],
   );
@@ -632,10 +649,11 @@ export default function App() {
       <Header
         tab={tab}
         onTabChange={setTab}
-        totalJobs={jobs.length}
         printers={printers}
         selectedPrinter={selectedPrinter}
         onPrinterChange={handlePrinterChange}
+        selectedColorPrinter={selectedColorPrinter}
+        onColorPrinterChange={handleColorPrinterChange}
       />
 
       {loadError && (

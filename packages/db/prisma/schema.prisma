@@ -28,6 +28,7 @@ datasource db {
 //         customRange: string,     // e.g. "1-5,8,10-12"
 //         customRangeError: string,
 //         duplex: string,          // "one" | "both"
+//         pagesPerSheet: number,   // 1 | 2 | 4 | 6 | 9 | 16 (N-up; only supported via loadWebContent)
 //         copies: number,
 //       },
 //       cost: number,        // cost for this specific file
@@ -100,18 +101,19 @@ enum FileOwnerRole {
 
 
 model printOption {
-  id       String   @id @default(uuid())
-  createdAt DateTime @default(now())
-  paperSize PaperSize  @default(A4)
-  colorMode ColorMode  @default(BW)
-  orientation orientation @default(PORTRAIT)
-  scaleMode scaleMode @default(FIT)
-  pageRange pageRange  @default(ALL)
-  customRange String?
-  duplex     duplex  @default(ONE)
-  copies    Int
-  fileId    String   @unique
-  file      file     @relation(fields: [fileId], references: [id], onDelete: Cascade, map: "printoption_fileId_fkey")
+  id            String      @id @default(uuid())
+  createdAt     DateTime    @default(now())
+  paperSize     PaperSize   @default(A4)
+  colorMode     ColorMode   @default(BW)
+  orientation   orientation @default(PORTRAIT)
+  scaleMode     scaleMode   @default(FIT)
+  pageRange     pageRange   @default(ALL)
+  customRange   String?
+  duplex        duplex      @default(ONE)
+  copies        Int
+  pagesPerSheet Int         @default(1) // N-up layout: 1, 2, 4, 6, 9, or 16 pages per sheet. Only supported via loadWebContent (webContents.print); Sumatra is not used.
+  fileId        String      @unique
+  file          file        @relation(fields: [fileId], references: [id], onDelete: Cascade, map: "printoption_fileId_fkey")
 }
 
 model file {

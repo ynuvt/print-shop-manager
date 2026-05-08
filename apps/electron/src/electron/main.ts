@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import https from "node:https";
-import { getPrinters, print } from "pdf-to-printer";
+import { getPrinters } from "pdf-to-printer";
 
 // Dry-run mode: auto-enabled on non-Windows platforms (Mac/Linux) for testing.
 // On Windows, real printing is used.
@@ -167,23 +167,48 @@ async function printPdfViaWebContents(
 ): Promise<void> {
   const win = new BrowserWindow({
     show: false,
-    width: 800,
-    height: 600,
+    width: 1200,  // wider for better PDF rendering quality
+    height: 900,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      plugins: true, // ensure Chromium PDF plugin is active
     },
   });
 
   try {
-    // Electron can render PDFs via its built-in PDF viewer.
-    await win.loadURL(`file://${filePath}`);
+    // Event-driven wait to guarantee the Chromium PDF plugin has fully 
+    // parsed and initialized before we issue the print command.
+    // 'did-stop-loading' fires when the document and the PDF plugin have completely finished loading.
+    await new Promise<void>((resolve, reject) => {
+      let isResolved = false;
+      const finish = () => {
+        if (!isResolved) {
+          isResolved = true;
+          resolve();
+        }
+      };
 
-    // Map our normalizedOptions to Electron's webContents.print() format
+      win.webContents.once("did-stop-loading", () => {
+        console.log(`[PDF] 'did-stop-loading' fired for ${path.basename(filePath)}`);
+        // The PDF is fully parsed by Chromium. Proceed to print immediately without any artificial delay.
+        finish();
+      });
+
+      win.webContents.once("did-fail-load", (_, errorCode, errorDescription) => {
+        reject(new Error(`Failed to load PDF: ${errorDescription} (${errorCode})`));
+      });
+
+      win.loadURL(`file://${filePath}`).catch(reject);
+    });
+
+    // printBackground: false — PDF page content is foreground (not CSS
+    // backgrounds), so this is correct. Setting it true was printing the
+    // PDF viewer's dark chrome/overlay as solid black.
     const electronPrintOpts: Record<string, any> = {
       silent: true,
       deviceName: printerName,
-      printBackground: true,
+      printBackground: false,
     };
 
     if (normalizedOptions) {
@@ -206,9 +231,14 @@ async function printPdfViaWebContents(
       if (normalizedOptions.pages) {
         electronPrintOpts.pageRanges = normalizedOptions.pages;
       }
+      // N-up pages per sheet (only supported via loadWebContent)
+      const pps = Number(normalizedOptions.pagesPerSheet);
+      if (pps && pps > 1) {
+        electronPrintOpts.pagesPerSheet = pps;
+      }
     }
 
-    console.log(`[FALLBACK] webContents.print → ${printerName}`, electronPrintOpts);
+    console.log(`[PDF] webContents.print → ${printerName}`, electronPrintOpts);
 
     await new Promise<void>((resolve, reject) => {
       win.webContents.print(
@@ -326,8 +356,7 @@ app.on("window-all-closed", () => {
   }
 });
 
-// IPC handlers for file operations
-/** Sanitize temp filenames to prevent SumatraPDF command-line failures from overly long names. */
+/** Sanitize temp filenames to prevent overly long names from causing issues. */
 function sanitizeTempFileName(name: string): string {
   const ext = path.extname(name);
   let base = path.basename(name, ext);
@@ -499,33 +528,16 @@ ipcMain.handle(
         );
         await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
       } else if (isImageFile(filePath)) {
-        // Images: pdf-to-printer can't handle them (prints blank pages).
-        // Route directly to webContents with HTML wrapper.
+        // Images: route directly to webContents with HTML wrapper.
         console.log(`[IMAGE] Detected image file: ${path.basename(filePath)} — using webContents.print directly`);
         await printImageViaWebContents(filePath, printer, normalizedOptions);
         console.log(`[IMAGE] webContents.print succeeded for ${path.basename(filePath)}`);
       } else {
-        let resolvedPrinter = printer;
-        try {
-          resolvedPrinter = await resolvePdfToPrinterName(printer);
-        } catch (e) {
-          console.warn("Failed to resolve printer name via pdf-to-printer:", e);
-        }
-
-        // PRIMARY: pdf-to-printer — always first priority for PDFs
-        try {
-          console.log(`[PRIMARY] pdf-to-printer: ${path.basename(filePath)} → ${resolvedPrinter}`, normalizedOptions);
-          await print(filePath, { printer: resolvedPrinter, ...normalizedOptions });
-          console.log(`[PRIMARY] pdf-to-printer succeeded for ${path.basename(filePath)}`);
-        } catch (error) {
-          console.error(
-            `[PRIMARY] pdf-to-printer FAILED for "${resolvedPrinter}". Falling back to webContents.print (loadContent)...`,
-            error,
-          );
-          // FALLBACK: use Electron webContents.print (loadContent) — only when pdf-to-printer fails
-          await printPdfViaWebContents(filePath, printer, normalizedOptions);
-          console.log(`[FALLBACK] webContents.print succeeded for ${path.basename(filePath)}`);
-        }
+        // PDFs: always use Electron webContents.print (loadWebContent).
+        // This is the only path that supports N-up pagesPerSheet.
+        console.log(`[PDF] webContents.print (loadWebContent) → ${printer}`, normalizedOptions);
+        await printPdfViaWebContents(filePath, printer, normalizedOptions);
+        console.log(`[PDF] webContents.print succeeded for ${path.basename(filePath)}`);
       }
 
       event.sender.send("print-progress", {

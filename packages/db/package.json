@@ -17,6 +17,7 @@
     "users:restore": "node --loader ts-node/esm scripts/restoreUserData.ts",
     "db:backup": "node --loader ts-node/esm scripts/backupFullDb.ts",
     "db:restore": "node --loader ts-node/esm scripts/restoreFullDb.ts",
+    "update:printoption": "node --loader ts-node/esm scripts/updatePrintOption.ts",
     "build": "npx prisma migrate dev && npx tsc -b",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

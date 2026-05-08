@@ -7,7 +7,7 @@ interface JobModalProps {
   job: PrintJob;
   onClose: () => void;
   onReject: (jobId: string, userId: string) => Promise<void>;
-  onStartPrint: (job: PrintJob, printerName: string) => void;
+  onStartPrint: (job: PrintJob, bwPrinter: string, colorPrinter: string) => void;
   activePrintState: ActivePrintJobState | null;
   isPrintBusy: boolean;
   printers: { name: string; isDefault: boolean }[];
@@ -30,7 +30,9 @@ export default function JobModal({
 }: JobModalProps) {
   const [rejectLoading, setRejectLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [localPrinter, setLocalPrinter] = useState<string>(selectedPrinter);
+  // Job-local printer state — pre-filled from globals, does NOT affect global selection
+  const [localBwPrinter, setLocalBwPrinter] = useState<string>(selectedPrinter);
+  const [localColorPrinter, setLocalColorPrinter] = useState<string>(selectedColorPrinter);
   const [showReprintConfirm, setShowReprintConfirm] = useState(false);
 
   // Is this the job currently printing?
@@ -50,13 +52,10 @@ export default function JobModal({
 
   useEffect(() => {
     setError(null);
-
-    // Auto-select color printer for COLOR jobs
-    const hasColor = job.files.some(
-      (f) => (f.option.colorMode || "BW").toUpperCase() === "COLOR",
-    );
-    setLocalPrinter(hasColor && selectedColorPrinter ? selectedColorPrinter : selectedPrinter);
-  }, [job.id, job.files, selectedColorPrinter, selectedPrinter]);
+    // Sync job-local printers when job or global printers change
+    setLocalBwPrinter(selectedPrinter);
+    setLocalColorPrinter(selectedColorPrinter);
+  }, [job.id, selectedPrinter, selectedColorPrinter]);
 
   const printTypeLabel = useMemo(() => {
     const modes = job.files
@@ -65,7 +64,7 @@ export default function JobModal({
     if (modes.length === 0) return "B/W";
     if (modes.every((m) => m === "BW")) return "B/W";
     if (modes.every((m) => m === "COLOR")) return "Color";
-    return "B/W";
+    return "Mixed";
   }, [job.files]);
 
   // Download progress computations
@@ -103,11 +102,13 @@ export default function JobModal({
   }
 
   function handlePrint() {
-    if (!localPrinter) {
-      setError("Please select a printer first.");
+    if (!localBwPrinter) {
+      setError("Please select a B&W printer first.");
       return;
     }
-    onStartPrint(job, localPrinter);
+    // Use color printer for color files; fall back to BW printer if color not set
+    const effectiveColorPrinter = localColorPrinter || localBwPrinter;
+    onStartPrint(job, localBwPrinter, effectiveColorPrinter);
   }
 
   // Can this job be printed? Only if no other job is busy, or this job itself is done/failed
@@ -150,15 +151,22 @@ export default function JobModal({
   }
 
   /** Total effective sheets across all files */
-  const totalEffectiveSheets = useMemo(() => {
-    return job.files.reduce((sum, file) => {
+  const { totalEffectiveSheets, totalBwSheets, totalColorSheets } = useMemo(() => {
+    let total = 0, bw = 0, color = 0;
+    for (const file of job.files) {
       const opt: PrintFileOption = file.option ?? {
         paperSize: "A4", colorMode: "BW", orientation: "PORTRAIT",
         scaleMode: "FIT", pageRange: "ALL", duplex: "ONE", copies: 1,
       };
-      return sum + getEffectiveSheets(file.pages, opt);
-    }, 0);
+      const sheets = getEffectiveSheets(file.pages, opt);
+      total += sheets;
+      if ((opt.colorMode || "BW").toUpperCase() === "COLOR") color += sheets;
+      else bw += sheets;
+    }
+    return { totalEffectiveSheets: total, totalBwSheets: bw, totalColorSheets: color };
   }, [job.files]);
+
+  const isMixedJob = totalBwSheets > 0 && totalColorSheets > 0;
 
   /** Does this job contain any color files? */
   const hasColorFiles = useMemo(() => {
@@ -369,7 +377,7 @@ export default function JobModal({
           )}
 
           {/* Summary cards */}
-          <div className="mb-5 grid grid-cols-3 gap-3">
+          <div className={`mb-5 grid gap-3 ${isMixedJob ? "grid-cols-2" : "grid-cols-3"}`}>
             <div
               className="rounded-xl p-4 text-center"
               style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
@@ -381,23 +389,59 @@ export default function JobModal({
               className="rounded-xl p-4 text-center"
               style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Sheets</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Total Sheets</p>
               <p className="mt-1.5 text-xl font-bold" style={{ color: "var(--text)" }}>{totalEffectiveSheets}</p>
               {totalEffectiveSheets !== job.totalPages && (
                 <p className="mt-0.5 text-[10px]" style={{ color: "var(--text-muted)" }}>{job.totalPages} pages</p>
               )}
             </div>
-            <div
-              className="rounded-xl p-4 text-center"
-              style={{
-                border: hasColorFiles ? "1px solid rgba(245,158,11,0.4)" : "1px solid var(--border)",
-                background: hasColorFiles ? "rgba(245,158,11,0.08)" : "var(--panel-muted)",
-              }}
-            >
-              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: hasColorFiles ? "#d97706" : "var(--text-muted)" }}>Print Type</p>
-              <p className="mt-1.5 text-xl font-bold" style={{ color: hasColorFiles ? "#d97706" : "var(--text)" }}>{printTypeLabel}</p>
-            </div>
+            {!isMixedJob && (
+              <div
+                className="rounded-xl p-4 text-center"
+                style={{
+                  border: hasColorFiles ? "1px solid rgba(245,158,11,0.4)" : "1px solid var(--border)",
+                  background: hasColorFiles ? "rgba(245,158,11,0.08)" : "var(--panel-muted)",
+                }}
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: hasColorFiles ? "#d97706" : "var(--text-muted)" }}>Print Type</p>
+                <p className="mt-1.5 text-xl font-bold" style={{ color: hasColorFiles ? "#d97706" : "var(--text)" }}>{printTypeLabel}</p>
+              </div>
+            )}
           </div>
+
+          {/* Mixed job sheet breakdown */}
+          {isMixedJob && (
+            <div className="mb-5 grid grid-cols-2 gap-3">
+              <div
+                className="rounded-xl p-3 flex items-center gap-3"
+                style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
+              >
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(100,116,139,0.15)" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>B&W Sheets</p>
+                  <p className="text-lg font-bold" style={{ color: "var(--text)" }}>{totalBwSheets}</p>
+                </div>
+              </div>
+              <div
+                className="rounded-xl p-3 flex items-center gap-3"
+                style={{ border: "1px solid rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.07)" }}
+              >
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(245,158,11,0.15)" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="8" cy="8" r="4" fill="#ef4444" stroke="none" />
+                    <circle cx="16" cy="8" r="4" fill="#22c55e" stroke="none" />
+                    <circle cx="12" cy="15" r="4" fill="#3b82f6" stroke="none" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#d97706" }}>Color Sheets</p>
+                  <p className="text-lg font-bold" style={{ color: "#d97706" }}>{totalColorSheets}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Files list */}
           <div>
@@ -505,36 +549,67 @@ export default function JobModal({
             <p className="mb-3 text-xs" style={{ color: "var(--error)" }}>{error}</p>
           )}
 
-          {/* Printer selector — show when can print */}
+          {/* Printer selectors — show when can print; job-local, does NOT affect global */}
           {(isPending || isCompleted) && !isActivePhase && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-1.5">
+            <div className="mb-4 flex flex-col gap-2.5">
+              {/* B&W Printer */}
+              <div>
                 <label
-                  htmlFor="printer-select"
-                  className="text-xs font-semibold uppercase tracking-wider"
+                  htmlFor="job-printer-bw"
+                  className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider"
                   style={{ color: "var(--text-muted)" }}
                 >
-                  Printer
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
+                  B&W Printer
                 </label>
-                {printTypeLabel === "Color" && (
-                  <span className="text-[10px] font-medium" style={{ color: "var(--success)" }}>✓ Color auto-selected</span>
-                )}
+                <select
+                  id="job-printer-bw"
+                  value={localBwPrinter}
+                  onChange={(e) => setLocalBwPrinter(e.target.value)}
+                  className="select-input w-full rounded-xl px-3 py-2.5 text-sm font-medium outline-none"
+                >
+                  <option value="">Choose B&W printer…</option>
+                  {printers.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}{p.isDefault ? " (Default)" : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <select
-                id="printer-select"
-                value={localPrinter}
-                onChange={(e) => setLocalPrinter(e.target.value)}
-                className="select-input w-full rounded-xl px-3 py-2.5 text-sm font-medium outline-none"
-              >
-                <option value="">Choose a printer…</option>
-                {printers.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                    {p.isDefault ? " (Default)" : ""}
-                    {p.name === selectedColorPrinter ? " 🎨" : ""}
-                  </option>
-                ))}
-              </select>
+              {/* Color Printer — always shown so user can override */}
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label
+                    htmlFor="job-printer-color"
+                    className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider"
+                    style={{ color: hasColorFiles ? "#d97706" : "var(--text-muted)" }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="8" cy="8" r="3.5" fill="#ef4444" stroke="none" />
+                      <circle cx="16" cy="8" r="3.5" fill="#22c55e" stroke="none" />
+                      <circle cx="12" cy="15" r="3.5" fill="#3b82f6" stroke="none" />
+                    </svg>
+                    Color Printer
+                  </label>
+                  {hasColorFiles && (
+                    <span className="text-[10px] font-medium" style={{ color: "#d97706" }}>🎨 Color files → this printer</span>
+                  )}
+                </div>
+                <select
+                  id="job-printer-color"
+                  value={localColorPrinter}
+                  onChange={(e) => setLocalColorPrinter(e.target.value)}
+                  className="select-input w-full rounded-xl px-3 py-2.5 text-sm font-medium outline-none"
+                  style={hasColorFiles ? { borderColor: "rgba(245,158,11,0.5)", color: "#d97706" } : {}}
+                >
+                  <option value="">Choose color printer…</option>
+                  {printers.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}{p.isDefault ? " (Default)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
 

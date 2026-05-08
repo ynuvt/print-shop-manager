@@ -10,10 +10,11 @@ interface PrinterInfo {
 interface HeaderProps {
   tab: Tab;
   onTabChange: (t: Tab) => void;
-  totalJobs: number;
   printers: PrinterInfo[];
   selectedPrinter: string;
   onPrinterChange: (printer: string) => void;
+  selectedColorPrinter: string;
+  onColorPrinterChange: (printer: string) => void;
 }
 
 function ThemeToggle() {
@@ -63,13 +64,64 @@ function ThemeToggle() {
   );
 }
 
+/** A compact labelled printer selector pill */
+function PrinterSelect({
+  id,
+  label,
+  icon,
+  value,
+  printers,
+  onChange,
+  accentColor,
+}: {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+  value: string;
+  printers: PrinterInfo[];
+  onChange: (v: string) => void;
+  accentColor?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div
+        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider shrink-0"
+        style={{ color: accentColor ?? "var(--text-muted)" }}
+      >
+        {icon}
+        {label}
+      </div>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="select-input"
+        style={
+          accentColor
+            ? { borderColor: `${accentColor}55`, color: accentColor }
+            : {}
+        }
+      >
+        <option value="">Select…</option>
+        {printers.map((p) => (
+          <option key={p.name} value={p.name}>
+            {p.name}
+            {p.isDefault ? " (Default)" : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export default function Header({
   tab,
   onTabChange,
-  totalJobs,
   printers,
   selectedPrinter,
   onPrinterChange,
+  selectedColorPrinter,
+  onColorPrinterChange,
 }: HeaderProps) {
   return (
     <header className="top-bar">
@@ -113,39 +165,47 @@ export default function Header({
         </button>
       </nav>
 
-      {/* Stats + theme + printer */}
-      <div className="flex items-center gap-3">
-        <div className="stat-block">
-          <p className="stat-label">Jobs</p>
-          <p className="stat-value tabular-nums">{totalJobs}</p>
-        </div>
+      {/* Printers + theme */}
+      <div className="flex items-center gap-2">
+        {/* B&W Printer */}
+        <PrinterSelect
+          id="header-printer-bw"
+          label="B&W"
+          value={selectedPrinter}
+          printers={printers}
+          onChange={onPrinterChange}
+          icon={
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 6 2 18 2 18 9" />
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+              <rect x="6" y="14" width="12" height="8" />
+            </svg>
+          }
+        />
+
+        <div className="stat-divider" />
+
+        {/* Color Printer */}
+        <PrinterSelect
+          id="header-printer-color"
+          label="Color"
+          value={selectedColorPrinter}
+          printers={printers}
+          onChange={onColorPrinterChange}
+          accentColor="#d97706"
+          icon={
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="13.5" cy="6.5" r="2.5" fill="#ef4444" stroke="none" />
+              <circle cx="17.5" cy="10.5" r="2.5" fill="#22c55e" stroke="none" />
+              <circle cx="8.5" cy="7.5" r="2.5" fill="#3b82f6" stroke="none" />
+              <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z" strokeWidth="1.5" />
+            </svg>
+          }
+        />
 
         <div className="stat-divider" />
 
         <ThemeToggle />
-
-        <div className="stat-divider" />
-
-        <div className="flex items-center gap-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 6 2 18 2 18 9" />
-            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-            <rect x="6" y="14" width="12" height="8" />
-          </svg>
-          <select
-            id="header-printer"
-            value={selectedPrinter}
-            onChange={(e) => onPrinterChange(e.target.value)}
-            className="select-input"
-          >
-            <option value="">Select printer</option>
-            {printers.map((printer) => (
-              <option key={printer.name} value={printer.name}>
-                {printer.name} {printer.isDefault ? "(Default)" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
     </header>
   );

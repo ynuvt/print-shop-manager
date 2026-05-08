@@ -10,6 +10,8 @@ const optionsSchema = z.object({
   customRangeError: z.string().optional(),
   duplex: z.enum(["ONE", "BOTH"]),
   copies: z.number(),
+  // N-up layout. Only supported via loadWebContent (webContents.print). Defaults to 1.
+  pagesPerSheet: z.number().int().min(1).optional().default(1),
 });
 
 const fileSchema = z.object({

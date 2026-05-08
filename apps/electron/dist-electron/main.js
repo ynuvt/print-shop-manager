@@ -149,21 +149,43 @@ async function printImageViaWebContents(filePath, printerName, normalizedOptions
 async function printPdfViaWebContents(filePath, printerName, normalizedOptions) {
     const win = new electron_1.BrowserWindow({
         show: false,
-        width: 800,
-        height: 600,
+        width: 1200, // wider for better PDF rendering quality
+        height: 900,
         webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
+            plugins: true, // ensure Chromium PDF plugin is active
         },
     });
     try {
-        // Electron can render PDFs via its built-in PDF viewer.
-        await win.loadURL(`file://${filePath}`);
-        // Map our normalizedOptions to Electron's webContents.print() format
+        // Event-driven wait to guarantee the Chromium PDF plugin has fully 
+        // parsed and initialized before we issue the print command.
+        // 'did-stop-loading' fires when the document and the PDF plugin have completely finished loading.
+        await new Promise((resolve, reject) => {
+            let isResolved = false;
+            const finish = () => {
+                if (!isResolved) {
+                    isResolved = true;
+                    resolve();
+                }
+            };
+            win.webContents.once("did-stop-loading", () => {
+                console.log(`[PDF] 'did-stop-loading' fired for ${node_path_1.default.basename(filePath)}`);
+                // The PDF is fully parsed by Chromium. Proceed to print immediately without any artificial delay.
+                finish();
+            });
+            win.webContents.once("did-fail-load", (_, errorCode, errorDescription) => {
+                reject(new Error(`Failed to load PDF: ${errorDescription} (${errorCode})`));
+            });
+            win.loadURL(`file://${filePath}`).catch(reject);
+        });
+        // printBackground: false — PDF page content is foreground (not CSS
+        // backgrounds), so this is correct. Setting it true was printing the
+        // PDF viewer's dark chrome/overlay as solid black.
         const electronPrintOpts = {
             silent: true,
             deviceName: printerName,
-            printBackground: true,
+            printBackground: false,
         };
         if (normalizedOptions) {
             if (normalizedOptions.copies) {
@@ -187,8 +209,13 @@ async function printPdfViaWebContents(filePath, printerName, normalizedOptions) 
             if (normalizedOptions.pages) {
                 electronPrintOpts.pageRanges = normalizedOptions.pages;
             }
+            // N-up pages per sheet (only supported via loadWebContent)
+            const pps = Number(normalizedOptions.pagesPerSheet);
+            if (pps && pps > 1) {
+                electronPrintOpts.pagesPerSheet = pps;
+            }
         }
-        console.log(`[FALLBACK] webContents.print → ${printerName}`, electronPrintOpts);
+        console.log(`[PDF] webContents.print → ${printerName}`, electronPrintOpts);
         await new Promise((resolve, reject) => {
             win.webContents.print(electronPrintOpts, (success, failureReason) => {
                 if (success)
@@ -292,8 +319,7 @@ electron_1.app.on("window-all-closed", () => {
         electron_1.app.quit();
     }
 });
-// IPC handlers for file operations
-/** Sanitize temp filenames to prevent SumatraPDF command-line failures from overly long names. */
+/** Sanitize temp filenames to prevent overly long names from causing issues. */
 function sanitizeTempFileName(name) {
     const ext = node_path_1.default.extname(name);
     let base = node_path_1.default.basename(name, ext);
@@ -408,32 +434,17 @@ electron_1.ipcMain.handle("print-pdf", async (event, filePath, printer, options,
             await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
         }
         else if (isImageFile(filePath)) {
-            // Images: pdf-to-printer can't handle them (prints blank pages).
-            // Route directly to webContents with HTML wrapper.
+            // Images: route directly to webContents with HTML wrapper.
             console.log(`[IMAGE] Detected image file: ${node_path_1.default.basename(filePath)} — using webContents.print directly`);
             await printImageViaWebContents(filePath, printer, normalizedOptions);
             console.log(`[IMAGE] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
         }
         else {
-            let resolvedPrinter = printer;
-            try {
-                resolvedPrinter = await resolvePdfToPrinterName(printer);
-            }
-            catch (e) {
-                console.warn("Failed to resolve printer name via pdf-to-printer:", e);
-            }
-            // PRIMARY: pdf-to-printer — always first priority for PDFs
-            try {
-                console.log(`[PRIMARY] pdf-to-printer: ${node_path_1.default.basename(filePath)} → ${resolvedPrinter}`, normalizedOptions);
-                await (0, pdf_to_printer_1.print)(filePath, { printer: resolvedPrinter, ...normalizedOptions });
-                console.log(`[PRIMARY] pdf-to-printer succeeded for ${node_path_1.default.basename(filePath)}`);
-            }
-            catch (error) {
-                console.error(`[PRIMARY] pdf-to-printer FAILED for "${resolvedPrinter}". Falling back to webContents.print (loadContent)...`, error);
-                // FALLBACK: use Electron webContents.print (loadContent) — only when pdf-to-printer fails
-                await printPdfViaWebContents(filePath, printer, normalizedOptions);
-                console.log(`[FALLBACK] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
-            }
+            // PDFs: always use Electron webContents.print (loadWebContent).
+            // This is the only path that supports N-up pagesPerSheet.
+            console.log(`[PDF] webContents.print (loadWebContent) → ${printer}`, normalizedOptions);
+            await printPdfViaWebContents(filePath, printer, normalizedOptions);
+            console.log(`[PDF] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
         }
         event.sender.send("print-progress", {
             fileIndex: meta?.fileIndex ?? 0,
