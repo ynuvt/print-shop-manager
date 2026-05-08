@@ -3,6 +3,23 @@ import type { JobStatus as BaseJobStatus, File } from "@printowl/types";
 export type JobStatus = BaseJobStatus | "CANCELED";
 export type { File };
 
+export interface BatchPrintFileConfig {
+  path: string;
+  copies: number;
+  paperSize: string;
+  colorMode: string;
+  duplex: string;
+  orientation: string;
+  pagesPerSheet: number;
+  id: string;
+}
+
+export interface BatchPrintProgressEvent {
+  fileId: string;
+  percent: number;
+  printRunId?: string;
+}
+
 export interface PrintJobSummary {
   id: string;
   userId: string;
@@ -82,6 +99,14 @@ declare global {
           fileName?: string;
           printRunId?: string;
         }) => void,
+      ) => () => void;
+      printBatch: (
+        printer: string,
+        files: BatchPrintFileConfig[],
+        meta?: { printRunId?: string }
+      ) => Promise<void>;
+      onBatchPrintProgress: (
+        listener: (payload: BatchPrintProgressEvent) => void
       ) => () => void;
     };
   }

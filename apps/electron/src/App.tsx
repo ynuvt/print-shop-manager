@@ -205,12 +205,26 @@ export default function App() {
       });
     });
 
-    // Note: print-progress IPC events are NOT listened to here.
-    // The print phase state is managed directly by executePrintJob()
-    // to avoid temp filenames (printowl_17768...) flashing in the UI.
+    const offBatchPrint = window.electronAPI?.onBatchPrintProgress?.((payload) => {
+      if (!payload.fileId || !payload.printRunId) return;
+      const fileIndex = parseInt(payload.fileId, 10);
+      updatePrintJob(payload.printRunId, (prev) => {
+        if (prev.phase !== "printing") return prev;
+        return {
+          ...prev,
+          printProgress: {
+            fileIndex,
+            totalFiles: prev.job.files.length,
+            percent: payload.percent,
+            fileName: `Printing file ${fileIndex + 1}…`,
+          },
+        };
+      });
+    });
 
     return () => {
       offDownload?.();
+      offBatchPrint?.();
     };
   }, [updatePrintJob]);
 
@@ -506,23 +520,34 @@ export default function App() {
           },
         }));
 
-        const printPromises = downloadedFiles.map(
-          ({ path, fileIndex, options, isColor }) => {
-            // Route color files to color printer, BW files to BW printer.
-            // Fall back gracefully if a printer is not set.
-            const targetPrinter =
-              isColor && colorPrinterName
-                ? colorPrinterName
-                : bwPrinterName;
-            return window.electronAPI.printPDF(path, targetPrinter, options, {
-              fileIndex,
-              totalFiles: job.files.length,
-              printRunId,
-            });
-          },
-        );
+        const bwFiles: any[] = [];
+        const colorFiles: any[] = [];
+        downloadedFiles.forEach(f => {
+           if (f.isColor && colorPrinterName && colorPrinterName !== bwPrinterName) {
+             colorFiles.push(f);
+           } else {
+             bwFiles.push(f);
+           }
+        });
 
-        await Promise.all(printPromises);
+        const mapToFileConfig = (f: any) => ({
+             path: f.path,
+             copies: f.options.copies,
+             paperSize: f.options.paperSize,
+             colorMode: f.isColor ? "COLOR" : "BW",
+             duplex: f.options.duplex,
+             orientation: f.options.orientation,
+             pagesPerSheet: f.options.pagesPerSheet || 1,
+             id: `${f.fileIndex}`
+        });
+
+        if (bwFiles.length > 0) {
+           await window.electronAPI.printBatch(bwPrinterName, bwFiles.map(mapToFileConfig), { printRunId });
+        }
+        
+        if (colorFiles.length > 0) {
+           await window.electronAPI.printBatch(colorPrinterName, colorFiles.map(mapToFileConfig), { printRunId });
+        }
 
         // Phase 3: Cleanup + status update
         await window.electronAPI.deleteFiles(

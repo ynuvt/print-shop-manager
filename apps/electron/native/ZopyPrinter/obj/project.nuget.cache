@@ -1,13 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "0wwxs5fzxmu8sLHoK1MNy0l95vsBPEU8gud0km7FKfvatWwXt+7+hTIursydlxH/SVYQZinBjoKzDeL5A0y4Gw==",
+  "dgSpecHash": "ywLEahYMmdWHvGAz3TShOT985KqhG6e2ino/BXVHDaU582dMc17QSmwLDPvzv/+FDV2ZWAIT7iqUdamDvvbQmQ==",
   "success": true,
   "projectFilePath": "/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/ZopyPrinter.csproj",
   "expectedPackageFiles": [
     "/Users/aryanrathore/.nuget/packages/microsoft.net.illink.tasks/8.0.25/microsoft.net.illink.tasks.8.0.25.nupkg.sha512",
     "/Users/aryanrathore/.nuget/packages/microsoft.win32.systemevents/8.0.0/microsoft.win32.systemevents.8.0.0.nupkg.sha512",
-    "/Users/aryanrathore/.nuget/packages/system.drawing.common/8.0.8/system.drawing.common.8.0.8.nupkg.sha512",
-    "/Users/aryanrathore/.nuget/packages/system.text.json/8.0.5/system.text.json.8.0.5.nupkg.sha512",
+    "/Users/aryanrathore/.nuget/packages/system.drawing.common/8.0.4/system.drawing.common.8.0.4.nupkg.sha512",
     "/Users/aryanrathore/.nuget/packages/microsoft.netcore.app.runtime.win-x64/8.0.25/microsoft.netcore.app.runtime.win-x64.8.0.25.nupkg.sha512",
     "/Users/aryanrathore/.nuget/packages/microsoft.aspnetcore.app.runtime.win-x64/8.0.25/microsoft.aspnetcore.app.runtime.win-x64.8.0.25.nupkg.sha512",
     "/Users/aryanrathore/.nuget/packages/microsoft.netcore.app.host.win-x64/8.0.25/microsoft.netcore.app.host.win-x64.8.0.25.nupkg.sha512"

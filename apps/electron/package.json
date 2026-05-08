@@ -52,6 +52,15 @@
       "resources/**",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "resources/ZopyPrinter",
+        "to": "ZopyPrinter",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
       "icon": "resources/icon.png",
       "target": [

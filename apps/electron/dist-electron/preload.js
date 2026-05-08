@@ -17,4 +17,10 @@ electron_1.contextBridge.exposeInMainWorld("electronAPI", {
         electron_1.ipcRenderer.on("print-progress", handler);
         return () => electron_1.ipcRenderer.removeListener("print-progress", handler);
     },
+    printBatch: (printer, files, meta) => electron_1.ipcRenderer.invoke("print-batch", printer, files, meta),
+    onBatchPrintProgress: (listener) => {
+        const handler = (_event, payload) => listener(payload);
+        electron_1.ipcRenderer.on("batch-print-progress", handler);
+        return () => electron_1.ipcRenderer.removeListener("batch-print-progress", handler);
+    },
 });

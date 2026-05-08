@@ -4,6 +4,15 @@ import fs from "node:fs";
 import os from "node:os";
 import https from "node:https";
 import { getPrinters } from "pdf-to-printer";
+import { spawn } from "node:child_process";
+
+const getZopyPrinterPath = () => {
+  const isDev = process.env.NODE_ENV !== "production" && !app.isPackaged;
+  if (isDev) {
+    return path.join(__dirname, "..", "..", "native", "ZopyPrinter", "bin", "Release", "net8.0-windows", "win-x64", "publish", "ZopyPrinter.exe");
+  }
+  return path.join(process.resourcesPath, "ZopyPrinter", "ZopyPrinter.exe");
+};
 
 // Dry-run mode: auto-enabled on non-Windows platforms (Mac/Linux) for testing.
 // On Windows, real printing is used.
@@ -348,6 +357,14 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+
+  if (process.platform === "win32") {
+    const exePath = getZopyPrinterPath();
+    if (fs.existsSync(exePath)) {
+      console.log("[ZopyPrinter] Warming up EXE...");
+      spawn(exePath, ["--warmup"]);
+    }
+  }
 });
 
 app.on("window-all-closed", () => {
@@ -611,3 +628,107 @@ function downloadFile(
       });
   });
 }
+
+ipcMain.handle(
+  "print-batch",
+  async (event, printer: string, files: any[], meta?: { printRunId?: string }) => {
+    const runZopyPrinter = () => {
+      return new Promise<void>((resolve, reject) => {
+        const exePath = getZopyPrinterPath();
+        const configPath = path.join(os.tmpdir(), `zopy_config_${Date.now()}.json`);
+        
+        fs.writeFileSync(configPath, JSON.stringify({
+          PrinterName: printer,
+          Files: files.map(f => ({
+             Path: f.path,
+             Copies: f.copies || 1,
+             PaperSize: f.paperSize || "A4",
+             ColorMode: f.colorMode || "BW",
+             Duplex: f.duplex || "ONE",
+             Orientation: f.orientation || "PORTRAIT",
+             PagesPerSheet: f.pagesPerSheet || 1,
+             Id: f.id || path.basename(f.path)
+          })),
+          PrintRunId: meta?.printRunId || ""
+        }));
+
+        const child = spawn(exePath, [configPath]);
+        
+        child.stdout.on("data", (data) => {
+          const lines = data.toString().split("\n");
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.type === "progress") {
+                event.sender.send("batch-print-progress", {
+                  fileId: msg.fileId,
+                  percent: msg.percent,
+                  printRunId: meta?.printRunId
+                });
+              } else if (msg.type === "error") {
+                console.error("[ZopyPrinter] Error:", msg.message);
+              }
+            } catch (e) {
+              console.log("[ZopyPrinter stdout]", line);
+            }
+          }
+        });
+        
+        child.stderr.on("data", (data) => console.error("[ZopyPrinter stderr]", data.toString()));
+        
+        child.on("close", (code) => {
+          fs.unlink(configPath, () => {});
+          if (code === 0) resolve();
+          else reject(new Error(`ZopyPrinter exited with code ${code}`));
+        });
+      });
+    };
+
+    if (process.platform === "win32") {
+      const exePath = getZopyPrinterPath();
+      if (fs.existsSync(exePath)) {
+        try {
+          await runZopyPrinter();
+          return;
+        } catch (e) {
+          console.error("[ZopyPrinter] C# failed printing, falling back to webContents...", e);
+        }
+      } else {
+        console.warn("[ZopyPrinter] EXE not found, falling back to webContents...");
+      }
+    }
+
+    // Fallback logic using WebContents
+    console.log("[ZopyPrinter] Using webContents fallback...");
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const options = {
+        copies: file.copies,
+        side: file.duplex,
+        orientation: file.orientation,
+        pagesPerSheet: file.pagesPerSheet
+      };
+      
+      event.sender.send("batch-print-progress", {
+        fileId: file.id,
+        percent: 0,
+        printRunId: meta?.printRunId
+      });
+      
+      if (DRY_RUN) {
+         await new Promise((r) => setTimeout(r, 500));
+      } else if (isImageFile(file.path)) {
+         await printImageViaWebContents(file.path, printer, options);
+      } else {
+         await printPdfViaWebContents(file.path, printer, options);
+      }
+      
+      event.sender.send("batch-print-progress", {
+        fileId: file.id,
+        percent: 100,
+        printRunId: meta?.printRunId
+      });
+    }
+  }
+);
