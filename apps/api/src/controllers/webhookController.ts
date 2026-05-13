@@ -638,6 +638,7 @@ Please try again or send a different file.`,
                   customRange: "",
                   duplex: "ONE",
                   copies: 1,
+                  pagesPerSheet: 1,
                 };
                 const cost = calculateFileCost(pages, defaultOptions);
 
@@ -809,6 +810,7 @@ Please try again or send a different file.`,
                     option: {
                       create: {
                         copies: 1,
+                        pagesPerSheet: 1,
                       },
                     },
                   },
@@ -1004,6 +1006,7 @@ Please try again.`,
                   customRange: "",
                   duplex: "ONE",
                   copies: 1,
+                  pagesPerSheet: 1,
                 };
                 const cost = calculateFileCost(pages, defaultOptions);
 

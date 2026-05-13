@@ -203,6 +203,7 @@ app.post(
         customRange: fileData.option.customRange,
         duplex: fileData.option.duplex,
         copies: fileData.option.copies,
+        pagesPerSheet: fileData.option.pagesPerSheet || 1,
       });
 
       const file = await prisma.$transaction(async (tx) => {
@@ -238,6 +239,7 @@ app.post(
                 paperSize: fileData.option.paperSize,
                 pageRange: fileData.option.pageRange,
                 customRange: fileData.option.customRange,
+                pagesPerSheet: fileData.option.pagesPerSheet || 1,
               },
             },
           },
@@ -326,6 +328,7 @@ app.put(
           paperSize: optionsData.paperSize,
           pageRange: optionsData.pageRange,
           customRange: optionsData.customRange,
+          pagesPerSheet: optionsData.pagesPerSheet || 1,
         },
       });
 
@@ -339,6 +342,7 @@ app.put(
             customRange: optionsData.customRange,
             duplex: optionsData.duplex,
             copies: optionsData.copies,
+            pagesPerSheet: optionsData.pagesPerSheet || 1,
           })
         : 0;
 

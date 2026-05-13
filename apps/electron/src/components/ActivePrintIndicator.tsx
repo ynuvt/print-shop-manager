@@ -1,4 +1,6 @@
+import { motion, AnimatePresence } from "framer-motion";
 import type { ActivePrintJobState } from "../types";
+import { X } from "lucide-react";
 
 interface Props {
   activePrintJobs: ActivePrintJobState[];
@@ -49,11 +51,18 @@ function JobPill({
   }
 
   return (
-    <div className="group relative animate-[slideIn_0.25s_ease-out]">
+    <motion.div 
+      layout
+      initial={{ opacity: 0, x: 50, scale: 0.8 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
+      whileHover={{ scale: 1.02 }}
+      className="group relative"
+    >
       <button
         type="button"
         onClick={onClick}
-        className={`relative flex items-center gap-3 rounded-2xl ${pillBg} py-3 pl-3 pr-5 text-white shadow-lg ring-1 ring-white/10 transition-all duration-200 hover:shadow-xl hover:ring-white/20 active:scale-[0.97]`}
+        className={`relative flex items-center gap-3 rounded-2xl ${pillBg} py-3 pl-3 pr-5 text-white shadow-2xl ring-1 ring-white/10 transition-all duration-200 hover:ring-white/20 active:scale-[0.97]`}
         style={{ minWidth: 220 }}
       >
         {/* Icon circle */}
@@ -85,16 +94,16 @@ function JobPill({
 
         {/* Text content */}
         <div className="min-w-0 flex-1 text-left">
-          <p className="text-sm font-bold leading-tight tracking-wide">
+          <p className="text-sm font-black leading-tight tracking-wide">
             #{verificationCode}
           </p>
-          <p className="text-xs leading-tight opacity-80 truncate mt-0.5">
+          <p className="text-[10px] font-bold leading-tight opacity-80 uppercase tracking-widest mt-1">
             {statusText}
           </p>
         </div>
 
         {/* Cost — right-aligned */}
-        <span className="shrink-0 text-base font-extrabold tabular-nums tracking-tight" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.2)" }}>
+        <span className="shrink-0 text-base font-black tabular-nums tracking-tight" style={{ textShadow: "0 1px 2px rgba(0,0,0,0.2)" }}>
           ₹{(printJob?.totalCost ?? 0).toFixed(0)}
         </span>
 
@@ -124,13 +133,13 @@ function JobPill({
             e.stopPropagation();
             onClear();
           }}
-          className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-gray-800 text-xs text-white shadow-md transition-transform hover:scale-110 hover:bg-gray-700"
+          className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-gray-950 text-[10px] font-black text-white shadow-xl transition-all hover:scale-110 hover:bg-black"
           aria-label="Dismiss"
         >
-          ×
+          <X size={10} strokeWidth={3} />
         </button>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -143,15 +152,17 @@ export default function ActivePrintIndicator({
     return null;
 
   return (
-    <div className="fixed bottom-5 right-5 z-[60] flex flex-col-reverse gap-2">
-      {activePrintJobs.map((job) => (
-        <JobPill
-          key={job.printRunId}
-          job={job}
-          onClick={() => onClickJob(job.printRunId)}
-          onClear={() => onClearJob(job.printRunId)}
-        />
-      ))}
+    <div className="fixed bottom-6 right-6 z-[60] flex flex-col-reverse gap-3">
+      <AnimatePresence mode="popLayout">
+        {activePrintJobs.map((job) => (
+          <JobPill
+            key={job.printRunId}
+            job={job}
+            onClick={() => onClickJob(job.printRunId)}
+            onClear={() => onClearJob(job.printRunId)}
+          />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }

@@ -2,15 +2,15 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../context/ThemeContext";
 
-type Option<T extends string> = { label: string; value: T };
+type Option<T extends string | number> = { label: string; value: T };
 
-type Props<T extends string> = {
+type Props<T extends string | number> = {
   options: Option<T>[];
   value: T;
   onChange: (v: T) => void;
 };
 
-export default function ToggleGroup<T extends string>({ options, value, onChange }: Props<T>) {
+export default function ToggleGroup<T extends string | number>({ options, value, onChange }: Props<T>) {
   const { colors, isDark } = useTheme();
 
   return (
@@ -75,9 +75,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   label: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.4,
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0.5,
     textTransform: "uppercase",
     textAlign: "center",
   },

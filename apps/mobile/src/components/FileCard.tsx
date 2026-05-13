@@ -132,6 +132,19 @@ export default function FileCard({ pf, expanded, onToggle, onUpdate, onRemove }:
           </View>
 
           <View>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Pages per Sheet</Text>
+            <ToggleGroup
+              options={[
+                { label: "1", value: 1 },
+                { label: "2", value: 2 },
+                { label: "4", value: 4 },
+              ]}
+              value={pf.options.pagesPerSheet}
+              onChange={(v) => onUpdate({ pagesPerSheet: v })}
+            />
+          </View>
+
+          <View>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Copies</Text>
             <View style={styles.counter}>
               <TouchableOpacity

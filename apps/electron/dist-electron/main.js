@@ -509,24 +509,27 @@ electron_1.ipcMain.handle("print-pdf", async (event, filePath, printer, options,
             printRunId: meta?.printRunId,
         });
         if (DRY_RUN) {
-            console.log(`[DRY RUN] Would print: ${node_path_1.default.basename(filePath)} → ${printer}`, normalizedOptions);
+            console.log(`[DRY RUN] Would print: ${node_path_1.default.basename(filePath)} → ${printer}`, JSON.stringify(normalizedOptions, null, 2));
             await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
         }
         else if (isImageFile(filePath)) {
             // Images: route directly to webContents with HTML wrapper.
             console.log(`[IMAGE] Detected image file: ${node_path_1.default.basename(filePath)} — using webContents.print directly`);
+            console.log("[IMAGE OPTIONS]", JSON.stringify(normalizedOptions, null, 2));
             await printImageViaWebContents(filePath, printer, normalizedOptions);
             console.log(`[IMAGE] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
         }
         else if (process.platform === "win32") {
             // Windows PDF: use ZopyPrinter (C#)
-            console.log(`[PDF] ZopyPrinter (C#) → ${printer}`, normalizedOptions);
+            console.log(`[PDF] ZopyPrinter (C#) → ${printer}`);
+            console.log("[PDF OPTIONS]", JSON.stringify(normalizedOptions, null, 2));
             await runZopyPrinter(event, printer, [{ ...normalizedOptions, path: filePath }], meta);
             console.log(`[PDF] ZopyPrinter succeeded for ${node_path_1.default.basename(filePath)}`);
         }
         else {
             // Mac/Linux PDF: use Electron webContents.print
-            console.log(`[PDF] webContents.print → ${printer}`, normalizedOptions);
+            console.log(`[PDF] webContents.print → ${printer}`);
+            console.log("[PDF OPTIONS]", JSON.stringify(normalizedOptions, null, 2));
             await printPdfViaWebContents(filePath, printer, normalizedOptions);
             console.log(`[PDF] webContents.print succeeded for ${node_path_1.default.basename(filePath)}`);
         }
@@ -591,7 +594,7 @@ function downloadFile(event, url, filePath, fileIndex, totalFiles, fileName, pri
 async function runZopyPrinter(event, printer, files, meta) {
     const exePath = getZopyPrinterPath();
     const configPath = node_path_1.default.join(node_os_1.default.tmpdir(), `zopy_config_${Date.now()}.json`);
-    node_fs_1.default.writeFileSync(configPath, JSON.stringify({
+    const config = {
         PrinterName: printer,
         Files: files.map((f) => ({
             Path: f.path || f.filePath,
@@ -606,7 +609,9 @@ async function runZopyPrinter(event, printer, files, meta) {
             Id: f.id || node_path_1.default.basename(f.path || f.filePath),
         })),
         PrintRunId: meta?.printRunId || "",
-    }));
+    };
+    console.log("[ZopyPrinter] Config JSON:", JSON.stringify(config, null, 2));
+    node_fs_1.default.writeFileSync(configPath, JSON.stringify(config));
     return new Promise((resolve, reject) => {
         console.log(`[ZopyPrinter] Spawning EXE at ${exePath}`);
         const child = (0, node_child_process_1.spawn)(exePath, [configPath], {

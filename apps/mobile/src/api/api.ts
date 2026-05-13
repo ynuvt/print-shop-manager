@@ -23,6 +23,7 @@ export type UserPrintJobFile = {
     customRange?: string;
     duplex: "ONE" | "BOTH";
     copies: number;
+    pagesPerSheet?: number;
   } | null;
 };
 
@@ -147,6 +148,7 @@ export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
     headers: authHeaders(),
   });
   if (!res.data) throw new Error("Failed to fetch user print jobs");
+  console.log("[API] Fetched user print jobs count:", res.data.length);
   return res.data;
 }
 
@@ -154,6 +156,7 @@ export async function getUserPrintJobById(id: string): Promise<UserPrintJob> {
   const jobs = await getUserPrintJobs();
   const job = jobs.find((j) => j.id === id);
   if (!job) throw new Error("Print job not found");
+  console.log(`[API] Fetched job by ID (${id}):`, JSON.stringify(job, null, 2));
   return job;
 }
 

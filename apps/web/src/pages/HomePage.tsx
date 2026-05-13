@@ -56,7 +56,7 @@ type WalkthroughStep =
   | "summary"
   | "submit";
 
-function ToggleGroup<T extends string>({
+function ToggleGroup<T extends string | number>({
   options,
   value,
   onChange,
@@ -228,6 +228,19 @@ function FileCard({
           </div>
 
           <div>
+            <p className="field-label">Pages per Sheet</p>
+            <ToggleGroup
+              options={[
+                { label: "1", value: 1 },
+                { label: "2", value: 2 },
+                { label: "4", value: 4 },
+              ]}
+              value={pf.options.pagesPerSheet}
+              onChange={(v) => onUpdate({ pagesPerSheet: v })}
+            />
+          </div>
+
+          <div>
             <p className="field-label">Copies</p>
             <div className="counter">
               <button
@@ -293,6 +306,7 @@ export default function HomePage({
     orientation: "PORTRAIT" as PrintOptions["orientation"],
     scaleMode: "FIT" as PrintOptions["scaleMode"],
     copies: 1,
+    pagesPerSheet: 1,
   });
 
   const [uploadStage, setUploadStage] = useState<"uploading" | "converting" | "creating">(
@@ -825,6 +839,7 @@ export default function HomePage({
             orientation: globalOptions.orientation,
             scaleMode: globalOptions.scaleMode,
             copies: globalOptions.copies,
+            pagesPerSheet: globalOptions.pagesPerSheet,
           },
         };
       }),
@@ -1447,6 +1462,19 @@ export default function HomePage({
                               ]}
                               value={globalOptions.scaleMode}
                               onChange={(v) => setGlobalOptions((p) => ({ ...p, scaleMode: v }))}
+                            />
+                          </div>
+
+                          <div>
+                            <p className="field-label">Pages per Sheet</p>
+                            <ToggleGroup
+                              options={[
+                                { label: "1", value: 1 },
+                                { label: "2", value: 2 },
+                                { label: "4", value: 4 },
+                              ]}
+                              value={globalOptions.pagesPerSheet}
+                              onChange={(v) => setGlobalOptions((p) => ({ ...p, pagesPerSheet: v }))}
                             />
                           </div>
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import StatusBadge from "./StatusBadge";
 import type { PrintJob, JobStatus, ActivePrintJobState } from "../types";
 import type { PrintFileOption } from "@printowl/types";
+import { X, Printer, Trash2, ExternalLink, FileCheck, Layers, Type, Palette } from "lucide-react";
 
 interface JobModalProps {
   job: PrintJob;
@@ -51,6 +53,7 @@ export default function JobModal({
     printPhase === "completed" ? "COMPLETED" : job.status;
 
   useEffect(() => {
+    console.log(`[JobModal] Opening job #${job.verificationCode}:`, JSON.stringify(job, null, 2));
     setError(null);
     // Sync job-local printers when job or global printers change
     setLocalBwPrinter(selectedPrinter);
@@ -174,21 +177,26 @@ export default function JobModal({
   }, [job.files]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
-      style={{ background: "rgba(0,0,0,0.5)" }}
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
+    <AnimatePresence>
       <div
-        className="flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-2xl shadow-2xl"
-        style={{
-          background: "var(--panel)",
-          border: "1px solid var(--border)",
-          ...(hasActiveIndicators ? { marginRight: "220px" } : {}),
-        }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-md"
+        style={{ background: "rgba(0,0,0,0.6)" }}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
       >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: 10 }}
+          transition={{ type: "spring", stiffness: 350, damping: 25 }}
+          className="flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.3)]"
+          style={{
+            background: "var(--panel)",
+            border: "1px solid var(--border)",
+            ...(hasActiveIndicators ? { marginRight: "220px" } : {}),
+          }}
+        >
         {/* ─── Header ─────────────────────────────────── */}
         <div
           className="relative shrink-0 px-6 py-5"
@@ -411,33 +419,29 @@ export default function JobModal({
 
           {/* Mixed job sheet breakdown */}
           {isMixedJob && (
-            <div className="mb-5 grid grid-cols-2 gap-3">
+            <div className="mb-6 grid grid-cols-2 gap-4">
               <div
-                className="rounded-xl p-3 flex items-center gap-3"
-                style={{ border: "1px solid var(--border)", background: "var(--panel-muted)" }}
+                className="rounded-2xl p-4 flex items-center gap-4 transition-all hover:bg-[var(--panel)]"
+                style={{ border: "2px solid var(--border)", background: "var(--panel-muted)" }}
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(100,116,139,0.15)" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" /></svg>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(100,116,139,0.15)" }}>
+                  <Layers size={20} className="text-[var(--text-muted)]" />
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>B&W Sheets</p>
-                  <p className="text-lg font-bold" style={{ color: "var(--text)" }}>{totalBwSheets}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60" style={{ color: "var(--text-muted)" }}>B&W Sheets</p>
+                  <p className="text-2xl font-black" style={{ color: "var(--text)" }}>{totalBwSheets}</p>
                 </div>
               </div>
               <div
-                className="rounded-xl p-3 flex items-center gap-3"
-                style={{ border: "1px solid rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.07)" }}
+                className="rounded-2xl p-4 flex items-center gap-4 transition-all hover:bg-[rgba(245,158,11,0.12)]"
+                style={{ border: "2px solid rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.07)" }}
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(245,158,11,0.15)" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="8" cy="8" r="4" fill="#ef4444" stroke="none" />
-                    <circle cx="16" cy="8" r="4" fill="#22c55e" stroke="none" />
-                    <circle cx="12" cy="15" r="4" fill="#3b82f6" stroke="none" />
-                  </svg>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(245,158,11,0.15)" }}>
+                  <Palette size={20} className="text-[#d97706]" />
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#d97706" }}>Color Sheets</p>
-                  <p className="text-lg font-bold" style={{ color: "#d97706" }}>{totalColorSheets}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-60" style={{ color: "#d97706" }}>Color Sheets</p>
+                  <p className="text-2xl font-black" style={{ color: "#d97706" }}>{totalColorSheets}</p>
                 </div>
               </div>
             </div>
@@ -506,6 +510,7 @@ export default function JobModal({
                         opt.duplex === "BOTH" ? "Duplex" : "Single",
                         opt.orientation === "LANDSCAPE" ? "Landscape" : "Portrait",
                         ...(opt.pageRange === "CUSTOM" ? [opt.customRange || "Custom"] : []),
+                        ...(opt.pagesPerSheet && opt.pagesPerSheet > 1 ? [`${opt.pagesPerSheet}-up`] : []),
                       ].map((tag) => (
                         <span
                           key={tag}
@@ -739,7 +744,8 @@ export default function JobModal({
             </button>
           )}
         </div>
+        </motion.div>
       </div>
-    </div>
+    </AnimatePresence>
   );
 }

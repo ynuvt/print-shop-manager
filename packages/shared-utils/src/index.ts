@@ -7,6 +7,7 @@ export type PrintOptions = {
   customRange?: string | null;
   duplex: "ONE" | "BOTH";
   copies: number;
+  pagesPerSheet: number;
 };
 
 const PRICE_BW = 2;
@@ -104,9 +105,12 @@ export function calculateSheetCount(
   options: PrintOptions,
 ): number {
   const selectedPages = getSelectedPageCount(totalPages, options);
+  const pagesPerSheet = options.pagesPerSheet || 1;
+  const layoutPages = Math.ceil(selectedPages / pagesPerSheet);
+  
   return options.duplex === "BOTH" && options.colorMode != "COLOR"
-    ? Math.ceil(selectedPages / 2)
-    : selectedPages;
+    ? Math.ceil(layoutPages / 2)
+    : layoutPages;
 }
 
 export function calculateFileCost(
@@ -135,6 +139,7 @@ export const defaultPrintOptions = (): PrintOptions => ({
   customRange: "",
   duplex: "ONE",
   copies: 1,
+  pagesPerSheet: 1,
 });
 
 /** A file the user has selected, with its detected page count and chosen print options. */

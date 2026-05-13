@@ -622,11 +622,11 @@ body {
 .toggle-item {
   border: 1px solid transparent;
   border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 11px;
+  padding: 10px 12px;
+  font-size: 14px;
   line-height: 1.2;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 800;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   text-align: center;
   white-space: normal;

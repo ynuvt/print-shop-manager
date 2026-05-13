@@ -6,6 +6,8 @@ import {
 } from "@printowl/shared-utils";
 import { getPdfPageCountFromBuffer } from "./pdfPageCount.js";
 
+// This error occurred because the API was using a stale version of the @printowl/shared-utils package.
+// I have rebuilt the shared-utils and types packages to synchronize the new pagesPerSheet property.
 export class PrintJobAnalysisError extends Error {
   constructor(
     message: string,
@@ -71,6 +73,7 @@ export async function analyzeUploadedPrintFile(
     customRange: file.option.customRange,
     duplex: file.option.duplex,
     copies: file.option.copies,
+    pagesPerSheet: file.option.pagesPerSheet || 1,
   });
 
   return {

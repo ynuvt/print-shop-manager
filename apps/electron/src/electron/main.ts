@@ -603,22 +603,25 @@ ipcMain.handle(
       if (DRY_RUN) {
         console.log(
           `[DRY RUN] Would print: ${path.basename(filePath)} → ${printer}`,
-          normalizedOptions,
+          JSON.stringify(normalizedOptions, null, 2),
         );
         await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
       } else if (isImageFile(filePath)) {
         // Images: route directly to webContents with HTML wrapper.
         console.log(`[IMAGE] Detected image file: ${path.basename(filePath)} — using webContents.print directly`);
+        console.log("[IMAGE OPTIONS]", JSON.stringify(normalizedOptions, null, 2));
         await printImageViaWebContents(filePath, printer, normalizedOptions);
         console.log(`[IMAGE] webContents.print succeeded for ${path.basename(filePath)}`);
       } else if (process.platform === "win32") {
         // Windows PDF: use ZopyPrinter (C#)
-        console.log(`[PDF] ZopyPrinter (C#) → ${printer}`, normalizedOptions);
+        console.log(`[PDF] ZopyPrinter (C#) → ${printer}`);
+        console.log("[PDF OPTIONS]", JSON.stringify(normalizedOptions, null, 2));
         await runZopyPrinter(event, printer, [{ ...normalizedOptions, path: filePath }], meta);
         console.log(`[PDF] ZopyPrinter succeeded for ${path.basename(filePath)}`);
       } else {
         // Mac/Linux PDF: use Electron webContents.print
-        console.log(`[PDF] webContents.print → ${printer}`, normalizedOptions);
+        console.log(`[PDF] webContents.print → ${printer}`);
+        console.log("[PDF OPTIONS]", JSON.stringify(normalizedOptions, null, 2));
         await printPdfViaWebContents(filePath, printer, normalizedOptions);
         console.log(`[PDF] webContents.print succeeded for ${path.basename(filePath)}`);
       }
@@ -704,25 +707,26 @@ async function runZopyPrinter(
   const exePath = getZopyPrinterPath();
   const configPath = path.join(os.tmpdir(), `zopy_config_${Date.now()}.json`);
 
-  fs.writeFileSync(
-    configPath,
-    JSON.stringify({
-      PrinterName: printer,
-      Files: files.map((f) => ({
-        Path: f.path || f.filePath,
-        Copies: f.copies || 1,
-        PaperSize: f.paperSize || "A4",
-        ColorMode: f.colorMode || (f.monochrome ? "BW" : "COLOR") || "BW",
-        Duplex: f.duplex || f.side || "ONE",
-        Orientation: f.orientation || "PORTRAIT",
-        PagesPerSheet: Number(f.pagesPerSheet) || 1,
-        Pages: f.pages || "",
-        Scale: f.scale || "fit",
-        Id: f.id || path.basename(f.path || f.filePath),
-      })),
-      PrintRunId: meta?.printRunId || "",
-    }),
-  );
+  const config = {
+    PrinterName: printer,
+    Files: files.map((f) => ({
+      Path: f.path || f.filePath,
+      Copies: f.copies || 1,
+      PaperSize: f.paperSize || "A4",
+      ColorMode: f.colorMode || (f.monochrome ? "BW" : "COLOR") || "BW",
+      Duplex: f.duplex || f.side || "ONE",
+      Orientation: f.orientation || "PORTRAIT",
+      PagesPerSheet: Number(f.pagesPerSheet) || 1,
+      Pages: f.pages || "",
+      Scale: f.scale || "fit",
+      Id: f.id || path.basename(f.path || f.filePath),
+    })),
+    PrintRunId: meta?.printRunId || "",
+  };
+
+  console.log("[ZopyPrinter] Config JSON:", JSON.stringify(config, null, 2));
+
+  fs.writeFileSync(configPath, JSON.stringify(config));
 
   return new Promise<void>((resolve, reject) => {
     console.log(`[ZopyPrinter] Spawning EXE at ${exePath}`);

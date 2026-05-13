@@ -89,6 +89,7 @@ function FileOptionCard({ file }: { file: UserPrintJobFile }) {
           <FileChip label={scaleLabel} />
           <FileChip label={`Pages: ${rangeLabel}`} />
           {(opt.copies ?? 1) > 1 && <FileChip label={`${opt.copies}x`} accent />}
+          {opt.pagesPerSheet && opt.pagesPerSheet > 1 && <FileChip label={`${opt.pagesPerSheet}-up`} accent />}
         </View>
       )}
     </View>
@@ -119,6 +120,7 @@ function JobDetailModal({
     setError(null);
     try {
       const fetched = await getUserPrintJobById(jobId);
+      console.log(`[JobDetailModal] Loaded job ${jobId}:`, JSON.stringify(fetched, null, 2));
       setJob(fetched);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load job");

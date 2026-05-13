@@ -755,6 +755,7 @@ app.post(
           customRange: file.options.customRange,
           duplex: file.options.duplex,
           copies: file.options.copies,
+          pagesPerSheet: file.options.pagesPerSheet || 1,
         });
 
         uploadedFiles.push({
@@ -771,6 +772,7 @@ app.post(
             customRange: file.options.customRange,
             duplex: file.options.duplex,
             copies: file.options.copies,
+            pagesPerSheet: file.options.pagesPerSheet || 1,
           },
         });
       }
@@ -1011,6 +1013,7 @@ app.post(
                   pageRange: mapPageRange(file.option.pageRange),
                   customRange: file.option.customRange,
                   copies: file.option.copies,
+                  pagesPerSheet: file.option.pagesPerSheet || 1,
                 },
               },
             },
@@ -1034,6 +1037,7 @@ app.post(
             customRange: opt.customRange || "",
             duplex: opt.duplex === "BOTH" ? "BOTH" : "ONE",
             copies: opt.copies,
+            pagesPerSheet: opt.pagesPerSheet || 1,
           });
         }, 0);
 
@@ -1235,6 +1239,7 @@ app.post(
           customRange: defaultOptions.customRange,
           duplex: defaultOptions.duplex,
           copies: defaultOptions.copies,
+          pagesPerSheet: defaultOptions.pagesPerSheet || 1,
         });
 
         processedFiles.push({
@@ -1278,6 +1283,7 @@ app.post(
                   customRange: file.option.customRange,
                   duplex: mapDuplex(file.option.duplex),
                   copies: file.option.copies,
+                  pagesPerSheet: file.option.pagesPerSheet || 1,
                 },
               },
             },
@@ -1541,7 +1547,10 @@ app.post(
         for (const file of job.files) {
             await tx.printOption.update({
                 where: { id: file.option!.id },
-                data: { colorMode: colorMode === "COLOR" ? "COLOR" : "BW" }
+                data: { 
+                  colorMode: colorMode === "COLOR" ? "COLOR" : "BW",
+                  pagesPerSheet: file.option!.pagesPerSheet || 1,
+                }
             });
         }
       });
@@ -1985,6 +1994,7 @@ app.post(
           customRange: file.options.customRange,
           duplex: file.options.duplex,
           copies: file.options.copies,
+          pagesPerSheet: file.options.pagesPerSheet || 1,
         });
 
         return {
