@@ -20,7 +20,8 @@
     "pdf-lib": "^1.17.1",
     "pdf-to-printer": "^5.7.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@printowl/types": "^1.0.0",

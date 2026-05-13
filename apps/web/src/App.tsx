@@ -3,6 +3,8 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import TermsPage from "./pages/TermsPage";
 import AboutPage from "./pages/AboutPage";
+import RewardsPage from "./pages/RewardsPage";
+import ShopDashboard from "./pages/ShopDashboard";
 import AuthOtpPage from "./pages/AuthOtpPage";
 import { NotificationProvider } from "./components/NotificationCenter";
 
@@ -49,6 +51,28 @@ export default function App() {
             path="/about"
             element={
               <AboutPage
+                theme={theme}
+                onToggleTheme={() =>
+                  setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+                }
+              />
+            }
+          />
+          <Route
+            path="/rewards"
+            element={
+              <RewardsPage
+                theme={theme}
+                onToggleTheme={() =>
+                  setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+                }
+              />
+            }
+          />
+          <Route
+            path="/shop"
+            element={
+              <ShopDashboard
                 theme={theme}
                 onToggleTheme={() =>
                   setTheme((prev) => (prev === "dark" ? "light" : "dark"))

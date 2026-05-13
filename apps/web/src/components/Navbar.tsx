@@ -1,47 +1,58 @@
-import { Link } from "react-router-dom";
-import { MessageCircle, Moon, Sun } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { Moon, Sun } from "lucide-react";
 import type { ThemeMode } from "../App";
 
 interface NavbarProps {
   theme: ThemeMode;
   onToggleTheme: () => void;
-  isWhatsappSynced?: boolean;
-  onSyncClick?: () => void;
 }
 
 export default function Navbar({
   theme,
   onToggleTheme,
-  isWhatsappSynced = true,
-  onSyncClick,
 }: NavbarProps) {
+  const location = useLocation();
+  const isHome = location.pathname === "/";
+  const isRewards = location.pathname === "/rewards";
+
   return (
     <header className="top-bar">
-      <Link to="/" className="brand-row" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: "14px" }}>
-        <img 
-          src="/img/zopy.png" 
-          alt="Zopy Logo" 
-          style={{ width: "48px", height: "48px", objectFit: "contain", borderRadius: "12%" }} 
-        />
-        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <span className="brand-subtitle" style={{ fontSize: "0.9rem", fontWeight: "600", opacity: 0.9, color: "var(--text)", letterSpacing: "0.02em" }}>
-            PRINT FROM ANYWHERE
-          </span>
-        </div>
+      <Link to="/" className="brand-row" style={{ textDecoration: "none" }}>
+        <span style={{ 
+          fontSize: "20px", 
+          fontWeight: "900", 
+          color: "#fff", 
+          WebkitTextStroke: "1px var(--brand)",
+          fontFamily: '"Sora", sans-serif', 
+          letterSpacing: "0.05em"
+        }}>
+          ZOPY
+        </span>
       </Link>
 
+      <div className="top-bar-center">
+        <nav className="nav-tabs">
+          <Link to="/" className={`nav-tab ${isHome ? "active" : ""}`}>
+            Home
+          </Link>
+          <Link to="/rewards" className={`nav-tab ${isRewards ? "active" : ""}`} style={{ position: "relative" }}>
+            Rewards
+            <span style={{ 
+              position: "absolute", 
+              top: "4px", 
+              right: "8px", 
+              width: "10px", 
+              height: "10px", 
+              background: "#ff4757", 
+              borderRadius: "50%",
+              border: "2px solid var(--panel)",
+              boxShadow: "0 0 10px rgba(255, 71, 87, 0.5)"
+            }} />
+          </Link>
+        </nav>
+      </div>
+
       <div className="top-bar-actions">
-        {!isWhatsappSynced && onSyncClick && (
-          <button
-            type="button"
-            className="btn btn-sync-nav"
-            onClick={onSyncClick}
-            title="Connect your WhatsApp"
-          >
-            <MessageCircle size={16} />
-            Sync
-          </button>
-        )}
         <button
           type="button"
           className="theme-btn icon-theme-btn"

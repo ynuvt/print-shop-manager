@@ -1201,8 +1201,6 @@ export default function HomePage({
       <Navbar 
         theme={theme} 
         onToggleTheme={onToggleTheme} 
-        isWhatsappSynced={isWhatsappSynced}
-        onSyncClick={() => setShowSyncWhatsappModal(true)}
       />
 
       <main className="main-wrap">
@@ -1210,10 +1208,27 @@ export default function HomePage({
 
           <>
             <section className="hero-panel">
-              <div className="hero-header">
-            <h1>Upload Documents</h1>
-            <p>Choose Color or B/W once, then set options per file.</p>
-          </div>
+              <div className="hero-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", marginBottom: "20px" }}>
+                <div>
+                  <h1 style={{ margin: 0 }}>Upload Documents</h1>
+                  <p style={{ margin: "4px 0 0", opacity: 0.8 }}>Choose Color or B/W once, then set options per file.</p>
+                </div>
+                {!isWhatsappSynced && (
+                  <button
+                    type="button"
+                    className="btn btn-sync-nav"
+                    style={{ 
+                      padding: "10px 20px",
+                      borderRadius: "12px",
+                      fontSize: "14px"
+                    }}
+                    onClick={handleForwardFromWhatsapp}
+                  >
+                    <MessageCircle size={18} />
+                    Sync
+                  </button>
+                )}
+              </div>
 
           {verificationCode ? (
             <div className="success-stack">

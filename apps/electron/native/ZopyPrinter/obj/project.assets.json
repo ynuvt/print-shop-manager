@@ -1,7 +1,7 @@
 {
   "version": 3,
   "targets": {
-    "net8.0": {
+    "net8.0-windows7.0": {
       "Microsoft.NET.ILLink.Tasks/8.0.25": {
         "type": "package",
         "build": {
@@ -50,7 +50,7 @@
         }
       }
     },
-    "net8.0/win-x64": {
+    "net8.0-windows7.0/win-x64": {
       "Microsoft.NET.ILLink.Tasks/8.0.25": {
         "type": "package",
         "build": {
@@ -223,7 +223,7 @@
     }
   },
   "projectFileDependencyGroups": {
-    "net8.0": [
+    "net8.0-windows7.0": [
       "Microsoft.NET.ILLink.Tasks >= 8.0.25",
       "System.Drawing.Common >= 8.0.4"
     ]
@@ -244,14 +244,14 @@
         "/Users/aryanrathore/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
-        "net8.0"
+        "net8.0-windows"
       ],
       "sources": {
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
-        "net8.0": {
-          "targetAlias": "net8.0",
+        "net8.0-windows7.0": {
+          "targetAlias": "net8.0-windows",
           "projectReferences": {}
         }
       },
@@ -262,8 +262,8 @@
       }
     },
     "frameworks": {
-      "net8.0": {
-        "targetAlias": "net8.0",
+      "net8.0-windows7.0": {
+        "targetAlias": "net8.0-windows",
         "dependencies": {
           "Microsoft.NET.ILLink.Tasks": {
             "suppressParent": "All",
@@ -290,6 +290,10 @@
         "downloadDependencies": [
           {
             "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
+            "version": "[8.0.25, 8.0.25]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Crossgen2.osx-arm64",
             "version": "[8.0.25, 8.0.25]"
           },
           {

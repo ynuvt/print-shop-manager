@@ -6,10 +6,22 @@ import https from "node:https";
 import { getPrinters } from "pdf-to-printer";
 import { spawn } from "node:child_process";
 
-const getZopyPrinterPath = () => {
+const getZopyPrinterPath = (): string => {
   const isDev = process.env.NODE_ENV !== "production" && !app.isPackaged;
   if (isDev) {
-    return path.join(__dirname, "..", "..", "native", "ZopyPrinter", "bin", "Release", "net8.0-windows", "win-x64", "publish", "ZopyPrinter.exe");
+    const devPaths = [
+      // Published path
+      path.join(__dirname, "..", "native", "ZopyPrinter", "bin", "Release", "net8.0-windows", "win-x64", "publish", "ZopyPrinter.exe"),
+      // Standard build path
+      path.join(__dirname, "..", "native", "ZopyPrinter", "bin", "Release", "net8.0-windows", "win-x64", "ZopyPrinter.exe"),
+      // Fallback to resources during dev
+      path.join(__dirname, "..", "resources", "ZopyPrinter", "ZopyPrinter.exe"),
+    ];
+    for (const p of devPaths) {
+      if (fs.existsSync(p)) return p;
+    }
+    // Final dev fallback (just in case)
+    return devPaths[0]!;
   }
   return path.join(process.resourcesPath, "ZopyPrinter", "ZopyPrinter.exe");
 };
@@ -362,7 +374,9 @@ app.whenReady().then(() => {
     const exePath = getZopyPrinterPath();
     if (fs.existsSync(exePath)) {
       console.log("[ZopyPrinter] Warming up EXE...");
-      spawn(exePath, ["--warmup"]);
+      spawn(exePath, ["--warmup"], {
+        cwd: path.dirname(exePath),
+      });
     }
   }
 });
@@ -462,6 +476,54 @@ ipcMain.handle("list-printers", async () => {
     ];
   }
 
+  if (process.platform === "win32") {
+    const exePath = getZopyPrinterPath();
+    if (fs.existsSync(exePath)) {
+      console.log("[list-printers] Spawning ZopyPrinter for listing...");
+      const printers = await new Promise<PrinterInfo[]>((resolve) => {
+        const child = spawn(exePath, ["--list-printers"], {
+          cwd: path.dirname(exePath),
+        }) as any;
+        let output = "";
+        child.stdout.on("data", (data: Buffer) => {
+          output += data.toString();
+        });
+        child.stderr.on("data", (data: Buffer) => {
+          console.error("[ZopyPrinter stderr]", data.toString());
+        });
+        child.on("close", (code: number | null) => {
+          console.log(`[list-printers] ZopyPrinter exited with code ${code}`);
+          try {
+            const lines = output.split("\n");
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith("{")) {
+                const msg = JSON.parse(trimmed);
+                if (msg.type === "printers" && Array.isArray(msg.printers)) {
+                  console.log(`[list-printers] Found ${msg.printers.length} printers via C#`);
+                  resolve(msg.printers);
+                  return;
+                } else if (msg.type === "error") {
+                   console.error("[list-printers] C# Error:", msg.message);
+                }
+              }
+            }
+          } catch (e) {
+            console.error("[ZopyPrinter] Failed to parse printer list:", e);
+          }
+          resolve([]);
+        });
+      });
+
+      if (printers.length > 0) {
+        return printers;
+      }
+      console.warn("[list-printers] ZopyPrinter returned no printers, trying fallback...");
+    } else {
+      console.warn("[list-printers] ZopyPrinter.exe NOT FOUND at path:", exePath);
+    }
+  }
+
   try {
     const printers = normalizePrinterList(await getPrinters());
     if (printers.length > 0) return printers;
@@ -549,10 +611,14 @@ ipcMain.handle(
         console.log(`[IMAGE] Detected image file: ${path.basename(filePath)} — using webContents.print directly`);
         await printImageViaWebContents(filePath, printer, normalizedOptions);
         console.log(`[IMAGE] webContents.print succeeded for ${path.basename(filePath)}`);
+      } else if (process.platform === "win32") {
+        // Windows PDF: use ZopyPrinter (C#)
+        console.log(`[PDF] ZopyPrinter (C#) → ${printer}`, normalizedOptions);
+        await runZopyPrinter(event, printer, [{ ...normalizedOptions, path: filePath }], meta);
+        console.log(`[PDF] ZopyPrinter succeeded for ${path.basename(filePath)}`);
       } else {
-        // PDFs: always use Electron webContents.print (loadWebContent).
-        // This is the only path that supports N-up pagesPerSheet.
-        console.log(`[PDF] webContents.print (loadWebContent) → ${printer}`, normalizedOptions);
+        // Mac/Linux PDF: use Electron webContents.print
+        console.log(`[PDF] webContents.print → ${printer}`, normalizedOptions);
         await printPdfViaWebContents(filePath, printer, normalizedOptions);
         console.log(`[PDF] webContents.print succeeded for ${path.basename(filePath)}`);
       }
@@ -629,78 +695,106 @@ function downloadFile(
   });
 }
 
+async function runZopyPrinter(
+  event: Electron.IpcMainInvokeEvent,
+  printer: string,
+  files: any[],
+  meta?: { printRunId?: string },
+) {
+  const exePath = getZopyPrinterPath();
+  const configPath = path.join(os.tmpdir(), `zopy_config_${Date.now()}.json`);
+
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      PrinterName: printer,
+      Files: files.map((f) => ({
+        Path: f.path || f.filePath,
+        Copies: f.copies || 1,
+        PaperSize: f.paperSize || "A4",
+        ColorMode: f.colorMode || (f.monochrome ? "BW" : "COLOR") || "BW",
+        Duplex: f.duplex || f.side || "ONE",
+        Orientation: f.orientation || "PORTRAIT",
+        PagesPerSheet: Number(f.pagesPerSheet) || 1,
+        Pages: f.pages || "",
+        Scale: f.scale || "fit",
+        Id: f.id || path.basename(f.path || f.filePath),
+      })),
+      PrintRunId: meta?.printRunId || "",
+    }),
+  );
+
+  return new Promise<void>((resolve, reject) => {
+    console.log(`[ZopyPrinter] Spawning EXE at ${exePath}`);
+    const child = spawn(exePath, [configPath], {
+      cwd: path.dirname(exePath),
+    }) as any;
+
+    let lastErrorMessage = "";
+
+    child.stdout.on("data", (data: Buffer) => {
+      const lines = data.toString().split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "progress") {
+            event.sender.send("batch-print-progress", {
+              fileId: msg.fileId,
+              percent: msg.percent,
+              printRunId: meta?.printRunId,
+            });
+            event.sender.send("print-progress", {
+              percent: msg.percent,
+              fileName: msg.fileId,
+              printRunId: meta?.printRunId,
+            });
+          } else if (msg.type === "error") {
+            lastErrorMessage = msg.message;
+            console.error("[ZopyPrinter] Error:", msg.message);
+          }
+        } catch (e) {
+          console.log("[ZopyPrinter stdout]", line);
+        }
+      }
+    });
+
+    child.stderr.on("data", (data: Buffer) => {
+      const err = data.toString();
+      console.error("[ZopyPrinter stderr]", err);
+      if (err.trim()) lastErrorMessage = err.trim();
+    });
+
+    child.on("close", (code: number | null) => {
+      fs.unlink(configPath, () => {});
+      if (code === 0) resolve();
+      else {
+        const errorDetail = lastErrorMessage ? `: ${lastErrorMessage}` : "";
+        reject(new Error(`ZopyPrinter failed (code ${code})${errorDetail}`));
+      }
+    });
+  });
+}
+
 ipcMain.handle(
   "print-batch",
-  async (event, printer: string, files: any[], meta?: { printRunId?: string }) => {
-    const runZopyPrinter = () => {
-      return new Promise<void>((resolve, reject) => {
-        const exePath = getZopyPrinterPath();
-        const configPath = path.join(os.tmpdir(), `zopy_config_${Date.now()}.json`);
-        
-        fs.writeFileSync(configPath, JSON.stringify({
-          PrinterName: printer,
-          Files: files.map(f => ({
-             Path: f.path,
-             Copies: f.copies || 1,
-             PaperSize: f.paperSize || "A4",
-             ColorMode: f.colorMode || "BW",
-             Duplex: f.duplex || "ONE",
-             Orientation: f.orientation || "PORTRAIT",
-             PagesPerSheet: f.pagesPerSheet || 1,
-             Id: f.id || path.basename(f.path)
-          })),
-          PrintRunId: meta?.printRunId || ""
-        }));
-
-        const child = spawn(exePath, [configPath]);
-        
-        child.stdout.on("data", (data) => {
-          const lines = data.toString().split("\n");
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const msg = JSON.parse(line);
-              if (msg.type === "progress") {
-                event.sender.send("batch-print-progress", {
-                  fileId: msg.fileId,
-                  percent: msg.percent,
-                  printRunId: meta?.printRunId
-                });
-              } else if (msg.type === "error") {
-                console.error("[ZopyPrinter] Error:", msg.message);
-              }
-            } catch (e) {
-              console.log("[ZopyPrinter stdout]", line);
-            }
-          }
-        });
-        
-        child.stderr.on("data", (data) => console.error("[ZopyPrinter stderr]", data.toString()));
-        
-        child.on("close", (code) => {
-          fs.unlink(configPath, () => {});
-          if (code === 0) resolve();
-          else reject(new Error(`ZopyPrinter exited with code ${code}`));
-        });
-      });
-    };
-
+  async (
+    event,
+    printer: string,
+    files: any[],
+    meta?: { printRunId?: string },
+  ) => {
     if (process.platform === "win32") {
       const exePath = getZopyPrinterPath();
       if (fs.existsSync(exePath)) {
-        try {
-          await runZopyPrinter();
-          return;
-        } catch (e) {
-          console.error("[ZopyPrinter] C# failed printing, falling back to webContents...", e);
-        }
-      } else {
-        console.warn("[ZopyPrinter] EXE not found, falling back to webContents...");
+        await runZopyPrinter(event, printer, files, meta);
+        return;
       }
+      throw new Error(`ZopyPrinter.exe not found at ${exePath}`);
     }
 
-    // Fallback logic using WebContents
-    console.log("[ZopyPrinter] Using webContents fallback...");
+    // Fallback logic for Mac/Linux (or dry run)
+    console.log("[ZopyPrinter] Using webContents (non-Windows)...");
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const options = {

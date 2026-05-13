@@ -86,7 +86,6 @@ export default function SyncScreen({ onSynced }: Props) {
           style={styles.logoImage}
           resizeMode="contain"
         />
-        <Text style={[styles.tagline, { color: colors.textMuted }]}>PRINT FROM ANYWHERE</Text>
       </View>
 
       {/* Card */}

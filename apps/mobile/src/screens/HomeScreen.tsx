@@ -402,7 +402,6 @@ export default function HomeScreen() {
       <View style={[styles.header, { borderBottomColor: colors.border, backgroundColor: `${colors.panel}E0` }]}>
         <View>
           <Text style={[styles.brandTitle, { color: colors.text }]}>ZOPY</Text>
-          <Text style={[styles.brandSub, { color: colors.textMuted }]}>PRINT FROM ANYWHERE</Text>
         </View>
         <TouchableOpacity onPress={toggleTheme} style={[styles.themeBtn, { borderColor: colors.border }]}>
           {isDark ? <Sun size={18} color={colors.text} /> : <Moon size={18} color={colors.text} />}

@@ -107,7 +107,6 @@ export default function AboutPage({
             For Users & Shops
           </h2>
           <h3 className="legal-subtitle">For Users</h3>
-          <p>Print from anywhere, anytime - no waiting.</p>
           <h3 className="legal-subtitle">For Shopkeepers</h3>
           <p>Get organized orders, reduce confusion, serve customers faster.</p>
 
