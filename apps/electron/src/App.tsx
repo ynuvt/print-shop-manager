@@ -485,7 +485,7 @@ export default function App() {
 
           const options = {
             copies: Math.max(1, Number(fileOption.copies) || 1),
-            paperSize: "A4",
+            paperSize: fileOption.paperSize || "A4",
             side: isDuplex ? "duplexlong" : "simplex",
             duplex: isDuplex ? "Duplex" : "Simplex",
             monochrome: !isColor,
@@ -537,9 +537,11 @@ export default function App() {
              copies: f.options.copies,
              paperSize: f.options.paperSize,
              colorMode: f.isColor ? "COLOR" : "BW",
-             duplex: f.options.duplex,
+             duplex: f.options.duplex === "Duplex" ? "BOTH" : "ONE",
              orientation: f.options.orientation,
              pagesPerSheet: f.options.pagesPerSheet || 1,
+             pages: f.options.pages || "",
+             scale: f.options.scale || "fit",
              id: `${f.fileIndex}`
         });
 
@@ -694,10 +696,10 @@ export default function App() {
         {/* Quick Search Area */}
         <form
           onSubmit={(e) => void handleSearchSubmit(e)}
-          className="shrink-0 border-b border-[var(--border)] bg-[var(--panel)] px-5 py-14 flex flex-col items-center"
+          className="shrink-0 border-b border-[var(--border)] bg-[var(--panel)] px-5 py-6"
         >
-          <div className="w-full max-w-md flex flex-col gap-6">
-            <div className="relative group">
+          <div className="flex max-w-xl items-center gap-3">
+            <div className="group relative flex-1">
               <input
                 type="text"
                 inputMode="numeric"
@@ -707,35 +709,37 @@ export default function App() {
                   const val = e.target.value.replace(/[^0-9]/g, "");
                   if (val.length <= 4) setSearch(val);
                 }}
-                placeholder="0000"
-                className="w-full h-24 rounded-3xl border-4 border-[var(--border)] bg-[var(--panel-muted)] px-6 text-6xl font-black text-center tracking-[0.25em] text-[var(--text)] outline-none transition-all placeholder:text-[var(--text-muted)] placeholder:opacity-10 focus:border-[var(--brand)] focus:ring-[16px] focus:ring-[var(--brand)]/10 focus:bg-[var(--bg)] shadow-inner"
+                placeholder="Enter Job Code"
+                className="w-full h-11 rounded-xl border-2 border-[var(--border)] bg-[var(--panel-muted)] px-10 text-base font-black text-[var(--text)] outline-none transition-all placeholder:text-[var(--text-muted)] placeholder:font-bold placeholder:opacity-50 focus:border-[var(--brand)] focus:ring-[8px] focus:ring-[var(--brand)]/10 focus:bg-[var(--bg)]"
                 autoFocus
               />
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[var(--panel)] px-3 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                OTP Verification
-              </div>
+              <Search
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--brand)] transition-colors"
+                size={18}
+              />
             </div>
             
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={search.length !== 4}
-                className="flex-1 flex h-14 items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] text-lg font-black text-white shadow-lg shadow-[var(--brand)]/20 transition-all hover:bg-[var(--brand-strong)] hover:translate-y-[-2px] active:scale-[0.98] active:translate-y-0 disabled:opacity-40 disabled:hover:translate-y-0 disabled:grayscale"
-              >
-                <Search size={20} strokeWidth={3} />
-                Search Job
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => void refreshJobs()}
-                disabled={loadingJobs}
-                className="flex items-center gap-2 rounded-2xl border-2 border-[var(--border)] bg-[var(--panel)] px-6 text-sm font-bold text-[var(--text-muted)] transition-all hover:border-[var(--brand)] hover:text-[var(--brand)] hover:bg-[var(--panel-muted)] disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 ${loadingJobs ? "animate-spin" : ""}`} />
-                Refresh Queue
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={search.length !== 4}
+              className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-6 text-sm font-black text-white shadow-lg shadow-[var(--brand)]/15 transition-all hover:bg-[var(--brand-strong)] hover:translate-y-[-1px] active:scale-95 active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:grayscale"
+            >
+              Search
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void refreshJobs()}
+              disabled={loadingJobs}
+              className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--panel)] transition-all hover:border-[var(--brand)] hover:bg-[var(--panel-muted)] disabled:opacity-50"
+              title="Refresh Queue"
+            >
+              <RefreshCw
+                className={`h-5 w-5 text-[var(--text-muted)] ${
+                  loadingJobs ? "animate-spin text-[var(--brand)]" : ""
+                }`}
+              />
+            </button>
           </div>
         </form>
 

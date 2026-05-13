@@ -3,7 +3,6 @@
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/ZopyPrinter.deps.json
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/ZopyPrinter.runtimeconfig.json
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/ZopyPrinter.dll
-/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/ZopyPrinter.pdb
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/Microsoft.Win32.SystemEvents.dll
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/System.Drawing.Common.dll
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/Microsoft.CSharp.dll
@@ -193,10 +192,8 @@
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.AssemblyInfoInputs.cache
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.AssemblyInfo.cs
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.csproj.CoreCompileInputs.cache
-/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.sourcelink.json
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.csproj.CopyComplete
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.dll
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/refint/ZopyPrinter.dll
-/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.pdb
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.genruntimeconfig.cache
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ref/ZopyPrinter.dll

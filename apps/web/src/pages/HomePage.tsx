@@ -227,7 +227,7 @@ function FileCard({
             )}
           </div>
 
-          <div>
+          {/* <div>
             <p className="field-label">Pages per Sheet</p>
             <ToggleGroup
               options={[
@@ -238,7 +238,7 @@ function FileCard({
               value={pf.options.pagesPerSheet}
               onChange={(v) => onUpdate({ pagesPerSheet: v })}
             />
-          </div>
+          </div> */}
 
           <div>
             <p className="field-label">Copies</p>
@@ -1465,7 +1465,7 @@ export default function HomePage({
                             />
                           </div>
 
-                          <div>
+                          {/* <div>
                             <p className="field-label">Pages per Sheet</p>
                             <ToggleGroup
                               options={[
@@ -1476,7 +1476,7 @@ export default function HomePage({
                               value={globalOptions.pagesPerSheet}
                               onChange={(v) => setGlobalOptions((p) => ({ ...p, pagesPerSheet: v }))}
                             />
-                          </div>
+                          </div> */}
 
                           <div>
                             <p className="field-label">Copies</p>

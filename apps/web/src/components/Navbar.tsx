@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Moon, Sun } from "lucide-react";
 import type { ThemeMode } from "../App";
 
@@ -11,9 +11,9 @@ export default function Navbar({
   theme,
   onToggleTheme,
 }: NavbarProps) {
-  const location = useLocation();
-  const isHome = location.pathname === "/";
-  const isRewards = location.pathname === "/rewards";
+  // const location = useLocation();
+  // const isHome = location.pathname === "/";
+  // const isRewards = location.pathname === "/rewards";
 
   return (
     <header className="top-bar">
@@ -31,7 +31,7 @@ export default function Navbar({
       </Link>
 
       <div className="top-bar-center">
-        <nav className="nav-tabs">
+        {/* <nav className="nav-tabs">
           <Link to="/" className={`nav-tab ${isHome ? "active" : ""}`}>
             Home
           </Link>
@@ -49,7 +49,7 @@ export default function Navbar({
               boxShadow: "0 0 10px rgba(255, 71, 87, 0.5)"
             }} />
           </Link>
-        </nav>
+        </nav> */}
       </div>
 
       <div className="top-bar-actions">
