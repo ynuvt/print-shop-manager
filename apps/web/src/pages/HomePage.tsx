@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, CSSProperties } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
 import { Link } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Check,
   ChevronDown,
@@ -27,7 +28,6 @@ import {
   uploadFileToR2,
   deleteUserFile,
   deleteUserPrintJob,
-  updateGlobalColorMode,
   storage,
 } from "../api/api";
 import { useNotifications } from "../components/NotificationCenter";
@@ -49,12 +49,13 @@ const MAX_JOB_UPLOAD_BYTES = MAX_JOB_UPLOAD_MB * 1024 * 1024;
 
 type WalkthroughStep =
   | "upload"
-  | "print-type"
   | "customize"
   | "add-more"
   | "file-select"
   | "summary"
   | "submit";
+
+
 
 function ToggleGroup<T extends string | number>({
   options,
@@ -106,7 +107,13 @@ function FileCard({
   const cost = calculateFileCost(pf.detectedPages, pf.options);
 
   return (
-    <article className="upload-file-card review-file-card">
+    <motion.article 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="upload-file-card review-file-card"
+    >
       <div className="upload-file-head">
         <button
           ref={titleRef}
@@ -144,24 +151,42 @@ function FileCard({
           )}
           <button
             type="button"
-            className="icon-btn remove-file-btn"
+            className="remove-file-btn"
             onClick={onRemove}
             aria-label="Remove file"
           >
-            <X size={16} strokeWidth={2.4} aria-hidden="true" />
+            <X size={14} strokeWidth={2.4} aria-hidden="true" />
           </button>
         </div>
       </div>
 
-      {expanded && (
-        <div
-          ref={walkthroughRef}
-          className={
-            isWalkthroughTarget
-              ? "upload-file-body walkthrough-target"
-              : "upload-file-body"
-          }
-        >
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            ref={walkthroughRef}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            style={{ overflow: "hidden" }}
+            className={
+              isWalkthroughTarget
+                ? "upload-file-body walkthrough-target"
+                : "upload-file-body"
+            }
+          >
+            <div>
+            <p className="field-label">Color Mode</p>
+            <ToggleGroup
+              options={[
+                { label: "B/W", value: "BW" },
+                { label: "Color", value: "COLOR" },
+              ]}
+              value={pf.options.colorMode}
+              onChange={(v) => onUpdate({ colorMode: v })}
+            />
+          </div>
+
           <div>
             <p className="field-label">Print Sides</p>
             <ToggleGroup
@@ -227,7 +252,7 @@ function FileCard({
             )}
           </div>
 
-          {/* <div>
+          <div>
             <p className="field-label">Pages per Sheet</p>
             <ToggleGroup
               options={[
@@ -238,7 +263,7 @@ function FileCard({
               value={pf.options.pagesPerSheet}
               onChange={(v) => onUpdate({ pagesPerSheet: v })}
             />
-          </div> */}
+          </div>
 
           <div>
             <p className="field-label">Copies</p>
@@ -260,9 +285,10 @@ function FileCard({
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </article>
+        </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.article>
   );
 }
 
@@ -283,7 +309,7 @@ export default function HomePage({
   const [calloutStyle, setCalloutStyle] = useState<CSSProperties>({});
   const [walkthroughFileIndex, setWalkthroughFileIndex] = useState<number>(0);
   const [walkthroughAddedExtra, setWalkthroughAddedExtra] = useState(false);
-  const [globalColorMode, setGlobalColorMode] =
+  const [globalColorMode] =
     useState<PrintOptions["colorMode"]>("BW");
   const [printFiles, setPrintFiles] = useState<PrintFileState[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -307,6 +333,7 @@ export default function HomePage({
     scaleMode: "FIT" as PrintOptions["scaleMode"],
     copies: 1,
     pagesPerSheet: 1,
+    colorMode: "BW" as PrintOptions["colorMode"],
   });
 
   const [uploadStage, setUploadStage] = useState<"uploading" | "converting" | "creating">(
@@ -330,7 +357,6 @@ export default function HomePage({
   const previousFileCount = useRef(0);
   const uploadButtonRef = useRef<HTMLButtonElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
-  const printModeRef = useRef<HTMLDivElement | null>(null);
   const fileOptionsRef = useRef<HTMLDivElement | null>(null);
   const fileTitleRef = useRef<HTMLButtonElement | null>(null);
   const summaryCardRef = useRef<HTMLDivElement | null>(null);
@@ -587,7 +613,7 @@ export default function HomePage({
   useEffect(() => {
     if (walkthroughStep === "upload" && printFiles.length > 0) {
       setWalkthroughFileIndex(0);
-      setWalkthroughStep("print-type");
+      setWalkthroughStep("customize");
     }
   }, [printFiles.length, walkthroughStep]);
 
@@ -646,8 +672,6 @@ export default function HomePage({
       switch (walkthroughStep) {
         case "upload":
           return uploadButtonRef.current;
-        case "print-type":
-          return printModeRef.current;
         case "customize":
           return fileOptionsRef.current;
         case "file-select":
@@ -778,33 +802,6 @@ export default function HomePage({
     [totalBytes, printFiles.length],
   );
 
-  const applyGlobalColorMode = useCallback(
-    async (mode: PrintOptions["colorMode"]) => {
-      setGlobalColorMode(mode);
-      const nextFiles = printFiles.map((file) => ({
-        ...file,
-        options: { ...file.options, colorMode: mode },
-      }));
-      setPrintFiles(nextFiles);
-
-      if (draftJobId) {
-        try {
-          await updateGlobalColorMode(draftJobId, mode);
-          // Mark as persisted to skip individual saves
-          nextFiles.forEach((f) => {
-            if (f.id) lastPersistedOptionsRef.current[f.id] = f.options;
-          });
-          notify(`All files updated to ${mode === "COLOR" ? "Color" : "B/W"}`, {
-            variant: "success",
-          });
-        } catch (err) {
-          notify("Failed to update global color mode.", { variant: "error" });
-        }
-      }
-    },
-    [printFiles, draftJobId],
-  );
-
   const toggleGlobalFileSelection = useCallback((idx: number) => {
     setGlobalSelectedFiles((prev) => {
       const next = new Set(prev);
@@ -840,6 +837,7 @@ export default function HomePage({
             scaleMode: globalOptions.scaleMode,
             copies: globalOptions.copies,
             pagesPerSheet: globalOptions.pagesPerSheet,
+            colorMode: globalOptions.colorMode,
           },
         };
       }),
@@ -1024,13 +1022,11 @@ export default function HomePage({
   const isWalkthroughActive = walkthroughStep !== null;
   const showCallout =
     walkthroughStep === "upload" ||
-    walkthroughStep === "print-type" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "file-select" ||
     walkthroughStep === "submit";
   const showCalloutButton =
-    walkthroughStep === "print-type" ||
     walkthroughStep === "customize" ||
     walkthroughStep === "add-more" ||
     walkthroughStep === "submit";
@@ -1038,8 +1034,6 @@ export default function HomePage({
     switch (walkthroughStep) {
       case "upload":
         return "Start by uploading your PDF files here.";
-      case "print-type":
-        return "Choose Color or B/W for all files, then select Next.";
       case "customize":
         return "Choose your print options and select Next.";
       case "add-more":
@@ -1054,7 +1048,6 @@ export default function HomePage({
   })();
   const calloutButtonLabel = (() => {
     switch (walkthroughStep) {
-      case "print-type":
       case "customize":
       case "add-more":
         return "Next";
@@ -1066,9 +1059,6 @@ export default function HomePage({
   })();
   const handleCalloutAction = () => {
     switch (walkthroughStep) {
-      case "print-type":
-        setWalkthroughStep("customize");
-        break;
       case "customize":
         if (walkthroughAddedExtra) {
           setWalkthroughAddedExtra(false);
@@ -1219,10 +1209,15 @@ export default function HomePage({
       />
 
       <main className="main-wrap">
-        {error && <div className="banner-error">{error}</div>}
+        {error && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="banner-error">{error}</motion.div>}
 
           <>
-            <section className="hero-panel">
+            <motion.section 
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+              className="hero-panel"
+            >
               <div className="hero-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", marginBottom: "20px" }}>
                 <div>
                   <h1 style={{ margin: 0 }}>Upload Documents</h1>
@@ -1233,14 +1228,12 @@ export default function HomePage({
                     type="button"
                     className="btn btn-sync-nav"
                     style={{ 
-                      padding: "10px 20px",
-                      borderRadius: "12px",
-                      fontSize: "14px"
+                      borderRadius: "10px",
                     }}
                     onClick={handleForwardFromWhatsapp}
                   >
-                    <MessageCircle size={18} />
-                    Sync
+                    <MessageCircle size={15} />
+                    SYNC
                   </button>
                 )}
               </div>
@@ -1382,26 +1375,7 @@ export default function HomePage({
                     <h2>File Options</h2>
                   </div>
 
-                  <div
-                    ref={printModeRef}
-                    className={
-                      walkthroughStep === "print-type"
-                        ? "print-mode-top walkthrough-target"
-                        : "print-mode-top"
-                    }
-                  >
-                    <p className="field-label">
-                      Print Type (applies to all files)
-                    </p>
-                    <ToggleGroup
-                      options={[
-                        { label: "Color Print", value: "COLOR" },
-                        { label: "B/W Print", value: "BW" },
-                      ]}
-                      value={globalColorMode}
-                      onChange={(v) => applyGlobalColorMode(v)}
-                    />
-                  </div>
+
 
                   {/* ── Global Print Options Panel ── */}
                   <div className="global-options-panel">
@@ -1429,6 +1403,18 @@ export default function HomePage({
                     {showGlobalOptions && (
                       <div className="global-options-body">
                         <div className="global-options-fields">
+                          <div>
+                            <p className="field-label">Color Mode</p>
+                            <ToggleGroup
+                              options={[
+                                { label: "B/W", value: "BW" },
+                                { label: "Color", value: "COLOR" },
+                              ]}
+                              value={globalOptions.colorMode}
+                              onChange={(v) => setGlobalOptions((p) => ({ ...p, colorMode: v }))}
+                            />
+                          </div>
+
                           <div>
                             <p className="field-label">Print Sides</p>
                             <ToggleGroup
@@ -1465,7 +1451,7 @@ export default function HomePage({
                             />
                           </div>
 
-                          {/* <div>
+                          <div>
                             <p className="field-label">Pages per Sheet</p>
                             <ToggleGroup
                               options={[
@@ -1476,7 +1462,7 @@ export default function HomePage({
                               value={globalOptions.pagesPerSheet}
                               onChange={(v) => setGlobalOptions((p) => ({ ...p, pagesPerSheet: v }))}
                             />
-                          </div> */}
+                          </div>
 
                           <div>
                             <p className="field-label">Copies</p>
@@ -1556,9 +1542,10 @@ export default function HomePage({
                   </div>
 
                   <div className="upload-file-list">
+                    <AnimatePresence>
                     {printFiles.map((pf, idx) => (
                       <FileCard
-                        key={`${pf.name}-${idx}`}
+                        key={pf.id || `${pf.name}-${idx}`}
                         pf={pf}
                         expanded={expandedIdx === idx}
                         onToggle={() => handleFileToggle(idx)}
@@ -1588,6 +1575,7 @@ export default function HomePage({
                         onRemove={() => removeFile(idx)}
                       />
                     ))}
+                    </AnimatePresence>
                   </div>
 
                   <div className="section-foot">
@@ -1652,7 +1640,7 @@ export default function HomePage({
               )}
             </>
           )}
-        </section>
+        </motion.section>
 
             <input
               ref={fileInputRef}

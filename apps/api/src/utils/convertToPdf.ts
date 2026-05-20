@@ -2,10 +2,13 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 type ConvertResult = {
   pdfBuffer: Buffer;
@@ -105,9 +108,13 @@ async function convertImageToPdf(
  * running under isolated profiles or unusual environments.
  */
 async function writeFontconfigXml(targetPath: string): Promise<void> {
+  const localFonts = path.resolve(__dirname, "..", "resource", "fonts");
+
   const xml = `<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig>
+  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+  <dir>${localFonts}</dir>
   <dir>/usr/share/fonts</dir>
   <dir>/usr/local/share/fonts</dir>
   <dir>/usr/share/fonts/truetype</dir>
@@ -125,26 +132,26 @@ async function writeFontconfigXml(targetPath: string): Promise<void> {
   <cachedir prefix="xdg">fontconfig</cachedir>
   <cachedir>~/.fontconfig</cachedir>
 
-  <!-- Prefer Liberation as substitutes for Microsoft fonts -->
+  <!-- Fallback to Liberation/Carlito/Caladea only if Microsoft fonts are missing -->
   <alias>
     <family>Times New Roman</family>
-    <prefer><family>Liberation Serif</family></prefer>
+    <accept><family>Liberation Serif</family></accept>
   </alias>
   <alias>
     <family>Arial</family>
-    <prefer><family>Liberation Sans</family></prefer>
+    <accept><family>Liberation Sans</family></accept>
   </alias>
   <alias>
     <family>Courier New</family>
-    <prefer><family>Liberation Mono</family></prefer>
+    <accept><family>Liberation Mono</family></accept>
   </alias>
   <alias>
     <family>Calibri</family>
-    <prefer><family>Carlito</family><family>Liberation Sans</family></prefer>
+    <accept><family>Carlito</family><family>Liberation Sans</family></accept>
   </alias>
   <alias>
     <family>Cambria</family>
-    <prefer><family>Caladea</family><family>Liberation Serif</family></prefer>
+    <accept><family>Caladea</family><family>Liberation Serif</family></accept>
   </alias>
 </fontconfig>`;
 

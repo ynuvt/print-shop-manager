@@ -4,7 +4,7 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "dev": "expo start",
+    "devv": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build": "echo 'Use EAS Build for production builds'"

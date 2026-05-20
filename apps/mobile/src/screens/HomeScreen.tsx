@@ -608,12 +608,12 @@ export default function HomeScreen() {
                 <Text style={{ color: colors.text, fontWeight: "600" }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalBtn, { backgroundColor: colors.error, borderWidth: 0 }]}
+                style={[styles.modalBtn, { backgroundColor: colors.error, borderWidth: 0, justifyContent: "center", alignItems: "center" }]}
                 onPress={() => void clearDraft()}
                 disabled={isClearing}
               >
                 <Trash2 size={14} color="#fff" />
-                <Text style={{ color: "#fff", fontWeight: "700" }}>{isClearing ? "Clearing..." : "Delete All"}</Text>
+                <Text style={{ color: "#fff", fontWeight: "700", textAlign: "center" }}>{isClearing ? "Clearing..." : "Delete All"}</Text>
               </TouchableOpacity>
             </View>
           </View>

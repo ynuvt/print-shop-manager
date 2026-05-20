@@ -1,5 +1,6 @@
 import Navbar from "../components/Navbar";
 import type { ThemeMode } from "../App";
+import { Link } from "react-router-dom";
 import { Star, Gift, ArrowRight, MapPin } from "lucide-react";
 import { useState } from "react";
 
@@ -15,8 +16,7 @@ export default function RewardsPage({
   return (
     <div className="app-shell">
       <Navbar theme={theme} onToggleTheme={onToggleTheme} />
-      
-      <main className="main-wrap" style={{ padding: "12px", maxWidth: "1000px", margin: "0 auto" }}>
+      <main className="main-wrap">
         {/* Active Rewards Section */}
         <section style={{ marginBottom: "32px" }}>
           <h2 style={{ fontSize: "20px", fontWeight: "800", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -214,7 +214,7 @@ export default function RewardsPage({
                     margin: "8px 0", fontFamily: '"Sora", sans-serif', letterSpacing: "3px",
                     position: "relative", overflow: "hidden"
                   }}>
-                    ZOPY-921
+                    KAPI15
                     <div style={{
                       position: "absolute", top: 0, width: "100%", height: "100%",
                       background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)",
@@ -331,6 +331,17 @@ export default function RewardsPage({
           }
         `}</style>
       </main>
+
+      <footer className="site-footer">
+        <div className="site-footer-inner">
+          <Link to="/terms" className="footer-link">
+            Terms & Conditions
+          </Link>
+          <Link to="/about" className="footer-link">
+            About Us
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 }
