@@ -415,3 +415,67 @@ export async function isWithinWhatsAppWindow(
     (Date.now() - waUser.lastMessageAt.getTime()) / (1000 * 60 * 60);
   return hoursSinceLastMessage <= WHATSAPP_WINDOW_HOURS;
 }
+
+export async function sendWhatsAppImageBuffer(args: {
+  to: string;
+  phoneNumberId: string;
+  buffer: Buffer;
+  fileName: string;
+}): Promise<void> {
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error("WHATSAPP_ACCESS_TOKEN is not configured.");
+  }
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", "image/png");
+  form.append(
+    "file",
+    new Blob([new Uint8Array(args.buffer)], { type: "image/png" }),
+    args.fileName,
+  );
+
+  const uploadResponse = await fetch(
+    `${WHATSAPP_API_BASE}/${args.phoneNumberId}/media`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    },
+  );
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    throw new Error(`Failed to upload WhatsApp Image media: ${uploadResponse.status} ${errorText}`);
+  }
+
+  const uploadData = (await uploadResponse.json()) as { id?: string };
+  if (!uploadData.id) {
+    throw new Error("WhatsApp image media upload did not return an id.");
+  }
+
+  const messageResponse = await fetch(
+    `${WHATSAPP_API_BASE}/${args.phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: args.to,
+        type: "image",
+        image: {
+          id: uploadData.id,
+        },
+      }),
+    },
+  );
+
+  if (!messageResponse.ok) {
+    const errorText = await messageResponse.text();
+    throw new Error(`Failed to send WhatsApp Image: ${messageResponse.status} ${errorText}`);
+  }
+}

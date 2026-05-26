@@ -89,9 +89,32 @@ export default function BrandCouponsPage() {
                     </span>
                   </td>
                   <td className="center" style={{ color: "#e4e4e7", fontWeight: 500, fontSize: 12 }}>{c.discountType === "PERCENTAGE" ? `${c.discountValue}%` : `₹${c.discountValue}`}</td>
-                  <td className="center"><span className={`brand-status-badge ${c.status.toLowerCase()}`}>{c.status}</span></td>
-                  <td style={{ color: "#71717a", fontSize: 12 }}>{c.nearestOutlet?.name || "—"}</td>
-                  <td style={{ color: "#71717a", fontSize: 12 }}>{new Date(c.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</td>
+                  <td className="center">
+                    <span className={`brand-status-badge ${c.status.toLowerCase()}`}>{c.status}</span>
+                    {c.status === "REDEEMED" && c.redemption && (
+                      <div style={{ fontSize: "10px", color: "#a1a1aa", marginTop: "4px" }}>
+                        by {c.redemption.worker.name}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ color: "#e4e4e7", fontSize: 12 }}>
+                    {c.status === "REDEEMED" && c.redemption ? (
+                      <div>
+                        <span style={{ color: "#22c55e", fontWeight: 500 }}>{c.redemption.outlet.name}</span>
+                        <div style={{ fontSize: "10px", color: "#71717a" }}>Redeemed</div>
+                      </div>
+                    ) : (
+                      c.nearestOutlet?.name || "—"
+                    )}
+                  </td>
+                  <td style={{ color: "#71717a", fontSize: 12 }}>
+                    <div>{new Date(c.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div>
+                    {c.status === "REDEEMED" && c.redemption && (
+                      <div style={{ fontSize: "10px", color: "#a1a1aa", marginTop: "2px" }}>
+                        Claimed: {new Date(c.redemption.redeemedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    )}
+                  </td>
                   <td className="center">
                     {c.status === "ACTIVE" && (
                       <button onClick={() => handleRevoke(c.id, c.code)} className="brand-btn-icon danger" title="Revoke">
