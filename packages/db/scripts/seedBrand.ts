@@ -3,45 +3,22 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../src/client.js";
 
 async function main() {
-  console.log('Seeding brand data...');
+  console.log('Cleaning up database brands...');
 
-  await prisma.brand.deleteMany({
-    where: { slug: 'test-brand' }
-  });
+  // Delete all existing brands (and their related cascading records)
+  await prisma.brand.deleteMany({});
 
-  const hashedPassword = await bcrypt.hash('password123', 10);
+  console.log('Creating Kaapi brand...');
+  const hashedPassword = await bcrypt.hash('kapikapi', 10);
 
   const brand = await prisma.brand.create({
     data: {
-      name: 'Test Brand',
-      slug: 'test-brand',
-      email: 'admin@testbrand.com',
+      name: 'Kaapi',
+      slug: 'kaapi',
+      email: 'kaapi@gmail.com',
       password: hashedPassword,
-      plan: 'PRO',
-      outlets: {
-        create: [
-          {
-            name: 'Main Street Outlet',
-            outletCode: 'TB-MAIN-001',
-            address: '123 Main St, Tech City',
-            isActive: true,
-            workers: {
-              create: [
-                {
-                  name: 'Alice Worker',
-                  phoneNumber: '+1234567890',
-                  isActive: true,
-                },
-                {
-                  name: 'Bob Worker',
-                  phoneNumber: '+1987654321',
-                  isActive: true,
-                }
-              ]
-            }
-          }
-        ]
-      },
+      plan: 'PRO_PLUS',
+      logo: 'https://images.unsplash.com/photo-1507133750040-4a8f57021571?auto=format&fit=crop&w=150&q=80',
       offers: {
         create: [
           {
@@ -51,6 +28,7 @@ async function main() {
             discountType: 'PERCENTAGE',
             discountValue: 50,
             isActive: true,
+            campaignType: 'COUPON',
           },
           {
             offerType: 'RETURNING',
@@ -59,24 +37,18 @@ async function main() {
             discountType: 'FLAT',
             discountValue: 20,
             isActive: true,
+            campaignType: 'COUPON',
           }
         ]
       },
     },
     include: {
-      outlets: {
-        include: {
-          workers: true
-        }
-      },
       offers: true,
     }
   });
 
-  console.log('Successfully created test brand with outlets, workers, and offers:');
+  console.log('Successfully created Kaapi brand:');
   console.log(JSON.stringify(brand, null, 2));
-
-
 }
 
 main()
