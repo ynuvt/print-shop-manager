@@ -10,13 +10,14 @@ import JobCard from "./components/JobCard";
 import JobModal from "./components/JobModal";
 import ActivePrintIndicator from "./components/ActivePrintIndicator";
 import {
-  adminLogin,
+  shopLogin,
   fetchAllJobs,
   fetchJobByCode,
   getAuthToken,
   NotFoundError,
   logout,
   updateJobStatus,
+  type PrintShopInfo,
 } from "./api/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, RefreshCw, CheckCircle2, XCircle, AlertTriangle, FileText, ChevronRight, Check, X, Printer, Trash2, ExternalLink, FileCheck, Layers, Type, Palette } from "lucide-react";
@@ -48,8 +49,8 @@ function capPrintJobs(jobs: ActivePrintJobState[]): ActivePrintJobState[] {
   return jobs.slice(-5);
 }
 
-function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
-  const [email, setEmail] = useState("");
+function LoginScreen({ onLogin }: { onLogin: (token: string, shop: PrintShopInfo) => void }) {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,10 +60,10 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
     setLoading(true);
     setError(null);
     try {
-      const token = await adminLogin(email, password);
-      onLogin(token);
-    } catch {
-      setError("Invalid credentials or server error.");
+      const response = await shopLogin(username.trim(), password);
+      onLogin(response.token, response.shop);
+    } catch (err: any) {
+      setError(err.message || "Invalid username/password or server error.");
     } finally {
       setLoading(false);
     }
@@ -75,7 +76,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
         <div className="mb-8 flex flex-col items-center">
           <img src="./zopy.png" alt="Zopy" className="h-14 w-14 rounded-2xl shadow-lg mb-4" />
           <h1 className="text-2xl font-bold text-[var(--text)] tracking-tight">Zopy Print Manager</h1>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">Sign in to your admin console</p>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">Sign in to your print console</p>
         </div>
 
         <form
@@ -84,17 +85,18 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
         >
           <div className="space-y-4">
             <div>
-              <label className="mb-1.5 block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider" htmlFor="login-email">
-                Email
+              <label className="mb-1.5 block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider" htmlFor="login-username">
+                Username
               </label>
               <input
-                id="login-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="login-username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="w-full rounded-xl border border-[var(--border)] bg-[var(--panel-muted)] px-3.5 py-2.5 text-sm text-[var(--text)] outline-none transition focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/10"
-                placeholder="admin@zopy.in"
+                placeholder="Enter shop username"
                 required
+                autoFocus
               />
             </div>
 
@@ -160,6 +162,25 @@ export default function App() {
   >([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
   const [selectedColorPrinter, setSelectedColorPrinter] = useState<string>("");
+
+  const [currentShop, setCurrentShop] = useState<{ id: string; username: string; shopId: string } | null>(() => {
+    const saved = localStorage.getItem("zopy_current_shop");
+    if (!saved) return null;
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return null;
+    }
+  });
+
+  const selectedShopId = currentShop?.shopId || "";
+
+  const handleLogout = useCallback(() => {
+    logout();
+    localStorage.removeItem("zopy_current_shop");
+    setToken(null);
+    setCurrentShop(null);
+  }, []);
 
   // ── Restore saved theme on mount ──────────────────
   useEffect(() => {
@@ -244,7 +265,9 @@ export default function App() {
       setLoadError(message);
       if (message.includes("HTTP 401") || message.includes("HTTP 403")) {
         logout();
+        localStorage.removeItem("zopy_current_shop");
         setToken(null);
+        setCurrentShop(null);
       }
     } finally {
       setLoadingJobs(false);
@@ -395,14 +418,16 @@ export default function App() {
       }
 
       setLoadError(null);
-      await handleSelectJob(matches[0]);
+      if (matches[0]) {
+        await handleSelectJob(matches[0]);
+      }
     },
     [search, jobs, tab, queueFilter, historyFilter, handleSelectJob],
   );
 
   const handleStatusUpdate = useCallback(
     async (jobId: string, userId: string, newStatus: UpdatableJobStatus) => {
-      await updateJobStatus(jobId, userId, newStatus);
+      await updateJobStatus(jobId, userId, newStatus, selectedShopId || undefined);
 
       setJobs((prev) =>
         sortJobsNewestFirst(
@@ -414,7 +439,7 @@ export default function App() {
         prev && prev.id === jobId ? { ...prev, status: newStatus } : prev,
       );
     },
-    [],
+    [selectedShopId],
   );
 
   // ── Background print pipeline ───────────────────────────
@@ -643,7 +668,7 @@ export default function App() {
     if (!selectedJob) return null;
     // Return the most recent run for this job
     const matches = activePrintJobs.filter((j) => j.jobId === selectedJob.id);
-    return matches.length > 0 ? matches[matches.length - 1] : null;
+    return matches.length > 0 ? (matches[matches.length - 1] ?? null) : null;
   }, [activePrintJobs, selectedJob]);
 
   // Is any job actively downloading/printing?
@@ -666,8 +691,11 @@ export default function App() {
   if (!token) {
     return (
       <LoginScreen
-        onLogin={(newToken: string) => {
+        onLogin={(newToken: string, shop: PrintShopInfo) => {
+          localStorage.setItem("printowl_admin_token", newToken);
+          localStorage.setItem("zopy_current_shop", JSON.stringify(shop));
           setToken(newToken);
+          setCurrentShop(shop);
         }}
       />
     );
@@ -683,6 +711,8 @@ export default function App() {
         onPrinterChange={handlePrinterChange}
         selectedColorPrinter={selectedColorPrinter}
         onColorPrinterChange={handleColorPrinterChange}
+        shopName={currentShop?.username || ""}
+        shopCode={currentShop?.shopId || ""}
       />
 
       {loadError && (

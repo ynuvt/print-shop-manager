@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ZopyPrinter")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+80e9cc208b9a6eedbe9e32c119b30b64b344f6a1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6b0d58be286f9cfd43197397f16719f9b6a12a9a")]
 [assembly: System.Reflection.AssemblyProductAttribute("ZopyPrinter")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ZopyPrinter")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

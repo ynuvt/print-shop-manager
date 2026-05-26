@@ -4,9 +4,16 @@ import HomePage from "./pages/HomePage";
 import TermsPage from "./pages/TermsPage";
 import AboutPage from "./pages/AboutPage";
 import RewardsPage from "./pages/RewardsPage";
-import ShopDashboard from "./pages/ShopDashboard";
 import AuthOtpPage from "./pages/AuthOtpPage";
+import BrandLoginPage from "./pages/BrandLoginPage";
+import BrandLayout from "./components/BrandLayout";
+import BrandDashboardPage from "./pages/BrandDashboardPage";
+import BrandOffersPage from "./pages/BrandOffersPage";
+import BrandOutletsPage from "./pages/BrandOutletsPage";
+import BrandWorkersPage from "./pages/BrandWorkersPage";
+import BrandCouponsPage from "./pages/BrandCouponsPage";
 import { NotificationProvider } from "./components/NotificationCenter";
+import { Toaster } from "react-hot-toast";
 
 export type ThemeMode = "dark" | "light";
 
@@ -23,6 +30,7 @@ export default function App() {
 
   return (
     <NotificationProvider>
+      <Toaster position="top-right" toastOptions={{ style: { background: '#18181b', color: '#fafafa', border: '1px solid #3f3f46', borderRadius: '12px' } }} />
       <BrowserRouter>
         <Routes>
           <Route
@@ -69,7 +77,7 @@ export default function App() {
               />
             }
           />
-          <Route
+          {/* <Route
             path="/shop"
             element={
               <ShopDashboard
@@ -79,10 +87,21 @@ export default function App() {
                 }
               />
             }
-          />
+          /> */}
           <Route path="/auth/otp" element={<AuthOtpPage />} />
+
+          {/* ── Brand Dashboard ── */}
+          <Route path="/brand/login" element={<BrandLoginPage />} />
+          <Route path="/brand" element={<BrandLayout />}>
+            <Route path="dashboard" element={<BrandDashboardPage />} />
+            <Route path="offers" element={<BrandOffersPage />} />
+            <Route path="outlets" element={<BrandOutletsPage />} />
+            <Route path="outlets/:outletId/workers" element={<BrandWorkersPage />} />
+            <Route path="coupons" element={<BrandCouponsPage />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </NotificationProvider>
   );
 }
+

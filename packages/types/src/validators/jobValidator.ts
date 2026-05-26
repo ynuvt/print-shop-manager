@@ -24,6 +24,7 @@ const JobUpdateSchema = z.object({
   id: z.string(),
   status: z.enum(JobStatusEnum),
   userId: z.string(),
+  shopId: z.string().optional(),
 });
 export type JobUpdate = z.infer<typeof JobUpdateSchema>;
 export type Job = z.infer<typeof JobSchema>;

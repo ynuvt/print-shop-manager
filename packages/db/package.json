@@ -17,15 +17,18 @@
     "users:restore": "node --loader ts-node/esm scripts/restoreUserData.ts",
     "db:backup": "node --loader ts-node/esm scripts/backupFullDb.ts",
     "db:restore": "node --loader ts-node/esm scripts/restoreFullDb.ts",
+    "db:seed-brand": "node --loader ts-node/esm scripts/seedBrand.ts",
     "update:printoption": "node --loader ts-node/esm scripts/updatePrintOption.ts",
-    "build": "npx prisma migrate dev && npx tsc -b",
+    "build": "npx prisma generate && npx tsc -b",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@prisma/client": "^6.19.2"
+    "@prisma/client": "^6.19.2",
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^3.0.3"
   },
   "devDependencies": {
     "@types/node": "^25.4.0",

@@ -114,14 +114,60 @@ export async function updateJobStatus(
   id: string,
   userId: string,
   status: "PROCESSING" | "COMPLETED" | "REJECTED" | "FAILED" | "CANCELED",
+  shopId?: string,
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/update-status/${id}`, {
     method: "PUT",
     headers: buildHeaders(),
-    body: JSON.stringify({ status, userId }),
+    body: JSON.stringify({ status, userId, shopId }),
   });
 
   if (!res.ok) {
     throw new Error(`Failed to update status (HTTP ${res.status}).`);
   }
 }
+
+export interface PrintShopInfo {
+  id: string;
+  username: string;
+  shopId: string;
+}
+
+export async function fetchActiveShops(): Promise<PrintShopInfo[]> {
+  const res = await fetch(`${API_BASE}/jobs/shops`, {
+    headers: buildHeaders(),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load shops (HTTP ${res.status}).`);
+  }
+
+  const data = await res.json();
+  return data.shops as PrintShopInfo[];
+}
+
+export async function shopLogin(
+  username: string,
+  password: string,
+): Promise<{ token: string; shop: PrintShopInfo }> {
+  const res = await fetch(`${API_BASE}/auth/shop-login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || "Login failed");
+  }
+
+  const data = await res.json();
+  const tokenString = typeof data.token === "object" && data.token !== null && "token" in data.token
+    ? (data.token as any).token
+    : data.token;
+
+  return { token: tokenString, shop: data.shop };
+}
+

@@ -289,6 +289,7 @@ async function buildPrintJobCreateDataFromProcessedFiles(
             customRange: file.option.customRange,
             duplex: mapDuplex(file.option.duplex),
             copies: file.option.copies,
+            pagesPerSheet: file.option.pagesPerSheet || 1,
           },
         },
       })),
@@ -1379,10 +1380,28 @@ app.get("/all", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
+app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
+  try {
+    const shops = await prisma.printShop.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        username: true,
+        shopId: true,
+      },
+      orderBy: { username: "asc" },
+    });
+    res.status(200).json({ shops });
+  } catch (error) {
+    console.error("[jobs/shops] Error:", error);
+    res.status(500).json({ error: "Failed to fetch active print shops." });
+  }
+});
+
 app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
   const { id } = req.params;
-  const { status, userId } = req.body;
-  const schema = JobUpdateSchema.safeParse({ id, status, userId });
+  const { status, userId, shopId } = req.body;
+  const schema = JobUpdateSchema.safeParse({ id, status, userId, shopId });
   if (!schema.success) {
     return res.status(400).json({ error: schema.error });
   }
@@ -1390,7 +1409,10 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
   try {
     job = await prisma.printJob.update({
       where: { id: schema.data.id },
-      data: { status: mapStatus(status) },
+      data: { 
+        status: mapStatus(status),
+        ...(schema.data.shopId && { shopId: schema.data.shopId }),
+      },
       include: {
         files: {
           select: { url: true },
@@ -1402,6 +1424,30 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
       await Promise.allSettled(
         job.files.map((file) => deleteObjectFromR2ByUrl(file.url)),
       );
+    }
+
+    // ─── COUPON ASSIGNMENT ON COMPLETED ───────────────────────────────
+    // When a job is completed, evaluate rules and assign coupons if eligible.
+    if (status === "COMPLETED" && job.userId) {
+      try {
+        const { evaluateRules } = await import("../modules/couponRules.js");
+        const { assignCouponsToUser } = await import("../modules/couponService.js");
+
+        const ruleResult = await evaluateRules({
+          userId: job.userId,
+          printJobId: job.id,
+          totalCost: job.totalCost,
+        });
+
+        if (ruleResult.eligible) {
+          // Fire-and-forget: don't block the status update response
+          assignCouponsToUser(job.userId).catch((err) =>
+            console.error("[coupon] Assignment failed:", err),
+          );
+        }
+      } catch (err) {
+        console.error("[coupon] Rule evaluation failed:", err);
+      }
     }
 
     res.status(200).json(job);
@@ -1848,10 +1894,9 @@ app.post(
   "/submit-whatsapp-job",
   authMiddleware(["customer"]),
   async (req: ExtendedRequest, res) => {
-    const { jobId, files, globalColorMode } = req.body as {
+    const { jobId, files } = req.body as {
       jobId?: string;
       files?: Array<{ id: string; options: unknown }>;
-      globalColorMode?: "BW" | "COLOR";
     };
     const userId = req.user!.uid;
 
@@ -1931,8 +1976,6 @@ app.post(
         return res.status(404).json({ error: "Job not found." });
       }
 
-      const finalColorMode = globalColorMode || (job as any).colorMode || "BW";
-
       if (job.status !== PrintJobStatus.DRAFT) {
         return res
           .status(403)
@@ -1987,7 +2030,7 @@ app.post(
 
         const cost = calculateFileCost(existing.pages, {
           paperSize: file.options.paperSize,
-          colorMode: finalColorMode || file.options.colorMode,
+          colorMode: file.options.colorMode,
           orientation: file.options.orientation,
           scaleMode: file.options.scaleMode,
           pageRange: file.options.pageRange,
@@ -2022,13 +2065,14 @@ app.post(
             where: { id: entry.optionId },
             data: {
               copies: entry.options.copies,
-              colorMode: mapColorModeToEnum(finalColorMode || entry.options.colorMode),
+              colorMode: mapColorModeToEnum(entry.options.colorMode),
               orientation: mapOrientationToEnum(entry.options.orientation),
               scaleMode: mapScaleModeToEnum(entry.options.scaleMode),
               duplex: mapDuplexToEnum(entry.options.duplex),
               paperSize: entry.options.paperSize,
               pageRange: entry.options.pageRange,
               customRange: entry.options.customRange,
+              pagesPerSheet: entry.options.pagesPerSheet || 1,
             },
           });
         }
@@ -2049,6 +2093,8 @@ app.post(
           }
         }
 
+        const isJobColor = updateEntries.some((e) => e.options.colorMode === "COLOR");
+
         await tx.printJob.update({
           where: { id: jobId },
           data: {
@@ -2057,7 +2103,7 @@ app.post(
             totalCost,
             estimatedTime: calculateEstimatedTime(totalPages),
             status: PrintJobStatus.PENDING,
-            colorMode: finalColorMode === "COLOR" ? "COLOR" : "BW",
+            colorMode: isJobColor ? "COLOR" : "BW",
             verificationCode: code,
           },
         });

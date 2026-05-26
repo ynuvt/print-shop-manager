@@ -5,6 +5,7 @@ import {
   UserEventType,
   Source,
 } from "../../../../packages/db/dist/generated/prisma/enums.js";
+import { authMiddleware } from "../middleware/authMiddleware.js";
 
 const app = express.Router();
 
@@ -57,7 +58,7 @@ function buildCreatedAtFilter(range: DateRange | null) {
   };
 }
 
-app.get("/summary", async (req, res) => {
+app.get("/summary", authMiddleware(["admin"]), async (req, res) => {
   let dateRange: DateRange | null;
 
   try {
@@ -68,19 +69,26 @@ app.get("/summary", async (req, res) => {
   }
 
   const createdAtFilter = buildCreatedAtFilter(dateRange);
+  const shopId = typeof req.query.shopId === "string" && req.query.shopId !== "all" ? req.query.shopId : undefined;
 
   try {
     // 1. Status breakdown
     const statusGroups = await prisma.printJob.groupBy({
       by: ["status"],
-      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { shopId } : {}),
+      },
       _count: { _all: true },
       _sum: { totalCost: true, totalPages: true },
     });
     // 2. Source breakdown (Web vs WhatsApp)
     const sourceGroups = await prisma.printJob.groupBy({
       by: ["source"],
-      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { shopId } : {}),
+      },
       _count: { _all: true },
       _sum: { totalCost: true, totalPages: true },
     });
@@ -89,6 +97,7 @@ app.get("/summary", async (req, res) => {
       where: {
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
         status: PrintJobStatus.COMPLETED,
+        ...(shopId ? { shopId } : {}),
       },
       _sum: { totalCost: true, totalPages: true },
       _count: { _all: true },
@@ -99,6 +108,7 @@ app.get("/summary", async (req, res) => {
       where: {
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
         expired: true,
+        ...(shopId ? { shopId } : {}),
       },
       _count: { _all: true },
     });
@@ -107,6 +117,7 @@ app.get("/summary", async (req, res) => {
       where: {
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
         status: PrintJobStatus.COMPLETED,
+        ...(shopId ? { shopId } : {}),
       },
       select: {
         createdAt: true,
@@ -154,7 +165,9 @@ app.get("/summary", async (req, res) => {
 
     // Calculate daily series
     const dailySeries = dailyStats.reduce<Record<string, any>>((acc, job) => {
-      const day = job.createdAt.toISOString().slice(0, 10);
+      // Convert UTC to IST (+5:30) for daily trend grouping
+      const istDate = new Date(job.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const day = istDate.toISOString().slice(0, 10);
       if (!acc[day]) acc[day] = { revenue: 0, pages: 0, count: 0 };
       acc[day].revenue += job.totalCost;
       acc[day].pages += job.totalPages;
@@ -179,7 +192,10 @@ app.get("/summary", async (req, res) => {
 
     // 8. File type breakdown (extension based as mimeType might be generic)
     const fileStats = await prisma.file.findMany({
-      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { printJob: { shopId } } : {}),
+      },
       select: { name: true },
     });
 
@@ -232,7 +248,8 @@ app.get("/summary", async (req, res) => {
             where: { 
               source: Source.WHATSAPP, 
               userMetadataId: { not: null },
-              ...(createdAtFilter ? { createdAt: createdAtFilter } : {})
+              ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+              ...(shopId ? { shopId } : {})
             } 
           })).length : 0, // Unique phone numbers that sent files
       },
@@ -246,7 +263,7 @@ app.get("/summary", async (req, res) => {
 });
 
 
-app.get("/users", async (req, res) => {
+app.get("/users", authMiddleware(["admin"]), async (req, res) => {
   let dateRange: DateRange | null;
 
   try {
@@ -257,16 +274,23 @@ app.get("/users", async (req, res) => {
   }
 
   const createdAtFilter = buildCreatedAtFilter(dateRange);
+  const shopId = typeof req.query.shopId === "string" && req.query.shopId !== "all" ? req.query.shopId : undefined;
 
   try {
     // 1. New users created in the period
     const totalUsers = await prisma.user.count({
-      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { printJobs: { some: { shopId } } } : {}),
+      },
     });
     // 2. Onboarding status breakdown for NEW users created in this period
     const onboardingGroups = await prisma.user.groupBy({
       by: ["onboardingCompleted"],
-      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { printJobs: { some: { shopId } } } : {}),
+      },
       _count: { _all: true },
     });
     // 3. Skip events in the period
@@ -274,6 +298,7 @@ app.get("/users", async (req, res) => {
       where: {
         type: UserEventType.ONBOARDING_SKIPPED,
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { user: { printJobs: { some: { shopId } } } } : {}),
       },
     });
     // 4. Total unique users who were active (created a job) in this period
@@ -282,6 +307,7 @@ app.get("/users", async (req, res) => {
       where: {
         userId: { not: null },
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { shopId } : {}),
       },
     });
     // 5. New users created in this period who also did a job in this same period (Activation)
@@ -290,18 +316,24 @@ app.get("/users", async (req, res) => {
       where: {
         userId: { not: null },
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { shopId } : {}),
         user: {
           createdAt: createdAtFilter ? createdAtFilter : undefined,
         },
       },
     });
+
     // 6. Repeat customers active in this period
     // (Completed a job in period AND had at least one completed job before the period)
     // If overall, just users with > 1 completed job total.
     const repeatUsers = await (!dateRange ? 
       prisma.printJob.groupBy({
         by: ["userId"],
-        where: { userId: { not: null }, status: PrintJobStatus.COMPLETED },
+        where: { 
+          userId: { not: null }, 
+          status: PrintJobStatus.COMPLETED,
+          ...(shopId ? { shopId } : {}),
+        },
         having: { userId: { _count: { gt: 1 } } }
       }) :
       prisma.printJob.groupBy({
@@ -310,11 +342,13 @@ app.get("/users", async (req, res) => {
           userId: { not: null },
           status: PrintJobStatus.COMPLETED,
           createdAt: createdAtFilter,
+          ...(shopId ? { shopId } : {}),
           user: {
             printJobs: {
               some: {
                 status: PrintJobStatus.COMPLETED,
-                createdAt: { lt: dateRange.start }
+                createdAt: { lt: dateRange.start },
+                ...(shopId ? { shopId } : {}),
               }
             }
           }
@@ -359,8 +393,8 @@ app.get("/users", async (req, res) => {
   }
 });
 
-app.get("/user-activity/:userId", async (req, res) => {
-  const { userId } = req.params;
+app.get("/user-activity/:userId", authMiddleware(["admin"]), async (req, res) => {
+  const userId = req.params.userId as string;
 
   try {
     const userJobs = await prisma.printJob.findMany({
@@ -405,7 +439,7 @@ app.get("/user-activity/:userId", async (req, res) => {
   }
 });
 
-app.get("/insights", async (req, res) => {
+app.get("/insights", authMiddleware(["admin"]), async (req, res) => {
   let dateRange: DateRange | null;
   try {
     dateRange = parseDateQuery(req.query);
@@ -413,25 +447,41 @@ app.get("/insights", async (req, res) => {
     return res.status(400).json({ error: "Invalid date query." });
   }
   const createdAtFilter = buildCreatedAtFilter(dateRange);
+  const shopId = typeof req.query.shopId === "string" && req.query.shopId !== "all" ? req.query.shopId : undefined;
 
   try {
     const allJobs = await prisma.printJob.findMany({
       where: { 
         status: PrintJobStatus.COMPLETED,
-        ...(createdAtFilter ? { createdAt: createdAtFilter } : {})
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { shopId } : {}),
       },
       select: { createdAt: true, totalCost: true },
     });
     
     const allUsers = await prisma.user.findMany({
-      where: createdAtFilter ? { createdAt: createdAtFilter } : {},
-      select: { id: true, createdAt: true, printJobs: { select: { createdAt: true } } },
+      where: {
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { printJobs: { some: { shopId } } } : {}),
+      },
+      select: { 
+        id: true, 
+        createdAt: true, 
+        printJobs: { 
+          where: {
+            status: PrintJobStatus.COMPLETED,
+            ...(shopId ? { shopId } : {}),
+          },
+          select: { createdAt: true } 
+        } 
+      },
     });
 
     const totalRevenueData = await prisma.printJob.aggregate({
       where: { 
         status: PrintJobStatus.COMPLETED,
-        ...(createdAtFilter ? { createdAt: createdAtFilter } : {})
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(shopId ? { shopId } : {}),
       },
       _sum: { totalCost: true },
     });
@@ -439,7 +489,9 @@ app.get("/insights", async (req, res) => {
     // Peak Hours Calculation
     const peakHours = new Array(24).fill(0);
     allJobs.forEach((job) => {
-      const hour = job.createdAt.getHours();
+      // Convert UTC to IST (+5:30) for peak hours analysis
+      const istDate = new Date(job.createdAt.getTime() + (5.5 * 60 * 60 * 1000));
+      const hour = istDate.getUTCHours();
       peakHours[hour]++;
     });
 
@@ -484,6 +536,118 @@ app.get("/insights", async (req, res) => {
   } catch (error) {
     console.error("[analysis/insights] Error:", error);
     res.status(500).json({ error: "Failed to fetch advanced insights." });
+  }
+});
+
+app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
+  let dateRange: DateRange | null;
+  try {
+    dateRange = parseDateQuery(req.query);
+  } catch (error) {
+    return res.status(400).json({ error: "Invalid date query." });
+  }
+  const createdAtFilter = buildCreatedAtFilter(dateRange);
+
+  try {
+    const shops = await prisma.printShop.findMany({
+      orderBy: { username: "asc" },
+    });
+
+    // Aggregate completed job stats per shop
+    const stats = await prisma.printJob.groupBy({
+      by: ["shopId"],
+      where: { 
+        status: "COMPLETED", 
+        shopId: { not: null },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      _sum: {
+        totalPages: true,
+        totalCost: true,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    const statsMap = new Map(
+      stats.map((s) => [s.shopId, {
+        completedCount: s._count.id,
+        totalPages: s._sum.totalPages || 0,
+        revenue: s._sum.totalCost || 0,
+      }])
+    );
+
+    const shopsWithStats = shops.map((shop) => {
+      const s = statsMap.get(shop.shopId) || { completedCount: 0, totalPages: 0, revenue: 0 };
+      return {
+        id: shop.id,
+        username: shop.username,
+        shopId: shop.shopId,
+        isActive: shop.isActive,
+        createdAt: shop.createdAt,
+        completedJobsCount: s.completedCount,
+        totalPagesPrinted: s.totalPages,
+        totalRevenue: s.revenue,
+      };
+    });
+
+    // Sort by completedJobsCount desc (leaderboard order)
+    shopsWithStats.sort((a, b) => b.completedJobsCount - a.completedJobsCount);
+
+    res.json({ shops: shopsWithStats });
+  } catch (error) {
+    console.error("[analysis/shops] Error:", error);
+    res.status(500).json({ error: "Failed to fetch shop statistics." });
+  }
+});
+
+app.post("/shops", authMiddleware(["admin"]), async (req, res) => {
+  try {
+    const { username, password, shopId } = req.body;
+    if (!username || !password || !shopId) {
+      return res.status(400).json({ error: "username, password, and shopId are required." });
+    }
+
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanShopId = shopId.trim().toUpperCase();
+
+    const existingUsername = await prisma.printShop.findUnique({
+      where: { username: cleanUsername },
+    });
+    if (existingUsername) {
+      return res.status(409).json({ error: "Username already exists." });
+    }
+
+    const existingShopId = await prisma.printShop.findUnique({
+      where: { shopId: cleanShopId },
+    });
+    if (existingShopId) {
+      return res.status(409).json({ error: "Shop ID already exists." });
+    }
+
+    const { default: bcrypt } = await import("bcryptjs");
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const shop = await prisma.printShop.create({
+      data: {
+        username: cleanUsername,
+        password: hashedPassword,
+        shopId: cleanShopId,
+        isActive: true,
+      },
+    });
+
+    res.status(201).json({
+      id: shop.id,
+      username: shop.username,
+      shopId: shop.shopId,
+      isActive: shop.isActive,
+      createdAt: shop.createdAt,
+    });
+  } catch (error) {
+    console.error("[analysis/shops] Create error:", error);
+    res.status(500).json({ error: "Failed to create print shop." });
   }
 });
 

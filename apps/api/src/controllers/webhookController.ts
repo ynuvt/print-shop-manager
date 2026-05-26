@@ -1192,6 +1192,74 @@ Please try again.`,
               continue;
             }
 
+            // ─── COUPON / REDEEM HANDLER ─────────────────────────────────────
+            // Detect coupon:CODE and redeem:CODE messages from outlet workers.
+            // These are processed BEFORE regular user commands since workers
+            // may not be synced Zopy users.
+            const couponMatch = incomingMessage.text?.body?.trim().match(/^coupon:(.+)$/i)
+              || (messageText.startsWith("coupon:") ? [null, messageText.slice(7)] : null);
+            const redeemMatch = incomingMessage.text?.body?.trim().match(/^redeem:(.+)$/i)
+              || (messageText.startsWith("redeem:") ? [null, messageText.slice(7)] : null);
+
+            if ((couponMatch || redeemMatch) && phoneNumberId && userData.displayPhoneNumber) {
+              try {
+                const { validateCoupon, redeemCoupon } = await import("../modules/couponService.js");
+                const { sendWhatsAppButtonMessage: sendBtn } = await import("../modules/whatsappServices.js");
+
+                if (couponMatch) {
+                  const code = (couponMatch[1] || "").trim();
+                  const result = await validateCoupon(code, userData.displayPhoneNumber);
+
+                  if (result.valid && result.coupon) {
+                    const discountText = result.coupon.discountType === "PERCENTAGE"
+                      ? `${result.coupon.discountValue}% OFF`
+                      : `₹${result.coupon.discountValue} OFF`;
+
+                    await sendBtn({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      body: [
+                        `✅ *Coupon Valid!*`,
+                        ``,
+                        `🏪 Brand: *${result.coupon.brandName}*`,
+                        `💰 Discount: *${discountText}*`,
+                        `${result.coupon.description ? `📝 ${result.coupon.description}` : ""}`,
+                        `📅 Valid until: ${result.coupon.validUntil.toLocaleDateString("en-IN")}`,
+                        ``,
+                        `Tap below to redeem this coupon.`,
+                      ].join("\n"),
+                      buttons: [
+                        { type: "reply", reply: { id: `redeem:${code}`, title: "🎉 Redeem Coupon" } },
+                      ],
+                    });
+                  } else {
+                    await sendWhatsAppTextMessage({
+                      to: userData.displayPhoneNumber,
+                      phoneNumberId,
+                      message: result.message,
+                    });
+                  }
+                } else if (redeemMatch) {
+                  const code = (redeemMatch[1] || "").trim();
+                  const result = await redeemCoupon(code, userData.displayPhoneNumber);
+
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    message: result.message,
+                  });
+                }
+              } catch (err) {
+                console.error("[coupon-webhook] Error:", err);
+                await sendWhatsAppTextMessage({
+                  to: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  message: "❌ Something went wrong processing the coupon. Please try again.",
+                });
+              }
+              continue;
+            }
+
             // ── Fast auth check ──────────────────────────────────────────────
             // We need to know if the user is synced (has a userId) to decide
             // whether to show the sync link or process commands.

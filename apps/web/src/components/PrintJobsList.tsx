@@ -61,18 +61,6 @@ function FileOptionCard({
   const colorLabel =
     opt?.colorMode === "COLOR" ? "Color" : "B\u0026W";
   const duplexLabel = opt?.duplex === "BOTH" ? "Both Sides" : "One Side";
-  const rangeLabel =
-    opt?.pageRange === "CUSTOM" && opt?.customRange
-      ? `${opt.customRange}`
-      : "All Pages";
-  const orientationLabel =
-    opt?.orientation === "LANDSCAPE" ? "Landscape" : "Portrait";
-  const scaleLabel =
-    opt?.scaleMode === "SHRINK"
-      ? "Shrink"
-      : opt?.scaleMode === "NOSCALE"
-        ? "No Scale"
-        : "Fit";
   const paperLabel = opt?.paperSize ?? "A4";
 
   return (
@@ -97,10 +85,13 @@ function FileOptionCard({
             {colorLabel}
           </span>
           <span className="job-chip">{duplexLabel}</span>
-          <span className="job-chip">{orientationLabel}</span>
-          <span className="job-chip">{scaleLabel}</span>
           <span className="job-chip">{paperLabel}</span>
-          <span className="job-chip">Pages: {rangeLabel}</span>
+          {opt.pageRange === "CUSTOM" && opt.customRange && (
+            <span className="job-chip">Pages: {opt.customRange}</span>
+          )}
+          {opt.pagesPerSheet && opt.pagesPerSheet > 1 && (
+            <span className="job-chip">{opt.pagesPerSheet}-up</span>
+          )}
           {(opt.copies ?? 1) > 1 && (
             <span className="job-chip job-chip--copies">{opt.copies}x copies</span>
           )}

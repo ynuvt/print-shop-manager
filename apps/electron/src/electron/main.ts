@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -606,6 +606,16 @@ ipcMain.handle(
           JSON.stringify(normalizedOptions, null, 2),
         );
         await new Promise((r) => setTimeout(r, 500)); // simulate spooler delay
+
+        dialog.showMessageBox({
+          type: "info",
+          title: "Dry Run Print Simulation",
+          message: `Dry Run Print: ${path.basename(filePath)}`,
+          detail: `Printer: ${printer}\n\nApplied Options:\n${Object.entries(normalizedOptions)
+            .map(([key, val]) => `- ${key}: ${typeof val === "object" ? JSON.stringify(val) : val}`)
+            .join("\n")}`,
+          buttons: ["OK"],
+        }).catch(err => console.error("Failed to show dry-run dialog:", err));
       } else if (isImageFile(filePath)) {
         // Images: route directly to webContents with HTML wrapper.
         console.log(`[IMAGE] Detected image file: ${path.basename(filePath)} — using webContents.print directly`);
@@ -788,6 +798,24 @@ ipcMain.handle(
     files: any[],
     meta?: { printRunId?: string },
   ) => {
+    if (DRY_RUN) {
+      console.log(`\n=== [DRY RUN BATCH PRINT START] ===`);
+      console.log(`Printer: ${printer}`);
+      files.forEach((f, idx) => {
+        console.log(`File [${idx + 1}/${files.length}]: ${path.basename(f.path || f.filePath || "unknown")}`);
+        console.log(`Options:`, JSON.stringify(f, null, 2));
+      });
+      console.log(`===================================\n`);
+
+      try {
+        const receiptPath = path.join(app.getPath("userData"), "mock-print-receipt.json");
+        fs.writeFileSync(receiptPath, JSON.stringify({ printer, files, timestamp: new Date() }, null, 2));
+        console.log(`[DRY RUN] Mock print receipt saved to: ${receiptPath}`);
+      } catch (err) {
+        console.error("Failed to write mock print receipt file:", err);
+      }
+    }
+
     if (process.platform === "win32") {
       const exePath = getZopyPrinterPath();
       if (fs.existsSync(exePath)) {
@@ -827,6 +855,27 @@ ipcMain.handle(
         percent: 100,
         printRunId: meta?.printRunId
       });
+    }
+
+    if (DRY_RUN) {
+      const details = files.map((f, idx) => {
+        return `File ${idx + 1}: ${path.basename(f.path || f.filePath || "unknown")}\n` +
+               `- Copies: ${f.copies || 1}\n` +
+               `- Color Mode: ${f.colorMode || "BW"}\n` +
+               `- Duplex: ${f.duplex || "ONE"}\n` +
+               `- Orientation: ${f.orientation || "PORTRAIT"}\n` +
+               `- Scale: ${f.scale || "fit"}\n` +
+               `- Pages: ${f.pages || "ALL"}\n` +
+               `- PagesPerSheet: ${f.pagesPerSheet || 1}`;
+      }).join("\n\n");
+
+      dialog.showMessageBox({
+        type: "info",
+        title: "Dry Run Print Simulation Result",
+        message: `Simulated batch print of ${files.length} file(s) to "${printer}"`,
+        detail: `All options were mapped successfully:\n\n${details}`,
+        buttons: ["OK"]
+      }).catch(err => console.error("Failed to show dry-run dialog:", err));
     }
   }
 );

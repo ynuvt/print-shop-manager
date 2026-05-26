@@ -309,8 +309,6 @@ export default function HomePage({
   const [calloutStyle, setCalloutStyle] = useState<CSSProperties>({});
   const [walkthroughFileIndex, setWalkthroughFileIndex] = useState<number>(0);
   const [walkthroughAddedExtra, setWalkthroughAddedExtra] = useState(false);
-  const [globalColorMode] =
-    useState<PrintOptions["colorMode"]>("BW");
   const [printFiles, setPrintFiles] = useState<PrintFileState[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number[]>([]);
@@ -333,7 +331,6 @@ export default function HomePage({
     scaleMode: "FIT" as PrintOptions["scaleMode"],
     copies: 1,
     pagesPerSheet: 1,
-    colorMode: "BW" as PrintOptions["colorMode"],
   });
 
   const [uploadStage, setUploadStage] = useState<"uploading" | "converting" | "creating">(
@@ -769,8 +766,7 @@ export default function HomePage({
         }));
 
         const { job } = await addFilesToWebDraft(
-          urlFiles,
-          globalColorMode === "MIXED" ? undefined : globalColorMode
+          urlFiles
         );
         setDraftJobId(job.id);
         
@@ -837,7 +833,6 @@ export default function HomePage({
             scaleMode: globalOptions.scaleMode,
             copies: globalOptions.copies,
             pagesPerSheet: globalOptions.pagesPerSheet,
-            colorMode: globalOptions.colorMode,
           },
         };
       }),
@@ -982,7 +977,6 @@ export default function HomePage({
           id: pf.id!,
           options: pf.options,
         })),
-        globalColorMode,
       });
 
       setVerificationCode(String(result.verificationCode));
@@ -1221,7 +1215,7 @@ export default function HomePage({
               <div className="hero-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", marginBottom: "20px" }}>
                 <div>
                   <h1 style={{ margin: 0 }}>Upload Documents</h1>
-                  <p style={{ margin: "4px 0 0", opacity: 0.8 }}>Choose Color or B/W once, then set options per file.</p>
+                  <p style={{ margin: "4px 0 0", opacity: 0.8 }}>Set your print options for each file individually.</p>
                 </div>
                 {!isWhatsappSynced && (
                   <button
@@ -1403,18 +1397,6 @@ export default function HomePage({
                     {showGlobalOptions && (
                       <div className="global-options-body">
                         <div className="global-options-fields">
-                          <div>
-                            <p className="field-label">Color Mode</p>
-                            <ToggleGroup
-                              options={[
-                                { label: "B/W", value: "BW" },
-                                { label: "Color", value: "COLOR" },
-                              ]}
-                              value={globalOptions.colorMode}
-                              onChange={(v) => setGlobalOptions((p) => ({ ...p, colorMode: v }))}
-                            />
-                          </div>
-
                           <div>
                             <p className="field-label">Print Sides</p>
                             <ToggleGroup

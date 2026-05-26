@@ -5,6 +5,9 @@ import userRoutes from "./userRoutes.js";
 import fileRoutes from "./fileRoutes.js";
 import analysisRoutes from "./analysisRoutes.js";
 import maintenanceRoutes from "./maintenanceRoutes.js";
+import brandAuthRoutes from "./brandAuthRoutes.js";
+import brandRoutes from "./brandRoutes.js";
+import couponRoutes from "./couponRoutes.js";
 const app = express.Router();
 
 app.use("/auth", authRoutes);
@@ -13,5 +16,8 @@ app.use("/users", userRoutes);
 app.use("/files", fileRoutes);
 app.use("/analysis", analysisRoutes);
 app.use("/maintenance", maintenanceRoutes);
+app.use("/brand-auth", brandAuthRoutes);
+app.use("/brand", brandRoutes);
+app.use("/coupons", couponRoutes);
 app.use("/webhooks", (await import("./webhookRoutes.js")).default);
 export default app;

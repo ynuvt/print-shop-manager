@@ -58,7 +58,6 @@ export default function HomeScreen() {
   const [userId, setUserId] = useState<string | null>(getUserId());
   const [isWhatsappSynced, setIsWhatsappSynced] = useState(false);
   const [showSyncModal, setShowSyncModal] = useState(false);
-  const [globalColorMode, setGlobalColorMode] = useState<PrintOptions["colorMode"]>("BW");
   const [printFiles, setPrintFiles] = useState<PrintFileState[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
@@ -364,11 +363,6 @@ export default function HomeScreen() {
     }
   }, [draftJobId]);
 
-  const applyGlobalColor = useCallback((mode: PrintOptions["colorMode"]) => {
-    setGlobalColorMode(mode);
-    setPrintFiles((prev) => prev.map((f) => ({ ...f, options: { ...f.options, colorMode: mode } })));
-  }, []);
-
   // ── Submit ──
   const onSubmit = async () => {
     if (!userId || !printFiles.length || isSubmitting || !draftJobId) return;
@@ -419,7 +413,7 @@ export default function HomeScreen() {
         <View style={[styles.panel, { borderColor: colors.border, backgroundColor: colors.panel }]}>
           <Text style={[styles.h1, { color: colors.text }]}>Upload Documents</Text>
           <Text style={{ color: colors.textMuted, fontSize: 14, marginBottom: 8 }}>
-            Choose Color or B/W once, then set options per file.
+            Set your print options for each file individually.
           </Text>
 
           {verificationCode ? (
@@ -495,18 +489,6 @@ export default function HomeScreen() {
               {printFiles.length > 0 && (
                 <>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>File Options</Text>
-
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Print Type (all files)</Text>
-                    <ToggleGroup
-                      options={[
-                        { label: "Color Print", value: "COLOR" },
-                        { label: "B/W Print", value: "BW" },
-                      ]}
-                      value={globalColorMode}
-                      onChange={applyGlobalColor}
-                    />
-                  </View>
 
                   <View style={{ gap: 8 }}>
                     {printFiles.map((pf, idx) => (

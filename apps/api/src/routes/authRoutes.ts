@@ -1,5 +1,6 @@
 import express from "express";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
 import { prisma } from "@printowl/db";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
@@ -74,6 +75,43 @@ router.post("/admin-login", (req, res) => {
     });
   } else {
     res.status(401).json({ error: "Invalid admin credentials." });
+  }
+});
+
+router.post("/shop-login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "username and password are required." });
+  }
+
+  try {
+    const shop = await prisma.printShop.findUnique({
+      where: { username: username.toLowerCase() },
+    });
+
+    if (!shop || !shop.isActive) {
+      return res.status(401).json({ error: "Invalid username or password, or shop is inactive." });
+    }
+
+    const valid = await bcrypt.compare(password, shop.password);
+    if (!valid) {
+      return res.status(401).json({ error: "Invalid username or password." });
+    }
+
+    const { token } = generateUserToken("admin");
+
+    res.status(200).json({
+      message: "Shop login successful!",
+      token,
+      shop: {
+        id: shop.id,
+        username: shop.username,
+        shopId: shop.shopId,
+      },
+    });
+  } catch (error) {
+    console.error("[shop-login] Error:", error);
+    res.status(500).json({ error: "Failed to login." });
   }
 });
 

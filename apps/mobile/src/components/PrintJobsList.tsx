@@ -64,11 +64,6 @@ function FileOptionCard({ file }: { file: UserPrintJobFile }) {
   const opt = file.option;
   const colorLabel = opt?.colorMode === "COLOR" ? "Color" : "B&W";
   const duplexLabel = opt?.duplex === "BOTH" ? "Both Sides" : "One Side";
-  const rangeLabel =
-    opt?.pageRange === "CUSTOM" && opt?.customRange ? opt.customRange : "All Pages";
-  const orientLabel = opt?.orientation === "LANDSCAPE" ? "Landscape" : "Portrait";
-  const scaleLabel =
-    opt?.scaleMode === "NOSCALE" ? "No Scale" : opt?.scaleMode === "SHRINK" ? "Shrink" : "Fit";
 
   return (
     <View style={[styles.fileCard, { borderColor: colors.border, backgroundColor: colors.panelMuted }]}>
@@ -85,9 +80,9 @@ function FileOptionCard({ file }: { file: UserPrintJobFile }) {
         <View style={styles.chipRow}>
           <FileChip label={colorLabel} accent={opt.colorMode === "COLOR"} />
           <FileChip label={duplexLabel} />
-          <FileChip label={orientLabel} />
-          <FileChip label={scaleLabel} />
-          <FileChip label={`Pages: ${rangeLabel}`} />
+          {opt.pageRange === "CUSTOM" && opt.customRange && (
+            <FileChip label={`Pages: ${opt.customRange}`} />
+          )}
           {(opt.copies ?? 1) > 1 && <FileChip label={`${opt.copies}x`} accent />}
           {opt.pagesPerSheet && opt.pagesPerSheet > 1 && <FileChip label={`${opt.pagesPerSheet}-up`} accent />}
         </View>

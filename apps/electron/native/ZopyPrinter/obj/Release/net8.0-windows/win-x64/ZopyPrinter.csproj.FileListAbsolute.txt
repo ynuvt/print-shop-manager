@@ -197,3 +197,6 @@
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/refint/ZopyPrinter.dll
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.genruntimeconfig.cache
 /Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ref/ZopyPrinter.dll
+/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.sourcelink.json
+/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/bin/Release/net8.0-windows/win-x64/ZopyPrinter.pdb
+/Users/aryanrathore/Documents/printowl/printowl/apps/electron/native/ZopyPrinter/obj/Release/net8.0-windows/win-x64/ZopyPrinter.pdb

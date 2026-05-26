@@ -36,3 +36,13 @@ export function generateTokenForUser(
 
   return { token: jwt.sign(payload, getJwtSecret()), userId };
 }
+
+export function generateBrandToken(brandId: string) {
+  const payload = {
+    uid: brandId,
+    createdAt: Date.now(),
+    role: "brand" as const,
+  };
+
+  return { token: jwt.sign(payload, getJwtSecret()), brandId };
+}

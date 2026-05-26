@@ -182,6 +182,8 @@ model PrintJob {
   colorMode        ColorMode      @default(BW)
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
+  shopId           String?
+  shop             PrintShop?     @relation(fields: [shopId], references: [shopId], onDelete: SetNull, map: "printjob_shopId_fkey")
 }
 
 model User {
@@ -192,6 +194,7 @@ model User {
   uploadedFiles        file[]      @relation("UserUploadedFiles")
   events               UserEvent[]
   whatsAppUser         WhatsAppUser?
+  coupons              Coupon[]
   name                  String?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
@@ -232,3 +235,158 @@ model MobileSyncOtp {
   usedAt      DateTime?
   createdAt   DateTime  @default(now())
 }
+
+// ─── COUPON SYSTEM ──────────────────────────────────────────────────────────────
+
+enum BrandPlan {
+  STANDARD  // ₹499/mo
+  PRO       // ₹999/mo
+  PRO_PLUS  // ₹1299/mo
+}
+
+enum OfferType {
+  FIRST_TIME // Big discount for new customers
+  RETURNING  // Smaller discount for repeat customers
+}
+
+enum CampaignType {
+  COUPON
+  ADVERTISEMENT
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FLAT
+}
+
+enum CouponStatus {
+  ACTIVE
+  REDEEMED
+  EXPIRED
+  REVOKED
+}
+
+model Brand {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  logo      String?
+  email     String    @unique
+  password  String
+  plan      BrandPlan @default(STANDARD)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  outlets   Outlet[]
+  offers    BrandOffer[]
+  coupons   Coupon[]
+}
+
+model Outlet {
+  id         String   @id @default(uuid())
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  name       String
+  address    String?
+  outletCode String   @unique
+  latitude   Float?
+  longitude  Float?
+  mapLink    String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  workers     OutletWorker[]
+  redemptions CouponRedemption[]
+  coupons     Coupon[]
+
+  @@index([brandId])
+}
+
+model OutletWorker {
+  id          String   @id @default(uuid())
+  phoneNumber String   @unique
+  name        String
+  outletId    String
+  outlet      Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  redemptions CouponRedemption[]
+
+  @@index([outletId])
+}
+
+model BrandOffer {
+  id            String       @id @default(uuid())
+  brandId       String
+  brand         Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  offerType     OfferType
+  campaignType  CampaignType @default(COUPON)
+  name          String
+  description   String?
+  discountType  DiscountType
+  discountValue Float
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  imageUrl      String?
+
+  coupons Coupon[]
+
+  @@unique([brandId, offerType])
+}
+
+
+model Coupon {
+  id              String       @id @default(uuid())
+  code            String       @unique
+  brandId         String
+  brand           Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  offerId         String
+  offer           BrandOffer   @relation(fields: [offerId], references: [id])
+  userId          String
+  user            User         @relation(fields: [userId], references: [id])
+  nearestOutletId String?
+  nearestOutlet   Outlet?      @relation(fields: [nearestOutletId], references: [id])
+  discountType    DiscountType
+  discountValue   Float
+  description     String?
+  offerType       OfferType
+  status          CouponStatus @default(ACTIVE)
+  maxUses         Int          @default(1)
+  validUntil      DateTime
+  createdAt       DateTime     @default(now())
+
+  redemption CouponRedemption?
+
+  @@index([userId])
+  @@index([brandId])
+  @@index([status])
+  @@index([code])
+}
+
+model CouponRedemption {
+  id         String       @id @default(uuid())
+  couponId   String       @unique
+  coupon     Coupon       @relation(fields: [couponId], references: [id])
+  outletId   String
+  outlet     Outlet       @relation(fields: [outletId], references: [id])
+  workerId   String
+  worker     OutletWorker @relation(fields: [workerId], references: [id])
+  redeemedAt DateTime     @default(now())
+
+  @@index([outletId])
+  @@index([workerId])
+}
+
+
+model PrintShop {
+  id        String     @id @default(uuid())
+  username  String     @unique
+  password  String
+  shopId    String     @unique
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  printJobs PrintJob[]
+}
+ 

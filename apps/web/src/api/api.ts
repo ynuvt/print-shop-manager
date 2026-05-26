@@ -338,7 +338,6 @@ export async function addFilesToWebDraft(
 export async function submitWhatsappJobReview(input: {
   jobId: string;
   files: Array<{ id: string; options: PrintFileOption }>;
-  globalColorMode?: "BW" | "COLOR";
 }): Promise<{ verificationCode: number }> {
   const token = getToken();
   let res;
@@ -551,4 +550,33 @@ export async function updateGlobalColorMode(
   );
 
   if (!res.data) throw new Error("Failed to update global color mode");
+}
+
+export async function getPublicAdvertisements(): Promise<Array<{
+  id: string;
+  imageUrl: string;
+  title: string;
+  description: string | null;
+  couponCode: string | null;
+  discountType: string | null;
+  discountValue: number | null;
+  brand: { name: string; logo: string | null };
+}>> {
+  const token = getToken();
+  if (!token) return [];
+  const { data } = await axios.get(`${BASE_URL}/coupons/advertisements`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  return data.advertisements ?? [];
+}
+
+export async function claimCoupon(code: string): Promise<{ message: string; coupon: any }> {
+  const token = getToken();
+  if (!token) throw new Error("Please log in to claim this coupon.");
+  const { data } = await axios.post(
+    `${BASE_URL}/coupons/claim`,
+    { code },
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  return data;
 }

@@ -508,8 +508,7 @@ export default function JobModal({
                         opt.paperSize,
                         opt.colorMode === "COLOR" ? "Color" : "B&W",
                         opt.duplex === "BOTH" ? "Duplex" : "Single",
-                        opt.orientation === "LANDSCAPE" ? "Landscape" : "Portrait",
-                        ...(opt.pageRange === "CUSTOM" ? [opt.customRange || "Custom"] : []),
+                        ...(opt.pageRange === "CUSTOM" && opt.customRange ? [`Pages: ${opt.customRange}`] : []),
                         ...(opt.pagesPerSheet && opt.pagesPerSheet > 1 ? [`${opt.pagesPerSheet}-up`] : []),
                       ].map((tag) => (
                         <span

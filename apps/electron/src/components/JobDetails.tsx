@@ -131,7 +131,19 @@ export default function JobDetails({ job, loading }: JobDetailsProps) {
                 </span>
                 <span>·</span>
                 <span>{file.option.paperSize}</span>
-              </div>
+                {file.option.pageRange === "CUSTOM" && file.option.customRange && (
+                  <>
+                    <span>·</span>
+                    <span>Pages: {file.option.customRange}</span>
+                  </>
+                )}
+                {file.option.pagesPerSheet && file.option.pagesPerSheet > 1 && (
+                  <>
+                    <span>·</span>
+                    <span>{file.option.pagesPerSheet}-up</span>
+                  </>
+                )}
+              </div>x
             </li>
           ))}
         </ul>
