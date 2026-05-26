@@ -454,6 +454,8 @@ export default function App() {
             setSimFlatPerJob={setSimFlatPerJob}
             simGatewayCut={simGatewayCut}
             setSimGatewayCut={setSimGatewayCut}
+            startDate={startDate}
+            endDate={endDate}
           />
         )}
 
@@ -657,12 +659,16 @@ function RevenueSimulator({
   simFeePerBatch, setSimFeePerBatch,
   simFlatPerJob, setSimFlatPerJob,
   simGatewayCut, setSimGatewayCut,
+  startDate,
+  endDate,
 }: {
   summary: any; insights: any;
   simFileThreshold: number; setSimFileThreshold: (v: number) => void;
   simFeePerBatch: number; setSimFeePerBatch: (v: number) => void;
   simFlatPerJob: number; setSimFlatPerJob: (v: number) => void;
   simGatewayCut: number; setSimGatewayCut: (v: number) => void;
+  startDate: string;
+  endDate: string;
 }) {
   const totalJobs: number = summary.summary.totalCompletedJobs || 0;
   const totalRevenue: number = summary.summary.totalRevenue || 0;
@@ -675,205 +681,297 @@ function RevenueSimulator({
   const gatewayDeduction = grossTotal * (simGatewayCut / 100);
   const netRevenue = grossTotal - gatewayDeduction;
 
-  // Monthly projection (based on ratio of days in range)
-  const jobsPerDay = totalJobs > 0 ? totalJobs / 30 : 0;
+  // Calculate actual number of days in the selected date range to project correctly
+  const getDaysInRange = (startStr: string, endStr: string) => {
+    const s = new Date(startStr);
+    const e = new Date(endStr);
+    const diffTime = Math.abs(e.getTime() - s.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // inclusive
+    return isNaN(diffDays) || diffDays <= 0 ? 30 : diffDays;
+  };
+
+  const daysSelected = getDaysInRange(startDate, endDate);
+
+  // Projections
+  const jobsPerDay = totalJobs > 0 ? totalJobs / daysSelected : 0;
   const monthlyGross = grossPerJob * jobsPerDay * 30;
   const monthlyNet = monthlyGross * (1 - simGatewayCut / 100);
 
   const fmtINR = (v: number) => `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  const formatDateString = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    } catch {
+      return dateStr;
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Title */}
-      <div className="bg-gradient-to-br from-violet-950/60 via-violet-900/40 to-gray-900 border border-violet-800/50 rounded-3xl p-6">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-2xl flex-shrink-0">💰</div>
+    <div className="space-y-8">
+      {/* Premium Hero Stats Header */}
+      <div className="bg-gradient-to-br from-violet-950/80 via-violet-900/40 to-gray-900 border border-violet-800/60 rounded-3xl p-8 relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-violet-600/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div>
-            <h2 className="text-xl font-extrabold text-white">Platform Revenue Simulator</h2>
-            <p className="text-sm text-violet-300/70 mt-1">Model your platform fees on top of real order data. Adjust sliders to see projected earnings.</p>
-            <div className="flex gap-4 mt-3 text-xs text-gray-400">
-              <span className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 font-mono">{totalJobs} real jobs</span>
-              <span className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 font-mono">~{avgFilesPerJob.toFixed(1)} files/job avg</span>
-              <span className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 font-mono">{fmtINR(totalRevenue)} GMV</span>
+            <h2 className="text-2xl font-black text-white tracking-tight">Platform Revenue Simulator</h2>
+            <p className="text-sm text-violet-300/80 mt-1 max-w-xl">
+              Model potential platforms fees over selected historical windows. Set rules to estimate your margins, processing overheads, and net yields.
+            </p>
+            <div className="flex flex-wrap gap-3 mt-4">
+              <span className="bg-violet-950/80 border border-violet-800/60 text-violet-300 rounded-xl px-3 py-1.5 text-xs font-semibold font-mono">
+                Period: {formatDateString(startDate)} - {formatDateString(endDate)} ({daysSelected} days)
+              </span>
+              <span className="bg-gray-800/90 border border-gray-700/60 text-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold font-mono">
+                {totalJobs} Jobs Used
+              </span>
+              <span className="bg-gray-800/90 border border-gray-700/60 text-gray-300 rounded-xl px-3 py-1.5 text-xs font-semibold font-mono">
+                ~{avgFilesPerJob.toFixed(1)} Files/Job Avg
+              </span>
+              <span className="bg-gray-800/90 border border-gray-700/60 text-amber-400 rounded-xl px-3 py-1.5 text-xs font-semibold font-mono">
+                {fmtINR(totalRevenue)} GMV
+              </span>
             </div>
+          </div>
+          <div className="flex flex-col items-start lg:items-end bg-violet-950/50 border border-violet-900/60 rounded-2xl p-5 lg:min-w-[240px] shadow-lg">
+            <span className="text-xs uppercase tracking-widest text-violet-300/70 font-bold">Estimated Net Revenue</span>
+            <span className="text-3xl lg:text-4xl font-black text-emerald-400 font-mono tracking-tight mt-1">{fmtINR(netRevenue)}</span>
+            <span className="text-[10px] text-gray-400 mt-1">For the {daysSelected}-day selected range</span>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Config Panel */}
-        <div className="space-y-4">
-          {/* Fee Rule 1: Per-file batch fee */}
-          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-5">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 bg-violet-400 rounded-full"></span>
-              File-Based Fee
-            </h3>
-            <p className="text-xs text-gray-400 -mt-2">Charge ₹X for every N files in a job (floors to whole batches).</p>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Left Panel: Integrated Config (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          <div className="bg-gray-900/90 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6">
+            <div className="border-b border-gray-800 pb-4">
+              <h3 className="text-lg font-bold text-white">Fee Configuration</h3>
+              <p className="text-xs text-gray-400 mt-1">Adjust sliding controls or type exact numeric inputs below.</p>
+            </div>
 
-            <div className="space-y-3">
-              <div>
-                <div className="flex justify-between mb-2">
-                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Files per batch (N)</label>
-                  <span className="text-sm font-bold text-violet-400 font-mono">{simFileThreshold} files</span>
+            {/* Fee Rule 1: File-Based Fee */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-wider text-violet-400">File-Based Fee</span>
+                <span className="text-[10px] text-gray-500 font-medium">Charge per batch of N files</span>
+              </div>
+              
+              {/* Threshold (N) Input & Slider */}
+              <div className="bg-gray-950/60 border border-gray-900 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-semibold text-gray-300">Files per batch (N)</label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number" min={1} max={100}
+                      value={simFileThreshold}
+                      onChange={(e) => setSimFileThreshold(Math.max(1, Number(e.target.value)))}
+                      className="w-14 bg-gray-900 border border-gray-800 rounded-lg px-1.5 py-1 text-xs text-center font-bold text-white focus:outline-none focus:border-violet-500 font-mono"
+                    />
+                    <span className="text-xs text-gray-400">files</span>
+                  </div>
                 </div>
                 <input
                   type="range" min={1} max={20} step={1}
                   value={simFileThreshold}
                   onChange={(e) => setSimFileThreshold(Number(e.target.value))}
-                  className="w-full accent-violet-500 cursor-pointer"
+                  className="w-full accent-violet-500 cursor-pointer h-1.5 rounded-lg bg-gray-800"
                 />
-                <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>1</span><span>20</span></div>
               </div>
 
-              <div>
-                <div className="flex justify-between mb-2">
-                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Fee per batch (₹)</label>
-                  <span className="text-sm font-bold text-violet-400 font-mono">₹{simFeePerBatch}</span>
+              {/* Price per Batch Input & Slider */}
+              <div className="bg-gray-950/60 border border-gray-900 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-semibold text-gray-300">Fee per batch (₹)</label>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">₹</span>
+                    <input
+                      type="number" min={0} max={500} step={0.5}
+                      value={simFeePerBatch}
+                      onChange={(e) => setSimFeePerBatch(Math.max(0, Number(e.target.value)))}
+                      className="w-16 bg-gray-900 border border-gray-800 rounded-lg px-1.5 py-1 text-xs text-center font-bold text-white focus:outline-none focus:border-violet-500 font-mono"
+                    />
+                  </div>
                 </div>
                 <input
                   type="range" min={0} max={20} step={0.5}
                   value={simFeePerBatch}
                   onChange={(e) => setSimFeePerBatch(Number(e.target.value))}
-                  className="w-full accent-violet-500 cursor-pointer"
+                  className="w-full accent-violet-500 cursor-pointer h-1.5 rounded-lg bg-gray-800"
                 />
-                <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>₹0</span><span>₹20</span></div>
               </div>
 
-              <div className="bg-gray-950/50 border border-gray-800 rounded-xl p-3 text-xs text-gray-400">
-                Example: job with <span className="text-white font-bold">{Math.round(avgFilesPerJob)} files</span> → <span className="text-violet-300 font-bold">{Math.floor(Math.max(1, avgFilesPerJob) / Math.max(1, simFileThreshold))} batch(es)</span> × ₹{simFeePerBatch} = <span className="text-violet-300 font-bold">₹{avgFileFee.toFixed(2)}</span>
+              <div className="bg-violet-950/20 border border-violet-900/30 rounded-xl p-3 text-[11px] text-violet-300/80 leading-relaxed font-sans">
+                For average job (~{Math.round(avgFilesPerJob)} files): {Math.floor(Math.max(1, avgFilesPerJob) / Math.max(1, simFileThreshold))} batch(es) × ₹{simFeePerBatch} = <span className="font-bold text-white">₹{avgFileFee.toFixed(2)}</span>
               </div>
             </div>
-          </section>
 
-          {/* Fee Rule 2: Flat per-job fee */}
-          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
-              Flat Job Fee
-            </h3>
-            <p className="text-xs text-gray-400 -mt-2">A fixed platform fee charged on every completed job regardless of file count.</p>
+            <div className="h-px bg-gray-800"></div>
 
-            <div>
-              <div className="flex justify-between mb-2">
-                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Fee per job (₹)</label>
-                <span className="text-sm font-bold text-amber-400 font-mono">₹{simFlatPerJob}</span>
+            {/* Fee Rule 2: Flat Job Fee */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-500">Flat Job Fee</span>
+                <span className="text-[10px] text-gray-500 font-medium">Flat fee charged on every job</span>
               </div>
-              <input
-                type="range" min={0} max={50} step={0.5}
-                value={simFlatPerJob}
-                onChange={(e) => setSimFlatPerJob(Number(e.target.value))}
-                className="w-full accent-amber-500 cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>₹0</span><span>₹50</span></div>
-            </div>
-          </section>
-
-          {/* Fee Rule 3: Payment Gateway Cut */}
-          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 bg-red-400 rounded-full"></span>
-              Payment Gateway Cut
-            </h3>
-            <p className="text-xs text-gray-400 -mt-2">Percentage of gross earnings taken by the payment processor (Razorpay, Stripe, etc.).</p>
-
-            <div>
-              <div className="flex justify-between mb-2">
-                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Gateway cut (%)</label>
-                <span className="text-sm font-bold text-red-400 font-mono">{simGatewayCut}%</span>
+              <div className="bg-gray-950/60 border border-gray-900 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-semibold text-gray-300">Fee per job (₹)</label>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">₹</span>
+                    <input
+                      type="number" min={0} max={500} step={0.5}
+                      value={simFlatPerJob}
+                      onChange={(e) => setSimFlatPerJob(Math.max(0, Number(e.target.value)))}
+                      className="w-16 bg-gray-900 border border-gray-800 rounded-lg px-1.5 py-1 text-xs text-center font-bold text-white focus:outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
+                </div>
+                <input
+                  type="range" min={0} max={50} step={0.5}
+                  value={simFlatPerJob}
+                  onChange={(e) => setSimFlatPerJob(Number(e.target.value))}
+                  className="w-full accent-amber-500 cursor-pointer h-1.5 rounded-lg bg-gray-800"
+                />
               </div>
-              <input
-                type="range" min={0} max={10} step={0.1}
-                value={simGatewayCut}
-                onChange={(e) => setSimGatewayCut(Number(e.target.value))}
-                className="w-full accent-red-500 cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>0%</span><span>10%</span></div>
             </div>
-          </section>
+
+            <div className="h-px bg-gray-800"></div>
+
+            {/* Fee Rule 3: Payment Gateway Cut */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-500">Gateway Cut</span>
+                <span className="text-[10px] text-gray-500 font-medium">Gateway processor transaction %</span>
+              </div>
+              <div className="bg-gray-950/60 border border-gray-900 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-semibold text-gray-300">Processor cut (%)</label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number" min={0} max={100} step={0.1}
+                      value={simGatewayCut}
+                      onChange={(e) => setSimGatewayCut(Math.max(0, Number(e.target.value)))}
+                      className="w-14 bg-gray-900 border border-gray-800 rounded-lg px-1.5 py-1 text-xs text-center font-bold text-white focus:outline-none focus:border-rose-500 font-mono"
+                    />
+                    <span className="text-xs text-gray-400">%</span>
+                  </div>
+                </div>
+                <input
+                  type="range" min={0} max={10} step={0.1}
+                  value={simGatewayCut}
+                  onChange={(e) => setSimGatewayCut(Number(e.target.value))}
+                  className="w-full accent-rose-500 cursor-pointer h-1.5 rounded-lg bg-gray-800"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Results Panel */}
-        <div className="space-y-4">
-          {/* Per-Job breakdown */}
-          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
-              Per-Job Earnings
-            </h3>
-            <div className="space-y-3 divide-y divide-gray-800/50">
-              <div className="flex justify-between items-center pt-1">
-                <span className="text-sm text-gray-300">File-based fee (avg)</span>
-                <span className="font-mono text-sm font-bold text-violet-400">+{fmtINR(avgFileFee)}</span>
+        {/* Right Panel: Result & Projection Modules (7 cols) */}
+        <div className="lg:col-span-7 space-y-6">
+          
+          {/* Revenue Waterfall Visualization Card */}
+          <div className="bg-gray-900/90 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-5">
+            <h3 className="text-base font-bold text-white">Revenue Waterfall Model</h3>
+            
+            {/* Visual Bar representation */}
+            <div className="space-y-2">
+              <div className="flex h-5 rounded-full overflow-hidden bg-gray-950 border border-gray-800/80 p-0.5">
+                {grossTotal > 0 ? (
+                  <>
+                    <div 
+                      className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-l-full transition-all duration-300"
+                      style={{ width: `${100 - simGatewayCut}%` }}
+                    />
+                    {simGatewayCut > 0 && (
+                      <div 
+                        className="h-full bg-gradient-to-r from-rose-500 to-rose-600 rounded-r-full transition-all duration-300"
+                        style={{ width: `${simGatewayCut}%` }}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <div className="h-full w-full bg-gray-800 rounded-full" />
+                )}
               </div>
-              <div className="flex justify-between items-center pt-3">
-                <span className="text-sm text-gray-300">Flat job fee</span>
-                <span className="font-mono text-sm font-bold text-amber-400">+{fmtINR(simFlatPerJob)}</span>
-              </div>
-              <div className="flex justify-between items-center pt-3">
-                <span className="text-sm text-gray-300">Gross per job</span>
-                <span className="font-mono text-sm font-bold text-white">{fmtINR(grossPerJob)}</span>
-              </div>
-              <div className="flex justify-between items-center pt-3">
-                <span className="text-sm text-gray-300">Gateway deduction ({simGatewayCut}%)</span>
-                <span className="font-mono text-sm font-bold text-red-400">-{fmtINR(grossPerJob * simGatewayCut / 100)}</span>
-              </div>
-              <div className="flex justify-between items-center pt-3">
-                <span className="text-sm font-bold text-white">Net per job</span>
-                <span className="font-mono text-lg font-black text-emerald-400">{fmtINR(grossPerJob * (1 - simGatewayCut / 100))}</span>
+              <div className="flex justify-between text-[11px] font-semibold">
+                <span className="text-emerald-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  Net Keep: {(100 - simGatewayCut).toFixed(1)}%
+                </span>
+                {simGatewayCut > 0 && (
+                  <span className="text-rose-400 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    Gateway: {simGatewayCut.toFixed(1)}%
+                  </span>
+                )}
               </div>
             </div>
-          </section>
 
-          {/* Total on current data */}
-          <section className="bg-gradient-to-br from-emerald-950/50 to-gray-900 border border-emerald-800/40 rounded-3xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
-              On Current Data ({totalJobs} jobs)
-            </h3>
-            <div className="space-y-3 divide-y divide-emerald-900/30">
-              <div className="flex justify-between items-center pt-1">
-                <span className="text-sm text-gray-300">Gross earnings</span>
-                <span className="font-mono text-sm font-bold text-white">{fmtINR(grossTotal)}</span>
+            {/* Structured Waterfall Breakdown */}
+            <div className="bg-gray-950/70 border border-gray-800/70 rounded-2xl p-5 space-y-3 font-mono text-xs">
+              <div className="flex justify-between items-center text-gray-400">
+                <span>File-based earnings ({totalJobs} jobs)</span>
+                <span className="text-white">{fmtINR(avgFileFee * totalJobs)}</span>
               </div>
-              <div className="flex justify-between items-center pt-3">
-                <span className="text-sm text-gray-300">Gateway cut total</span>
-                <span className="font-mono text-sm font-bold text-red-400">-{fmtINR(gatewayDeduction)}</span>
+              <div className="flex justify-between items-center text-gray-400">
+                <span>Flat job earnings ({totalJobs} jobs)</span>
+                <span className="text-white">{fmtINR(simFlatPerJob * totalJobs)}</span>
               </div>
-              <div className="flex justify-between items-center pt-3">
-                <span className="text-sm font-bold text-white">Net platform earnings</span>
-                <span className="font-mono text-2xl font-black text-emerald-400">{fmtINR(netRevenue)}</span>
+              <div className="h-px bg-gray-900 my-1"></div>
+              <div className="flex justify-between items-center text-gray-300 font-bold">
+                <span>Gross Simulated Revenue</span>
+                <span className="text-white">{fmtINR(grossTotal)}</span>
+              </div>
+              <div className="flex justify-between items-center text-rose-400/80">
+                <span>Payment gateway fees (-{simGatewayCut}%)</span>
+                <span>-{fmtINR(gatewayDeduction)}</span>
+              </div>
+              <div className="h-px bg-gray-900 my-1"></div>
+              <div className="flex justify-between items-center text-base font-black text-emerald-400 pt-1">
+                <span>Net Simulated Earnings</span>
+                <span>{fmtINR(netRevenue)}</span>
               </div>
             </div>
-          </section>
+          </div>
 
-          {/* Monthly Projection */}
-          <section className="bg-gradient-to-br from-violet-950/40 to-gray-900 border border-violet-800/30 rounded-3xl p-6 space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span className="w-2 h-2 bg-violet-400 rounded-full"></span>
-              30-Day Projection
-              <span className="text-[10px] text-gray-500 font-normal ml-1">(based on current pace)</span>
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Gross / Month</p>
-                <p className="text-xl font-black text-white mt-1">{fmtINR(monthlyGross)}</p>
+          {/* Projections Matrix */}
+          <div className="bg-gray-900/90 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-5">
+            <div className="flex justify-between items-center">
+              <h3 className="text-base font-bold text-white">Future Yield Forecast</h3>
+              <span className="bg-violet-950 border border-violet-850 text-violet-300 rounded-lg px-2 py-0.5 text-[10px] font-bold font-mono">
+                Paced off {daysSelected} days of data
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-gray-950/50 border border-gray-800 rounded-2xl p-4 space-y-1">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Gross / Month (30 Days)</span>
+                <p className="text-2xl font-black text-white font-mono">{fmtINR(monthlyGross)}</p>
+                <p className="text-[10px] text-gray-500">Projected {Math.round(jobsPerDay * 30)} simulated jobs</p>
               </div>
-              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Net / Month</p>
-                <p className="text-xl font-black text-emerald-400 mt-1">{fmtINR(monthlyNet)}</p>
+
+              <div className="bg-gray-950/50 border border-gray-800 rounded-2xl p-4 space-y-1">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Net Profit / Month (30 Days)</span>
+                <p className="text-2xl font-black text-emerald-400 font-mono">{fmtINR(monthlyNet)}</p>
+                <p className="text-[10px] text-gray-500">Profit after processor cut</p>
               </div>
-              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Annual (Net)</p>
-                <p className="text-xl font-black text-violet-400 mt-1">{fmtINR(monthlyNet * 12)}</p>
+
+              <div className="bg-gray-950/50 border border-gray-800 rounded-2xl p-4 space-y-1">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Annualized Net Profit</span>
+                <p className="text-2xl font-black text-violet-400 font-mono">{fmtINR(monthlyNet * 12)}</p>
+                <p className="text-[10px] text-gray-500">Yearly outlook at current rate</p>
               </div>
-              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Take Rate</p>
-                <p className="text-xl font-black text-amber-400 mt-1">{totalRevenue > 0 ? ((netRevenue / totalRevenue) * 100).toFixed(1) : "0.0"}%</p>
-                <p className="text-[9px] text-gray-500 mt-0.5">of GMV</p>
+
+              <div className="bg-gray-950/50 border border-gray-800 rounded-2xl p-4 space-y-1">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Platform Take Rate</span>
+                <p className="text-2xl font-black text-amber-400 font-mono">{totalRevenue > 0 ? ((netRevenue / totalRevenue) * 100).toFixed(1) : "0.0"}%</p>
+                <p className="text-[10px] text-gray-500">Simulated share of {fmtINR(totalRevenue)} GMV</p>
               </div>
             </div>
-          </section>
+          </div>
         </div>
       </div>
     </div>
