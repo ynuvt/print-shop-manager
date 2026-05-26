@@ -1,9 +1,9 @@
 import Navbar from "../components/Navbar";
 import type { ThemeMode } from "../App";
 import { Link } from "react-router-dom";
-import { Star, Gift, ArrowRight, MapPin, Ticket, Clock, Megaphone } from "lucide-react";
+import { Star, ArrowRight, MapPin, Ticket, Clock } from "lucide-react";
 import { useState, useEffect } from "react";
-import { storage, getPublicAdvertisements } from "../api/api";
+import { storage } from "../api/api";
 import axios from "axios";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -215,49 +215,34 @@ function CouponCard({ coupon }: { coupon: CouponData }) {
 
           {/* Code block */}
           <div className="animate-pop delay-3" style={{ textAlign: "center", padding: "0 20px" }}>
-            <span style={{ fontSize: "10px", fontWeight: 800, color: "rgba(0,0,0,0.5)", letterSpacing: "0.2em", textTransform: "uppercase" }}>
-              Redeem Code
-            </span>
-            <div style={{
-              fontSize: "clamp(28px, 8vw, 44px)", fontWeight: 950, color: "#000",
-              margin: "6px 0", fontFamily: '"Sora", sans-serif', letterSpacing: "3px",
-              position: "relative", overflow: "hidden",
-            }}>
-              {coupon.code}
-              <div style={{
-                position: "absolute", top: 0, width: "100%", height: "100%",
-                background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)",
-                animation: "codeShine 2s infinite linear",
-              }} />
-            </div>
             <div style={{
               background: "#000", color: "#FACC15",
-              padding: "5px 18px", borderRadius: "8px",
+              padding: "6px 18px", borderRadius: "12px",
               display: "inline-flex", alignItems: "center", gap: "8px",
+              marginBottom: "20px",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
             }}>
-              <span style={{ fontSize: "12px", fontWeight: 800 }}>{discountLabel}</span>
+              <span style={{ fontSize: "14px", fontWeight: 900 }}>{discountLabel}</span>
             </div>
             {coupon.qrData && (
-              <div className="animate-pop delay-3" style={{ marginTop: "16px", textAlign: "center" }}>
+              <div className="animate-pop delay-3" style={{ display: "flex", justifyContent: "center" }}>
                 <div style={{
                   background: "#fff",
-                  padding: "12px",
-                  borderRadius: "16px",
+                  padding: "16px",
+                  borderRadius: "24px",
                   display: "inline-block",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+                  border: "2px solid rgba(0,0,0,0.05)"
                 }}>
                   <QRCodeSVG
                     value={coupon.qrData}
-                    size={130}
+                    size={180}
                     bgColor={"#ffffff"}
                     fgColor={"#000000"}
-                    level={"M"}
+                    level={"H"}
                     includeMargin={false}
                   />
                 </div>
-                <p style={{ fontSize: "9px", fontWeight: 800, color: "rgba(0,0,0,0.6)", marginTop: "6px", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
-                  Worker scans to redeem
-                </p>
               </div>
             )}
           </div>
@@ -317,18 +302,15 @@ export default function RewardsPage({
   onToggleTheme: () => void;
 }) {
   const [coupons, setCoupons] = useState<CouponData[]>([]);
-  const [advertisements, setAdvertisements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = () => {
     setLoading(true);
-    Promise.all([
-      fetchMyCoupons(),
-      getPublicAdvertisements()
-    ]).then(([couponsData, adsData]) => {
-      setCoupons(couponsData);
-      setAdvertisements(adsData);
-    }).finally(() => setLoading(false));
+    fetchMyCoupons()
+      .then((couponsData) => {
+        setCoupons(couponsData);
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {

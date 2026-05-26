@@ -335,7 +335,7 @@ export default function App() {
                 activeTab === "simulator" ? "text-violet-400 font-extrabold" : "text-gray-400 hover:text-white"
               }`}
             >
-              💰 Revenue Simulator
+              Revenue Simulator
               {activeTab === "simulator" && (
                 <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-400 rounded-full" />
               )}
