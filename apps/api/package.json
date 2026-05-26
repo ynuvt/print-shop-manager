@@ -17,6 +17,7 @@
     "@types/express": "^5.0.6",
     "@types/multer": "^2.0.0",
     "@types/node": "^25.4.0",
+    "@types/qrcode": "^1.5.6",
     "ts-node-dev": "^2.0.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.3"
@@ -40,6 +41,7 @@
     "multer": "^2.0.2",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.4",
+    "qrcode": "^1.5.4",
     "sharp": "^0.34.5",
     "socket.io-client": "^4.8.3"
   }

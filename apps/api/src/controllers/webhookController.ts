@@ -1206,6 +1206,22 @@ Please try again.`,
                 const { validateCoupon, redeemCoupon } = await import("../modules/couponService.js");
                 const { sendWhatsAppButtonMessage: sendBtn } = await import("../modules/whatsappServices.js");
 
+                // Check worker eligibility first so we ignore customer messages without any reply
+                const worker = await prisma.outletWorker.findUnique({
+                  where: { phoneNumber: userData.displayPhoneNumber, isActive: true },
+                  include: { outlet: { include: { brand: true } } },
+                });
+
+                if (!worker) {
+                  console.log(`[coupon-webhook] Non-worker ${userData.displayPhoneNumber} sent coupon command. Replying.`);
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
+                    phoneNumberId,
+                    message: "This coupon can only be claimed at the outlet by the worker who works there.",
+                  });
+                  continue;
+                }
+
                 if (couponMatch) {
                   const code = (couponMatch[1] || "").trim();
                   const result = await validateCoupon(code, userData.displayPhoneNumber);
@@ -1219,34 +1235,37 @@ Please try again.`,
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
                       body: [
-                        `✅ *Coupon Valid!*`,
+                        `*Coupon Valid*`,
                         ``,
-                        `🏪 Brand: *${result.coupon.brandName}*`,
-                        `💰 Discount: *${discountText}*`,
-                        `${result.coupon.description ? `📝 ${result.coupon.description}` : ""}`,
-                        `📅 Valid until: ${result.coupon.validUntil.toLocaleDateString("en-IN")}`,
+                        `Brand: *${result.coupon.brandName}*`,
+                        `Discount: *${discountText}*`,
+                        `${result.coupon.description ? `Description: _${result.coupon.description}_` : ""}`,
+                        `Valid until: ${result.coupon.validUntil.toLocaleDateString("en-IN")}`,
                         ``,
                         `Tap below to redeem this coupon.`,
                       ].join("\n"),
                       buttons: [
-                        { type: "reply", reply: { id: `redeem:${code}`, title: "🎉 Redeem Coupon" } },
+                        { type: "reply", reply: { id: `redeem:${code}`, title: "Redeem Coupon" } },
                       ],
                     });
                   } else {
+                    // Clean text (no emojis)
+                    const cleanMsg = result.message.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD00-\uDFFF]/g, "").trim();
                     await sendWhatsAppTextMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
-                      message: result.message,
+                      message: cleanMsg,
                     });
                   }
                 } else if (redeemMatch) {
                   const code = (redeemMatch[1] || "").trim();
                   const result = await redeemCoupon(code, userData.displayPhoneNumber);
 
+                  const cleanMsg = result.message.replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD00-\uDFFF]/g, "").trim();
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    message: result.message,
+                    message: cleanMsg,
                   });
                 }
               } catch (err) {
@@ -1254,7 +1273,7 @@ Please try again.`,
                 await sendWhatsAppTextMessage({
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
-                  message: "❌ Something went wrong processing the coupon. Please try again.",
+                  message: "Something went wrong processing the coupon. Please try again.",
                 });
               }
               continue;

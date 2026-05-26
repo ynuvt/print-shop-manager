@@ -24,12 +24,12 @@ type CouponRule = {
 const rules: CouponRule[] = [
   {
     name: "min_total_cost",
-    description: "Assign coupon when print job total cost > ₹50",
+    description: "Assign coupon when print job total cost > ₹60",
     evaluate: async (ctx) => {
-      if (ctx.totalCost > 2) {
+      if (ctx.totalCost > 60) {
         return { eligible: true };
       }
-      return { eligible: false, reason: "Cost below ₹50" };
+      return { eligible: false, reason: "Cost below ₹60" };
     },
   },
   // ─── FUTURE RULES (examples) ───

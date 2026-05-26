@@ -1426,9 +1426,8 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
       );
     }
 
-    // ─── COUPON ASSIGNMENT ON COMPLETED (TEMPORARILY DISABLED) ───────────────────────────────
+    // ─── COUPON ASSIGNMENT ON COMPLETED ───────────────────────────────
     // When a job is completed, evaluate rules and assign coupons if eligible.
-    /*
     if (status === "COMPLETED" && job.userId) {
       try {
         const { evaluateRules } = await import("../modules/couponRules.js");
@@ -1450,7 +1449,6 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
         console.error("[coupon] Rule evaluation failed:", err);
       }
     }
-    */
 
     res.status(200).json(job);
   } catch (error) {

@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { MapPin, ExternalLink } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { getDashboardSummary, getDashboardTimeline, getDashboardOutlets, getDashboardRedemptions } from "../api/brandApi";
+import toast from "react-hot-toast";
 
 interface SummaryCategory {
   total: number;
@@ -30,6 +31,42 @@ export default function BrandDashboardPage() {
   const [outlets, setOutlets] = useState<OutletStat[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [brandProfile, setBrandProfile] = useState<any>(null);
+  const [profileName, setProfileName] = useState("");
+  const [profileLogo, setProfileLogo] = useState("");
+  const [updatingProfile, setUpdatingProfile] = useState(false);
+
+  const loadBrandProfileData = async () => {
+    try {
+      const { getBrandProfile } = await import("../api/brandApi");
+      const profile = await getBrandProfile();
+      setBrandProfile(profile);
+      setProfileName(profile.name);
+      setProfileLogo(profile.logo || "");
+    } catch (err) {
+      console.error("Failed to load profile", err);
+    }
+  };
+
+  useEffect(() => {
+    loadBrandProfileData();
+  }, []);
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUpdatingProfile(true);
+    try {
+      const { updateBrandProfile } = await import("../api/brandApi");
+      const updated = await updateBrandProfile({ name: profileName, logo: profileLogo });
+      setBrandProfile(updated);
+      toast.success("Profile updated successfully! Refresh page to see new logo.");
+    } catch {
+      toast.error("Failed to update profile.");
+    } finally {
+      setUpdatingProfile(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([
@@ -60,9 +97,51 @@ export default function BrandDashboardPage() {
 
   return (
     <div className="brand-gap-8">
-      <div>
-        <h1 className="brand-page-title">Dashboard</h1>
-        <p className="brand-page-subtitle">Overview of your coupon performance</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+        <div>
+          <h1 className="brand-page-title">Dashboard</h1>
+          <p className="brand-page-subtitle">Overview of your coupon performance</p>
+        </div>
+        
+        {/* Brand Icon settings widget */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="brand-card"
+          style={{ padding: 16, display: "flex", alignItems: "center", gap: 16, maxWidth: "420px", flex: "1 1 300px" }}
+        >
+          {brandProfile && (
+            <form onSubmit={handleUpdateProfile} style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+                <input
+                  type="text"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  className="brand-input"
+                  style={{ padding: "6px 10px", fontSize: "13px" }}
+                  placeholder="Brand Name"
+                  required
+                />
+                <input
+                  type="text"
+                  value={profileLogo}
+                  onChange={(e) => setProfileLogo(e.target.value)}
+                  className="brand-input"
+                  style={{ padding: "6px 10px", fontSize: "11px", fontFamily: "monospace" }}
+                  placeholder="Brand Icon URL"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={updatingProfile}
+                className="brand-btn-primary"
+                style={{ padding: "8px 12px", fontSize: "12px", height: "fit-content" }}
+              >
+                {updatingProfile ? "..." : "Save Profile"}
+              </button>
+            </form>
+          )}
+        </motion.div>
       </div>
 
       {/* Coupon Performance Table */}

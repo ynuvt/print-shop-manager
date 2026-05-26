@@ -2,8 +2,9 @@
 // Core business logic for coupon generation, assignment, validation, and redemption.
 
 import { prisma } from "@printowl/db";
-import { sendWhatsAppTextMessage } from "./whatsappServices.js";
+import { sendWhatsAppTextMessage, sendWhatsAppImageBuffer } from "./whatsappServices.js";
 import { brandHasFeature } from "./brandPlanFeatures.js";
+import QRCode from "qrcode";
 
 // ─── COUPON CODE GENERATION ──────────────────────────────────────────────────
 
@@ -192,7 +193,7 @@ export async function assignCouponsToUser(userId: string): Promise<void> {
  * Pro+: template message.
  */
 async function deliverCouponByPlan(
-  coupon: { code: string; discountType: string; discountValue: number; description: string | null },
+  coupon: { code: string; discountType: string; discountValue: number; description: string | null; nearestOutletId: string | null },
   brand: { id: string; name: string; plan: string },
   userId: string,
 ): Promise<void> {
@@ -212,23 +213,28 @@ async function deliverCouponByPlan(
       ? `${coupon.discountValue}% OFF`
       : `₹${coupon.discountValue} OFF`;
 
-  if (brandHasFeature(brand.plan as any, "whatsapp_coupon_texts")) {
-    // Pro plan: send plain text
-    await sendWhatsAppTextMessage({
-      to: waUser.phoneNumber,
-      phoneNumberId,
-      message: `🎉 You've earned a coupon from *${brand.name}*!\n\n💰 *${discountText}*\n${coupon.description || ""}\n\n🎟️ Code: *${coupon.code}*\n\nShow this at any outlet to redeem!`,
-    });
-  } else if (brandHasFeature(brand.plan as any, "whatsapp_template_coupons")) {
-    // Pro+ plan: send template message (using plain text as fallback for now)
-    // TODO: Implement actual template message sending once Meta approves templates
-    await sendWhatsAppTextMessage({
-      to: waUser.phoneNumber,
-      phoneNumberId,
-      message: `🎉 *${brand.name}* Reward!\n\n💰 *${discountText}*\n${coupon.description || ""}\n\n🎟️ Code: *${coupon.code}*\n\nVisit the nearest outlet and show this code to redeem your reward!`,
-    });
-  }
-  // Standard plan: no WhatsApp delivery (website only)
+  const FRONTEND_BASE_URL = (process.env.FRONTEND_BASE_URL ?? "").replace(/\/$/, "");
+  const rewardsUrl = `${FRONTEND_BASE_URL}/rewards`;
+  const brandNameUpper = brand.name.toUpperCase();
+
+  const message = [
+    `Hello from *${brandNameUpper}*!`,
+    ``,
+    `You have earned a new discount coupon!`,
+    ``,
+    `Discount: *${discountText}*`,
+    coupon.description ? `_${coupon.description}_` : "",
+    ``,
+    `Claim and view your coupon details here:`,
+    `👉 ${rewardsUrl}`,
+  ].filter(line => line !== null).join("\n");
+
+  // Send plain text notification to everyone
+  await sendWhatsAppTextMessage({
+    to: waUser.phoneNumber,
+    phoneNumberId,
+    message,
+  });
 }
 
 // ─── COUPON VALIDATION ───────────────────────────────────────────────────────

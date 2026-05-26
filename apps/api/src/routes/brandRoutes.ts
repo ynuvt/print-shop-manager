@@ -250,8 +250,10 @@ router.delete("/workers/:id", async (req: ExtendedRequest, res: Response) => {
       return res.status(404).json({ message: "Worker not found." });
     }
 
-    await prisma.outletWorker.update({ where: { id: req.params.id as string }, data: { isActive: false } });
-    res.json({ message: "Worker deactivated." });
+    // Delete associated redemptions first
+    await prisma.couponRedemption.deleteMany({ where: { workerId: req.params.id as string } });
+    await prisma.outletWorker.delete({ where: { id: req.params.id as string } });
+    res.json({ message: "Worker deleted." });
   } catch (err) {
     console.error("[brand] delete worker error:", err);
     res.status(500).json({ message: "Internal server error." });

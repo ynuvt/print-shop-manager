@@ -4,7 +4,6 @@ import {
   Lightbulb,
   Mail,
   Rocket,
-  Sparkles,
   Target,
   Users,
   Zap,
