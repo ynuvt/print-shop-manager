@@ -159,6 +159,26 @@ export async function assignCouponsToUser(userId: string): Promise<void> {
 
       // Deliver based on plan
       await deliverCouponByPlan(coupon, brand, userId);
+
+      // Emit real-time socket event for the earned coupon
+      try {
+        const { default: socket } = await import("../config/socket.js");
+        const discountText =
+          coupon.discountType === "PERCENTAGE"
+            ? `${coupon.discountValue}% OFF`
+            : `₹${coupon.discountValue} OFF`;
+
+        socket.emit("coupon-earned", userId, {
+          id: coupon.id,
+          code: coupon.code,
+          brandName: brand.name,
+          discountText,
+          description: coupon.description,
+          validUntil: coupon.validUntil.toISOString(),
+        });
+      } catch (socketErr) {
+        console.error("[coupon-socket] Failed to emit coupon-earned event:", socketErr);
+      }
     } catch (err) {
       console.error(`[coupon] Failed to assign coupon from brand ${brand.name}:`, err);
     }

@@ -5,6 +5,7 @@ import { Star, Gift, ArrowRight, MapPin, Ticket, Clock, Megaphone } from "lucide
 import { useState, useEffect } from "react";
 import { storage, getPublicAdvertisements } from "../api/api";
 import axios from "axios";
+import { QRCodeSVG } from "qrcode.react";
 
 const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
@@ -236,6 +237,29 @@ function CouponCard({ coupon }: { coupon: CouponData }) {
             }}>
               <span style={{ fontSize: "12px", fontWeight: 800 }}>{discountLabel}</span>
             </div>
+            {coupon.qrData && (
+              <div className="animate-pop delay-3" style={{ marginTop: "16px", textAlign: "center" }}>
+                <div style={{
+                  background: "#fff",
+                  padding: "12px",
+                  borderRadius: "16px",
+                  display: "inline-block",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                }}>
+                  <QRCodeSVG
+                    value={coupon.qrData}
+                    size={130}
+                    bgColor={"#ffffff"}
+                    fgColor={"#000000"}
+                    level={"M"}
+                    includeMargin={false}
+                  />
+                </div>
+                <p style={{ fontSize: "9px", fontWeight: 800, color: "rgba(0,0,0,0.6)", marginTop: "6px", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
+                  Worker scans to redeem
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Dashed divider */}
@@ -318,84 +342,11 @@ export default function RewardsPage({
     <div className="app-shell">
       <Navbar theme={theme} onToggleTheme={onToggleTheme} />
       <main className="main-wrap">
-        {/* Ads Section */}
-        {advertisements.length > 0 && (
-          <section style={{ marginBottom: "32px" }}>
-            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px", color: "var(--text-muted)" }}>
-              <Megaphone size={18} color="var(--brand)" />
-              Featured Campaigns
-            </h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {advertisements.map((ad) => {
-                return (
-                  <div
-                    key={ad.id}
-                    style={{
-                      position: "relative",
-                      borderRadius: "12px",
-                      overflow: "hidden",
-                      background: "#111",
-                      border: "1px solid #27272a",
-                      boxShadow: "0 10px 24px rgba(0,0,0,0.3)",
-                      display: "flex",
-                      flexDirection: "column",
-                      transition: "transform 0.2s ease, border-color 0.2s ease",
-                    }}
-                    className="reward-card-premium"
-                  >
-                    <div style={{ height: "160px", width: "100%", overflow: "hidden", position: "relative" }}>
-                      {ad.imageUrl ? (
-                        <img src={ad.imageUrl} alt={ad.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        <div style={{
-                          width: "100%", height: "100%",
-                          background: `linear-gradient(135deg, rgba(250,204,21,0.1) 0%, rgba(0,0,0,0.95) 80%)`,
-                          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                          color: "#71717a", gap: "8px"
-                        }}>
-                          <Gift size={32} color="var(--brand, #FACC15)" />
-                          <span style={{ fontSize: "11px", fontWeight: 600 }}>Exclusive Offer Preview</span>
-                        </div>
-                      )}
-                      <div style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)", padding: "4px 10px", borderRadius: "20px", border: "1px solid rgba(255,255,255,0.1)" }}>
-                        <span style={{ fontSize: "10px", fontWeight: 900, color: "var(--brand, #FACC15)", letterSpacing: "0.05em" }}>{ad.brand.name}</span>
-                      </div>
-                    </div>
-                    <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                      {ad.isOffer && (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "4px" }}>
-                          <span style={{
-                            background: ad.offerType === "FIRST_TIME" ? "rgba(250,204,21,0.12)" : "rgba(139,92,246,0.12)",
-                            color: ad.offerType === "FIRST_TIME" ? "#fbbf24" : "#a78bfa",
-                            fontSize: "10px", fontWeight: 800, padding: "3px 8px", borderRadius: "6px",
-                            border: ad.offerType === "FIRST_TIME" ? "1px solid rgba(250,204,21,0.2)" : "1px solid rgba(139,92,246,0.2)",
-                          }}>
-                            {ad.offerType === "FIRST_TIME" ? "FIRST-TIME OFFER" : "RETURNING OFFER"}
-                          </span>
-                          <span style={{
-                            background: "rgba(255,255,255,0.06)",
-                            color: "#fff",
-                            fontSize: "10px", fontWeight: 800, padding: "3px 8px", borderRadius: "6px",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                          }}>
-                            {ad.discountType === "PERCENTAGE" ? `${ad.discountValue}% OFF` : `₹${ad.discountValue} OFF`}
-                          </span>
-                        </div>
-                      )}
-                      <h3 style={{ fontSize: "18px", fontWeight: 900, color: "#fff", margin: 0 }}>{ad.title}</h3>
-                      {ad.description && <p style={{ fontSize: "13px", color: "#a1a1aa", margin: 0, lineHeight: "1.4" }}>{ad.description}</p>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
 
         {/* Active Rewards Section */}
         <section style={{ marginBottom: "24px" }}>
           <h2 style={{ fontSize: "20px", fontWeight: 800, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
-            <Gift size={22} color="var(--brand)" />
+            <img src={`${import.meta.env.BASE_URL || "/"}img/rewardicon.png`} alt="Rewards" style={{ width: "24px", height: "24px", objectFit: "contain" }} />
             My Active Rewards
           </h2>
 

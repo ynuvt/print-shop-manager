@@ -33,8 +33,7 @@ export default function AboutPage({
             <p>Remote printing made simple for students and local vendors.</p>
           </div>
           <p className="legal-lead">
-            <span className="legal-title-icon" aria-hidden="true">
-              <Sparkles size={18} />
+            <span className="legal-title-icon" aria-hidden="true" style={{ display: "inline-flex", alignItems: "center" }}>
             </span>
             At Zopy, we believe printing should be as simple as sending a
             message.

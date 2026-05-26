@@ -456,7 +456,11 @@ app.get("/insights", authMiddleware(["admin"]), async (req, res) => {
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
         ...(shopId ? { shopId } : {}),
       },
-      select: { createdAt: true, totalCost: true },
+      select: { 
+        createdAt: true, 
+        totalCost: true,
+        _count: { select: { files: true } },
+      },
     });
     
     const allUsers = await prisma.user.findMany({
@@ -522,11 +526,17 @@ app.get("/insights", authMiddleware(["admin"]), async (req, res) => {
     const churnRate =
       allUsers.length > 0 ? (churnedUsers / allUsers.length) * 100 : 0;
 
+    // Average files per completed job
+    const totalFilesInJobs = allJobs.reduce((sum, j) => sum + ((j as any)._count?.files || 0), 0);
+    const avgFilesPerJob = allJobs.length > 0 ? totalFilesInJobs / allJobs.length : 1;
+
     res.status(200).json({
       peakHours,
       arpu: arpu.toFixed(2),
       churnRate: churnRate.toFixed(2),
       totalRevenue,
+      avgFilesPerJob: parseFloat(avgFilesPerJob.toFixed(2)),
+      totalFilesInPeriod: totalFilesInJobs,
       userMetrics: {
         total: allUsers.length,
         active: activeUsers,

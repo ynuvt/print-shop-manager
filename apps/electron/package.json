@@ -5,6 +5,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "build": "npm run build:renderer && npm run build:main",
+    "build:zopyprinter": "cd native/ZopyPrinter && dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true && xcopy /y bin\\Release\\net8.0-windows\\win-x64\\publish\\* ..\\..\\resources\\ZopyPrinter\\",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
     "dist:win:portable": "npm run build && electron-builder --win portable --x64",
     "build:renderer": "vite build",

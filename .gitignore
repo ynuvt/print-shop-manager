@@ -21,7 +21,8 @@ coverage
 # Vercel
 .vercel
 dist-electron/
-native/
+# native/ folders (except ZopyPrinter source which we need to track)
+# Note: apps/electron/native/ is handled below with fine-grained rules
 
 # Build Outputs
 .next/
@@ -43,9 +44,23 @@ yarn-error.log*
 apps/electron/release/
 apps/electron/release.zip
 apps/electron/dist-electron/
-apps/electron/native/
-apps/electron/resources/
+# Ignore native build artifacts, but allow source + pre-built binary
+apps/electron/native/*
+!apps/electron/native/ZopyPrinter/
+apps/electron/native/ZopyPrinter/*
+!apps/electron/native/ZopyPrinter/Program.cs
+!apps/electron/native/ZopyPrinter/ZopyPrinter.csproj
+!apps/electron/native/ZopyPrinter/VERSION
+!apps/electron/native/ZopyPrinter/README.md
+!apps/electron/native/ZopyPrinter/PDFiumConfig.cmake
+# Ignore resources except ZopyPrinter pre-built binary
+apps/electron/resources/*
+!apps/electron/resources/ZopyPrinter/
+!apps/electron/resources/ZopyPrinter/**
+!apps/electron/resources/icon.png
+# *.exe is excluded globally but allow the ZopyPrinter ones in resources
 *.exe
+!apps/electron/resources/ZopyPrinter/*.exe
 
 # Native C# build outputs
 apps/electron/native/ZopyPrinter/bin/
