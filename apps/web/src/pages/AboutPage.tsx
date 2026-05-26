@@ -34,7 +34,6 @@ export default function AboutPage({
           </div>
           <p className="legal-lead">
             <span className="legal-title-icon" aria-hidden="true" style={{ display: "inline-flex", alignItems: "center" }}>
-              <img src={`${import.meta.env.BASE_URL || "/"}img/rewardicon.png`} alt="sparkle" style={{ width: "18px", height: "18px", objectFit: "contain" }} />
             </span>
             At Zopy, we believe printing should be as simple as sending a
             message.
