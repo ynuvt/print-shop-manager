@@ -322,6 +322,17 @@ export default function HomePage({
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
 
+  // -- Real-time coupon earned modal --
+  const [earnedCoupon, setEarnedCoupon] = useState<{
+    id: string;
+    code: string;
+    brandName: string;
+    discountText: string;
+    description?: string;
+    validUntil: string;
+  } | null>(null);
+  const [showCouponModal, setShowCouponModal] = useState(false);
+
   // ── Global print options panel state ──
   const [showGlobalOptions, setShowGlobalOptions] = useState(false);
   const [globalSelectedFiles, setGlobalSelectedFiles] = useState<Set<number>>(new Set());
@@ -595,17 +606,26 @@ export default function HomePage({
       }
     };
 
+    const handleCouponEarned = (uid: string, coupon: any) => {
+      if (uid === userId) {
+        setEarnedCoupon(coupon);
+        setShowCouponModal(true);
+      }
+    };
+
     socket.on("connect", onConnect);
     socket.on("job-file-added", handleJobFileAdded);
     socket.on("job-status-updated", handleJobStatusUpdated);
+    socket.on("coupon-earned", handleCouponEarned);
 
     return () => {
       socket.emit("leave-room", userId);
       socket.off("connect", onConnect);
       socket.off("job-file-added", handleJobFileAdded);
       socket.off("job-status-updated", handleJobStatusUpdated);
+      socket.off("coupon-earned", handleCouponEarned);
     };
-  }, [userId, fetchWebDraft]);
+  }, [userId, fetchWebDraft, notify]);
 
   useEffect(() => {
     if (walkthroughStep === "upload" && printFiles.length > 0) {
@@ -1741,6 +1761,279 @@ export default function HomePage({
           </div>
         </div>
       )}
+      <AnimatePresence>
+        {showCouponModal && earnedCoupon && (
+          <div
+            className="modal-shell"
+            role="dialog"
+            aria-modal="true"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              display: "grid",
+              placeItems: "center",
+              background: "rgba(0, 0, 0, 0.8)",
+              backdropFilter: "blur(12px)",
+            }}
+            onClick={() => setShowCouponModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="reward-modal-card"
+              style={{
+                background: "linear-gradient(135deg, #18181b 0%, #09090b 100%)",
+                border: "1px solid rgba(250, 204, 21, 0.2)",
+                boxShadow: "0 25px 50px -12px rgba(250, 204, 21, 0.15)",
+                borderRadius: "32px",
+                padding: "32px",
+                width: "90%",
+                maxWidth: "440px",
+                textAlign: "center",
+                position: "relative",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Sparkle background effects */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: "-50px",
+                  left: "-50px",
+                  width: "150px",
+                  height: "150px",
+                  background: "radial-gradient(circle, rgba(250, 204, 21, 0.15) 0%, transparent 70%)",
+                  pointerEvents: "none",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "-50px",
+                  right: "-50px",
+                  width: "150px",
+                  height: "150px",
+                  background: "radial-gradient(circle, rgba(250, 204, 21, 0.15) 0%, transparent 70%)",
+                  pointerEvents: "none",
+                }}
+              />
+
+              {/* Close button */}
+              <button
+                onClick={() => setShowCouponModal(false)}
+                style={{
+                  position: "absolute",
+                  top: "20px",
+                  right: "20px",
+                  background: "rgba(255, 255, 255, 0.05)",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: "50%",
+                  width: "36px",
+                  height: "36px",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "#a1a1aa",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+                  e.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                  e.currentTarget.style.color = "#a1a1aa";
+                }}
+              >
+                <X size={16} />
+              </button>
+
+              {/* Header Icon */}
+              <div style={{ display: "inline-flex", justifyContent: "center", marginBottom: "20px" }}>
+                <div
+                  style={{
+                    width: "72px",
+                    height: "72px",
+                    borderRadius: "24px",
+                    background: "rgba(250, 204, 21, 0.1)",
+                    border: "2px solid #FACC15",
+                    display: "grid",
+                    placeItems: "center",
+                    boxShadow: "0 8px 32px rgba(250, 204, 21, 0.2)",
+                  }}
+                >
+                  <Plus size={36} color="#FACC15" style={{ transform: "rotate(45deg)" }} />
+                </div>
+              </div>
+
+              {/* Title */}
+              <h2
+                style={{
+                  fontSize: "24px",
+                  fontWeight: 900,
+                  color: "#fff",
+                  margin: "0 0 8px",
+                  fontFamily: '"Sora", sans-serif',
+                }}
+              >
+                Reward Unlocked! 🎉
+              </h2>
+              <p style={{ color: "#a1a1aa", fontSize: "14px", margin: "0 0 24px" }}>
+                You earned an exclusive offer from your print job spending:
+              </p>
+
+              {/* Ticket Container */}
+              <div
+                style={{
+                  background: "#FACC15",
+                  borderRadius: "20px",
+                  padding: "24px 20px",
+                  position: "relative",
+                  boxShadow: "0 12px 24px rgba(0, 0, 0, 0.25)",
+                  marginBottom: "28px",
+                  color: "#000",
+                }}
+              >
+                {/* Perforated holes left & right */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "-10px",
+                    marginTop: "-10px",
+                    width: "20px",
+                    height: "20px",
+                    background: "#09090b",
+                    borderRadius: "50%",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    right: "-10px",
+                    marginTop: "-10px",
+                    width: "20px",
+                    height: "20px",
+                    background: "#09090b",
+                    borderRadius: "50%",
+                  }}
+                />
+
+                {/* Brand Name */}
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 900,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.15em",
+                    color: "rgba(0, 0, 0, 0.6)",
+                  }}
+                >
+                  {earnedCoupon.brandName}
+                </span>
+
+                {/* Discount */}
+                <div
+                  style={{
+                    fontSize: "36px",
+                    fontWeight: 950,
+                    margin: "6px 0 2px",
+                    fontFamily: '"Sora", sans-serif',
+                    letterSpacing: "-1px",
+                  }}
+                >
+                  {earnedCoupon.discountText}
+                </div>
+
+                {/* Code */}
+                <div
+                  style={{
+                    display: "inline-block",
+                    background: "rgba(0, 0, 0, 0.08)",
+                    border: "1px dashed rgba(0, 0, 0, 0.2)",
+                    borderRadius: "8px",
+                    padding: "4px 12px",
+                    fontSize: "14px",
+                    fontWeight: 800,
+                    fontFamily: "monospace",
+                    letterSpacing: "1px",
+                    marginTop: "8px",
+                  }}
+                >
+                  CODE: {earnedCoupon.code}
+                </div>
+
+                {/* Description */}
+                {earnedCoupon.description && (
+                  <p style={{ fontSize: "12px", fontWeight: 700, margin: "12px 0 0", opacity: 0.8 }}>
+                    {earnedCoupon.description}
+                  </p>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <Link
+                  to="/rewards"
+                  onClick={() => setShowCouponModal(false)}
+                  style={{
+                    background: "#FACC15",
+                    color: "#000",
+                    textDecoration: "none",
+                    padding: "14px 24px",
+                    borderRadius: "16px",
+                    fontWeight: 900,
+                    fontSize: "14px",
+                    boxShadow: "0 8px 24px rgba(250, 204, 21, 0.3)",
+                    transition: "all 0.2s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                    e.currentTarget.style.boxShadow = "0 12px 28px rgba(250, 204, 21, 0.4)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "none";
+                    e.currentTarget.style.boxShadow = "0 8px 24px rgba(250, 204, 21, 0.3)";
+                  }}
+                >
+                  View My Rewards Page
+                </Link>
+                <button
+                  onClick={() => setShowCouponModal(false)}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "16px",
+                    padding: "12px 24px",
+                    color: "#fff",
+                    fontWeight: 800,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.05)";
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

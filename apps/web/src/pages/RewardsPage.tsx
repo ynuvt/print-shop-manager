@@ -5,6 +5,7 @@ import { Star, Gift, ArrowRight, MapPin, Ticket, Clock, Megaphone } from "lucide
 import { useState, useEffect } from "react";
 import { storage, getPublicAdvertisements } from "../api/api";
 import axios from "axios";
+import { QRCodeSVG } from "qrcode.react";
 
 const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
@@ -236,6 +237,29 @@ function CouponCard({ coupon }: { coupon: CouponData }) {
             }}>
               <span style={{ fontSize: "12px", fontWeight: 800 }}>{discountLabel}</span>
             </div>
+            {coupon.qrData && (
+              <div className="animate-pop delay-3" style={{ marginTop: "16px", textAlign: "center" }}>
+                <div style={{
+                  background: "#fff",
+                  padding: "12px",
+                  borderRadius: "16px",
+                  display: "inline-block",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                }}>
+                  <QRCodeSVG
+                    value={coupon.qrData}
+                    size={130}
+                    bgColor={"#ffffff"}
+                    fgColor={"#000000"}
+                    level={"M"}
+                    includeMargin={false}
+                  />
+                </div>
+                <p style={{ fontSize: "9px", fontWeight: 800, color: "rgba(0,0,0,0.6)", marginTop: "6px", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
+                  Worker scans to redeem
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Dashed divider */}

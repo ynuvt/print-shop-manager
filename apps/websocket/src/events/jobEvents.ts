@@ -12,6 +12,10 @@ export function jobEvents(socket: Socket, io: Server) {
       io.to(userId).emit("job-status-updated", userId, jobId, msg);
     },
   );
+  socket.on("coupon-earned", (userId: string, coupon: any) => {
+    console.log(`Coupon earned socket event received for user ${userId}`);
+    io.to(userId).emit("coupon-earned", userId, coupon);
+  });
   //Join user to listed to specific job updates like file added, processing started, etc
   socket.on("join-job-updates", (jobId: string) => {
     socket.join(jobId);
