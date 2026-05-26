@@ -17,6 +17,7 @@ async function main() {
     data: {
       name: "Test Cafe",
       slug: "test-cafe",
+      logo: "https://images.unsplash.com/photo-1507133750040-4a8f57021571?auto=format&fit=crop&w=150&q=80",
       email: "cafe@test.com",
       password: hashedPassword,
       plan: "PRO",
@@ -73,6 +74,7 @@ async function main() {
     data: {
       name: "Burger House",
       slug: "burger-house",
+      logo: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=150&q=80",
       email: "burger@test.com",
       password: hashedPassword,
       plan: "PRO",

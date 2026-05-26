@@ -3,6 +3,12 @@ import { motion } from "framer-motion";
 import { Moon, Sun } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { ThemeMode } from "../App";
+import { storage } from "../api/api";
+import axios from "axios";
+import { getSocket } from "../services/getSocket";
+
+const API_ORIGIN = import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in";
+const BASE_URL = `${API_ORIGIN}/api/v1`;
 
 interface NavbarProps {
   theme: ThemeMode;
@@ -18,6 +24,8 @@ export default function Navbar({
   const isRewards = location.pathname === "/rewards";
 
   const [shouldAnimate, setShouldAnimate] = useState(false);
+  const [hasActiveRewards, setHasActiveRewards] = useState(false);
+
   useEffect(() => {
     const hasAnimated = sessionStorage.getItem("navbar_animated");
     if (!hasAnimated) {
@@ -25,6 +33,42 @@ export default function Navbar({
       sessionStorage.setItem("navbar_animated", "true");
     }
   }, []);
+
+  useEffect(() => {
+    const token = storage.get("token");
+    if (!token) {
+      setHasActiveRewards(false);
+      return;
+    }
+
+    axios
+      .get(`${BASE_URL}/coupons/my-coupons`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      .then((res) => {
+        const coupons = res.data?.coupons ?? [];
+        const hasActive = coupons.some((c: any) => c.status === "ACTIVE");
+        setHasActiveRewards(hasActive);
+      })
+      .catch((err) => {
+        console.error("[navbar] Failed to fetch coupons:", err);
+        setHasActiveRewards(false);
+      });
+
+    const socket = getSocket();
+    const handleCouponEarned = (uid: string) => {
+      const userId = storage.get("userId");
+      if (uid === userId) {
+        setHasActiveRewards(true);
+      }
+    };
+
+    socket.on("coupon-earned", handleCouponEarned);
+
+    return () => {
+      socket.off("coupon-earned", handleCouponEarned);
+    };
+  }, [location.pathname]);
 
   return (
     <motion.header 
@@ -54,17 +98,19 @@ export default function Navbar({
           </Link>
           <Link to="/rewards" className={`nav-tab ${isRewards ? "active" : ""}`} style={{ position: "relative" }}>
             Rewards
-            <span style={{ 
-              position: "absolute", 
-              top: "4px", 
-              right: "8px", 
-              width: "10px", 
-              height: "10px", 
-              background: "#ff4757", 
-              borderRadius: "50%",
-              border: "2px solid var(--panel)",
-              boxShadow: "0 0 10px rgba(255, 71, 87, 0.5)"
-            }} />
+            {hasActiveRewards && (
+              <span style={{ 
+                position: "absolute", 
+                top: "4px", 
+                right: "8px", 
+                width: "10px", 
+                height: "10px", 
+                background: "#ff4757", 
+                borderRadius: "50%",
+                border: "2px solid var(--panel)",
+                boxShadow: "0 0 10px rgba(255, 71, 87, 0.5)"
+              }} />
+            )}
           </Link>
         </nav>
       </div>
