@@ -26,7 +26,13 @@ export default function App() {
   const [users, setUsers] = useState<any>(null);
   const [insights, setInsights] = useState<any>(null);
   const [shopsData, setShopsData] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "shops">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "shops" | "simulator">("dashboard");
+
+  // Revenue Simulator state
+  const [simFileThreshold, setSimFileThreshold] = useState(5);   // charge per N files
+  const [simFeePerBatch, setSimFeePerBatch] = useState(1);        // ₹ per batch of N files
+  const [simFlatPerJob, setSimFlatPerJob] = useState(5);          // ₹ flat fee per job
+  const [simGatewayCut, setSimGatewayCut] = useState(2);          // % gateway takes
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
@@ -323,6 +329,17 @@ export default function App() {
                 <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 rounded-full" />
               )}
             </button>
+            <button
+              onClick={() => setActiveTab("simulator")}
+              className={`pb-3 text-sm font-bold transition-all relative ${
+                activeTab === "simulator" ? "text-violet-400 font-extrabold" : "text-gray-400 hover:text-white"
+              }`}
+            >
+              💰 Revenue Simulator
+              {activeTab === "simulator" && (
+                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-400 rounded-full" />
+              )}
+            </button>
           </div>
         )}
 
@@ -423,6 +440,21 @@ export default function App() {
             </section>
 
           </div>
+        )}
+
+        {activeTab === "simulator" && summary && insights && (
+          <RevenueSimulator
+            summary={summary}
+            insights={insights}
+            simFileThreshold={simFileThreshold}
+            setSimFileThreshold={setSimFileThreshold}
+            simFeePerBatch={simFeePerBatch}
+            setSimFeePerBatch={setSimFeePerBatch}
+            simFlatPerJob={simFlatPerJob}
+            setSimFlatPerJob={setSimFlatPerJob}
+            simGatewayCut={simGatewayCut}
+            setSimGatewayCut={setSimGatewayCut}
+          />
         )}
 
         {activeTab === "shops" && !loading && shopsData && (
@@ -612,6 +644,237 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Revenue Simulator ───────────────────────────────────────────────────────
+function RevenueSimulator({
+  summary,
+  insights,
+  simFileThreshold, setSimFileThreshold,
+  simFeePerBatch, setSimFeePerBatch,
+  simFlatPerJob, setSimFlatPerJob,
+  simGatewayCut, setSimGatewayCut,
+}: {
+  summary: any; insights: any;
+  simFileThreshold: number; setSimFileThreshold: (v: number) => void;
+  simFeePerBatch: number; setSimFeePerBatch: (v: number) => void;
+  simFlatPerJob: number; setSimFlatPerJob: (v: number) => void;
+  simGatewayCut: number; setSimGatewayCut: (v: number) => void;
+}) {
+  const totalJobs: number = summary.summary.totalCompletedJobs || 0;
+  const totalRevenue: number = summary.summary.totalRevenue || 0;
+  const avgFilesPerJob: number = insights.avgFilesPerJob ?? (summary.summary.avgPagesPerJob > 0 ? Math.ceil(summary.summary.avgPagesPerJob / 10) : 1);
+
+  // Per-file batch fee: floor(files / threshold) * feePerBatch  per job
+  const avgFileFee = Math.floor(Math.max(1, avgFilesPerJob) / Math.max(1, simFileThreshold)) * simFeePerBatch;
+  const grossPerJob = avgFileFee + simFlatPerJob;
+  const grossTotal = grossPerJob * totalJobs;
+  const gatewayDeduction = grossTotal * (simGatewayCut / 100);
+  const netRevenue = grossTotal - gatewayDeduction;
+
+  // Monthly projection (based on ratio of days in range)
+  const jobsPerDay = totalJobs > 0 ? totalJobs / 30 : 0;
+  const monthlyGross = grossPerJob * jobsPerDay * 30;
+  const monthlyNet = monthlyGross * (1 - simGatewayCut / 100);
+
+  const fmtINR = (v: number) => `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  return (
+    <div className="space-y-6">
+      {/* Title */}
+      <div className="bg-gradient-to-br from-violet-950/60 via-violet-900/40 to-gray-900 border border-violet-800/50 rounded-3xl p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-2xl flex-shrink-0">💰</div>
+          <div>
+            <h2 className="text-xl font-extrabold text-white">Platform Revenue Simulator</h2>
+            <p className="text-sm text-violet-300/70 mt-1">Model your platform fees on top of real order data. Adjust sliders to see projected earnings.</p>
+            <div className="flex gap-4 mt-3 text-xs text-gray-400">
+              <span className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 font-mono">{totalJobs} real jobs</span>
+              <span className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 font-mono">~{avgFilesPerJob.toFixed(1)} files/job avg</span>
+              <span className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 font-mono">{fmtINR(totalRevenue)} GMV</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Config Panel */}
+        <div className="space-y-4">
+          {/* Fee Rule 1: Per-file batch fee */}
+          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-5">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-violet-400 rounded-full"></span>
+              File-Based Fee
+            </h3>
+            <p className="text-xs text-gray-400 -mt-2">Charge ₹X for every N files in a job (floors to whole batches).</p>
+
+            <div className="space-y-3">
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Files per batch (N)</label>
+                  <span className="text-sm font-bold text-violet-400 font-mono">{simFileThreshold} files</span>
+                </div>
+                <input
+                  type="range" min={1} max={20} step={1}
+                  value={simFileThreshold}
+                  onChange={(e) => setSimFileThreshold(Number(e.target.value))}
+                  className="w-full accent-violet-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>1</span><span>20</span></div>
+              </div>
+
+              <div>
+                <div className="flex justify-between mb-2">
+                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Fee per batch (₹)</label>
+                  <span className="text-sm font-bold text-violet-400 font-mono">₹{simFeePerBatch}</span>
+                </div>
+                <input
+                  type="range" min={0} max={20} step={0.5}
+                  value={simFeePerBatch}
+                  onChange={(e) => setSimFeePerBatch(Number(e.target.value))}
+                  className="w-full accent-violet-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>₹0</span><span>₹20</span></div>
+              </div>
+
+              <div className="bg-gray-950/50 border border-gray-800 rounded-xl p-3 text-xs text-gray-400">
+                Example: job with <span className="text-white font-bold">{Math.round(avgFilesPerJob)} files</span> → <span className="text-violet-300 font-bold">{Math.floor(Math.max(1, avgFilesPerJob) / Math.max(1, simFileThreshold))} batch(es)</span> × ₹{simFeePerBatch} = <span className="text-violet-300 font-bold">₹{avgFileFee.toFixed(2)}</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Fee Rule 2: Flat per-job fee */}
+          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-amber-400 rounded-full"></span>
+              Flat Job Fee
+            </h3>
+            <p className="text-xs text-gray-400 -mt-2">A fixed platform fee charged on every completed job regardless of file count.</p>
+
+            <div>
+              <div className="flex justify-between mb-2">
+                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Fee per job (₹)</label>
+                <span className="text-sm font-bold text-amber-400 font-mono">₹{simFlatPerJob}</span>
+              </div>
+              <input
+                type="range" min={0} max={50} step={0.5}
+                value={simFlatPerJob}
+                onChange={(e) => setSimFlatPerJob(Number(e.target.value))}
+                className="w-full accent-amber-500 cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>₹0</span><span>₹50</span></div>
+            </div>
+          </section>
+
+          {/* Fee Rule 3: Payment Gateway Cut */}
+          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+              Payment Gateway Cut
+            </h3>
+            <p className="text-xs text-gray-400 -mt-2">Percentage of gross earnings taken by the payment processor (Razorpay, Stripe, etc.).</p>
+
+            <div>
+              <div className="flex justify-between mb-2">
+                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Gateway cut (%)</label>
+                <span className="text-sm font-bold text-red-400 font-mono">{simGatewayCut}%</span>
+              </div>
+              <input
+                type="range" min={0} max={10} step={0.1}
+                value={simGatewayCut}
+                onChange={(e) => setSimGatewayCut(Number(e.target.value))}
+                className="w-full accent-red-500 cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-gray-500 mt-1"><span>0%</span><span>10%</span></div>
+            </div>
+          </section>
+        </div>
+
+        {/* Results Panel */}
+        <div className="space-y-4">
+          {/* Per-Job breakdown */}
+          <section className="bg-gray-900 border border-gray-800 rounded-3xl p-6 space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+              Per-Job Earnings
+            </h3>
+            <div className="space-y-3 divide-y divide-gray-800/50">
+              <div className="flex justify-between items-center pt-1">
+                <span className="text-sm text-gray-300">File-based fee (avg)</span>
+                <span className="font-mono text-sm font-bold text-violet-400">+{fmtINR(avgFileFee)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-sm text-gray-300">Flat job fee</span>
+                <span className="font-mono text-sm font-bold text-amber-400">+{fmtINR(simFlatPerJob)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-sm text-gray-300">Gross per job</span>
+                <span className="font-mono text-sm font-bold text-white">{fmtINR(grossPerJob)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-sm text-gray-300">Gateway deduction ({simGatewayCut}%)</span>
+                <span className="font-mono text-sm font-bold text-red-400">-{fmtINR(grossPerJob * simGatewayCut / 100)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-sm font-bold text-white">Net per job</span>
+                <span className="font-mono text-lg font-black text-emerald-400">{fmtINR(grossPerJob * (1 - simGatewayCut / 100))}</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Total on current data */}
+          <section className="bg-gradient-to-br from-emerald-950/50 to-gray-900 border border-emerald-800/40 rounded-3xl p-6 space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+              On Current Data ({totalJobs} jobs)
+            </h3>
+            <div className="space-y-3 divide-y divide-emerald-900/30">
+              <div className="flex justify-between items-center pt-1">
+                <span className="text-sm text-gray-300">Gross earnings</span>
+                <span className="font-mono text-sm font-bold text-white">{fmtINR(grossTotal)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-sm text-gray-300">Gateway cut total</span>
+                <span className="font-mono text-sm font-bold text-red-400">-{fmtINR(gatewayDeduction)}</span>
+              </div>
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-sm font-bold text-white">Net platform earnings</span>
+                <span className="font-mono text-2xl font-black text-emerald-400">{fmtINR(netRevenue)}</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Monthly Projection */}
+          <section className="bg-gradient-to-br from-violet-950/40 to-gray-900 border border-violet-800/30 rounded-3xl p-6 space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <span className="w-2 h-2 bg-violet-400 rounded-full"></span>
+              30-Day Projection
+              <span className="text-[10px] text-gray-500 font-normal ml-1">(based on current pace)</span>
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Gross / Month</p>
+                <p className="text-xl font-black text-white mt-1">{fmtINR(monthlyGross)}</p>
+              </div>
+              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Net / Month</p>
+                <p className="text-xl font-black text-emerald-400 mt-1">{fmtINR(monthlyNet)}</p>
+              </div>
+              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Annual (Net)</p>
+                <p className="text-xl font-black text-violet-400 mt-1">{fmtINR(monthlyNet * 12)}</p>
+              </div>
+              <div className="bg-gray-950/60 border border-gray-800 rounded-2xl p-4">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Take Rate</p>
+                <p className="text-xl font-black text-amber-400 mt-1">{totalRevenue > 0 ? ((netRevenue / totalRevenue) * 100).toFixed(1) : "0.0"}%</p>
+                <p className="text-[9px] text-gray-500 mt-0.5">of GMV</p>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );
