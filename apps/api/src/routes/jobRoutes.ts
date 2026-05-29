@@ -1428,6 +1428,8 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
 
     // ─── COUPON ASSIGNMENT ON COMPLETED ───────────────────────────────
     // When a job is completed, evaluate rules and assign coupons if eligible.
+    // Commented out: not deployed yet.
+    /*
     if (status === "COMPLETED" && job.userId) {
       try {
         const { evaluateRules } = await import("../modules/couponRules.js");
@@ -1449,6 +1451,7 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
         console.error("[coupon] Rule evaluation failed:", err);
       }
     }
+    */
 
     res.status(200).json(job);
   } catch (error) {
@@ -2278,30 +2281,41 @@ app.delete(
         }
 
         for (const file of existingJob.files) {
-          await deleteObjectFromR2ByUrl(file.url);
+          if (file.url) {
+            await deleteObjectFromR2ByUrl(file.url);
+          }
         }
 
         const optionIds = existingJob.files
           .map((file) => file.option?.id)
           .filter((id): id is string => !!id);
 
-        await prisma.$transaction(async (tx) => {
-          await tx.printJob.update({
+        job = await prisma.$transaction(async (tx) => {
+          const updated = await tx.printJob.update({
             where: { id: existingJob.id },
-            data: { expired: true },
+            data: {
+              status: PrintJobStatus.CANCELED,
+              expired: true,
+              oldOtp: existingJob.verificationCode ?? undefined,
+              verificationCode: null,
+            },
           });
 
           await tx.file.updateMany({
             where: { printJobId: existingJob.id },
             data: { url: "" },
           });
+
+          return updated;
         });
 
         return res.status(200).json({ message: "Job deleted successfully." });
       }
 
       for (const file of existingJob.files) {
-        await deleteObjectFromR2ByUrl(file.url);
+        if (file.url) {
+          await deleteObjectFromR2ByUrl(file.url);
+        }
       }
 
       job = await prisma.printJob.update({
@@ -2313,11 +2327,12 @@ app.delete(
       });
       res.status(200).json({ message: "Job canceled successfully." });
     } catch (error) {
+      console.error("Delete job error:", error);
       res.status(500).json({ error: "Failed to delete job." });
     } finally {
       if (job) {
-        const statusText = PrintJobStatus.REJECTED;
-        const msg = `Your print job with verification code ${job.verificationCode} is now ${statusText}.`;
+        const statusText = job.status;
+        const msg = `Your print job with verification code ${job.verificationCode ?? job.oldOtp ?? "N/A"} is now ${statusText}.`;
         socket.emit("job-status-updated", job.userId, job.id, msg);
       }
     }
