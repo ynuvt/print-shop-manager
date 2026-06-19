@@ -13,12 +13,16 @@ function getJwtSecret() {
   return secret;
 }
 
-export function generateUserToken(role: "admin" | "customer" = "customer") {
+export function generateUserToken(
+  role: "admin" | "customer" = "customer",
+  additionalPayload?: Record<string, any>,
+) {
   // For now, payload can just be a random UUID or timestamp
   const payload = {
     uid: crypto.randomUUID(), // Node 18+ builtin
     createdAt: Date.now(),
     role: role, // To allow for future roles like "admin", "customer", etc.
+    ...additionalPayload,
   };
 
   return { token: jwt.sign(payload, getJwtSecret()), userId: payload.uid };

@@ -35,6 +35,13 @@ try {
   summary.WhatsAppLoginOtp = await backupTable("WhatsAppLoginOtp", prisma.whatsAppLoginOtp);
   summary.UserEvent = await backupTable("UserEvent", prisma.userEvent);
   summary.MobileSyncOtp = await backupTable("MobileSyncOtp", prisma.mobileSyncOtp);
+  summary.Brand = await backupTable("Brand", prisma.brand);
+  summary.Outlet = await backupTable("Outlet", prisma.outlet);
+  summary.OutletWorker = await backupTable("OutletWorker", prisma.outletWorker);
+  summary.BrandOffer = await backupTable("BrandOffer", prisma.brandOffer);
+  summary.Coupon = await backupTable("Coupon", prisma.coupon);
+  summary.CouponRedemption = await backupTable("CouponRedemption", prisma.couponRedemption);
+  summary.PrintShop = await backupTable("PrintShop", prisma.printShop);
 
   const summaryPath = path.join(backupDir, "summary.json");
   await fs.writeFile(summaryPath, JSON.stringify({

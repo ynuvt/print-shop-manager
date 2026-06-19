@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, CSSProperties } from "react";
 import type { PrintFileOption as PrintOptions } from "@printowl/types";
 import { Link } from "react-router-dom";
@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Copy,
   FileText,
+  MapPin,
   MessageCircle,
   Plus,
   RefreshCw,
@@ -28,8 +29,11 @@ import {
   uploadFileToR2,
   deleteUserFile,
   deleteUserPrintJob,
+  getShops,
   storage,
 } from "../api/api";
+import type { PrintShopInfo } from "../api/api";
+import ShopPickerModal, { saveRecentShop } from "../components/ShopPickerModal";
 import { useNotifications } from "../components/NotificationCenter";
 // import ReviewPage from "./ReviewPage";
 import PrintJobsList from "../components/PrintJobsList";
@@ -57,7 +61,7 @@ type WalkthroughStep =
 
 
 
-function ToggleGroup<T extends string | number>({
+const ToggleGroup = memo(function ToggleGroup<T extends string | number>({
   options,
   value,
   onChange,
@@ -81,10 +85,11 @@ function ToggleGroup<T extends string | number>({
       ))}
     </div>
   );
-}
+}) as unknown as <T extends string | number>(props: { options: { label: string; value: T }[]; value: T; onChange: (v: T) => void }) => ReturnType<typeof import("react").createElement>;
 
-function FileCard({
+const FileCard = memo(function FileCard({
   pf,
+  idx,
   expanded,
   onToggle,
   isWalkthroughTarget,
@@ -93,18 +98,21 @@ function FileCard({
   isTitleWalkthroughTarget,
   onUpdate,
   onRemove,
+  pricing,
 }: {
   pf: PrintFileState;
+  idx: number;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle: (idx: number) => void;
   isWalkthroughTarget?: boolean;
   walkthroughRef?: (node: HTMLDivElement | null) => void;
   titleRef?: (node: HTMLButtonElement | null) => void;
   isTitleWalkthroughTarget?: boolean;
-  onUpdate: (patch: Partial<PrintOptions>) => void;
-  onRemove: () => void;
+  onUpdate: (idx: number, patch: Partial<PrintOptions>) => void;
+  onRemove: (idx: number) => void;
+  pricing?: { priceBW?: number; priceColor?: number };
 }) {
-  const cost = calculateFileCost(pf.detectedPages, pf.options);
+  const cost = calculateFileCost(pf.detectedPages, pf.options, pricing);
 
   return (
     <motion.article 
@@ -123,7 +131,7 @@ function FileCard({
               ? "upload-file-title walkthrough-target"
               : "upload-file-title"
           }
-          onClick={onToggle}
+          onClick={() => onToggle(idx)}
         >
           <div className="file-icon" aria-hidden="true">
             <FileText size={18} />
@@ -139,7 +147,7 @@ function FileCard({
           <button
             type="button"
             className="file-edit-hint file-edit-hint--action"
-            onClick={onToggle}
+            onClick={() => onToggle(idx)}
           >
             <SlidersHorizontal size={12} />
             Edit details
@@ -152,8 +160,8 @@ function FileCard({
           <button
             type="button"
             className="remove-file-btn"
-            onClick={onRemove}
             aria-label="Remove file"
+            onClick={() => onRemove(idx)}
           >
             <X size={14} strokeWidth={2.4} aria-hidden="true" />
           </button>
@@ -183,7 +191,7 @@ function FileCard({
                 { label: "Color", value: "COLOR" },
               ]}
               value={pf.options.colorMode}
-              onChange={(v) => onUpdate({ colorMode: v })}
+              onChange={(v) => onUpdate(idx, { colorMode: v })}
             />
           </div>
 
@@ -195,7 +203,7 @@ function FileCard({
                 { label: "Both Sides", value: "BOTH" },
               ]}
               value={pf.options.duplex}
-              onChange={(v) => onUpdate({ duplex: v })}
+              onChange={(v) => onUpdate(idx, { duplex: v })}
             />
           </div>
 
@@ -207,7 +215,7 @@ function FileCard({
                 { label: "Horizontal", value: "LANDSCAPE" },
               ]}
               value={pf.options.orientation}
-              onChange={(v) => onUpdate({ orientation: v })}
+              onChange={(v) => onUpdate(idx, { orientation: v })}
             />
           </div>
 
@@ -219,7 +227,7 @@ function FileCard({
                 { label: "Original size", value: "NOSCALE" },
               ]}
               value={pf.options.scaleMode}
-              onChange={(v) => onUpdate({ scaleMode: v })}
+              onChange={(v) => onUpdate(idx, { scaleMode: v })}
             />
           </div>
 
@@ -231,7 +239,7 @@ function FileCard({
                 { label: "Custom", value: "CUSTOM" },
               ]}
               value={pf.options.pageRange}
-              onChange={(v) => onUpdate({ pageRange: v, customRange: "" })}
+              onChange={(v) => onUpdate(idx, { pageRange: v, customRange: "" })}
             />
 
             {pf.options.pageRange === "CUSTOM" && (
@@ -239,7 +247,7 @@ function FileCard({
                 <input
                   type="text"
                   value={pf.options.customRange ?? ""}
-                  onChange={(e) => onUpdate({ customRange: e.target.value })}
+                  onChange={(e) => onUpdate(idx, { customRange: e.target.value })}
                   placeholder={`1-5, 8, 10-12 (total ${pf.detectedPages} pages)`}
                   className={
                     pf.pageRangeError ? "text-input invalid" : "text-input"
@@ -261,7 +269,7 @@ function FileCard({
                 { label: "4", value: 4 },
               ]}
               value={pf.options.pagesPerSheet}
-              onChange={(v) => onUpdate({ pagesPerSheet: v })}
+              onChange={(v) => onUpdate(idx, { pagesPerSheet: v })}
             />
           </div>
 
@@ -271,7 +279,7 @@ function FileCard({
               <button
                 type="button"
                 onClick={() =>
-                  onUpdate({ copies: Math.max(1, pf.options.copies - 1) })
+                  onUpdate(idx, { copies: Math.max(1, pf.options.copies - 1) })
                 }
               >
                 -
@@ -279,7 +287,7 @@ function FileCard({
               <span>{pf.options.copies}</span>
               <button
                 type="button"
-                onClick={() => onUpdate({ copies: pf.options.copies + 1 })}
+                onClick={() => onUpdate(idx, { copies: pf.options.copies + 1 })}
               >
                 +
               </button>
@@ -290,7 +298,7 @@ function FileCard({
       </AnimatePresence>
     </motion.article>
   );
-}
+});
 
 export default function HomePage({
   theme,
@@ -313,12 +321,12 @@ export default function HomePage({
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { notify } = useNotifications();
   const [isWhatsappSynced, setIsWhatsappSynced] = useState(false);
   const [showSyncWhatsappModal, setShowSyncWhatsappModal] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = useState(false);
 
@@ -349,13 +357,37 @@ export default function HomePage({
   );
   const [draftJobId, setDraftJobId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const totalBytes = printFiles.reduce((sum, file) => sum + ((file.file as any)?.size ?? 0), 0);
-  const overallProgress = uploadProgress.length
-    ? Math.round(
-        uploadProgress.reduce((sum, value) => sum + value, 0) /
-          uploadProgress.length,
-      )
-    : 0;
+
+  // ── Shop selection ──
+  const [shops, setShops] = useState<PrintShopInfo[]>([]);
+  const [selectedShop, setSelectedShop] = useState<PrintShopInfo | null>(null);
+  const [showShopPicker, setShowShopPicker] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // Keep a ref to the current printFiles so callbacks like removeFile can stay stable
+  const printFilesRef = useRef<PrintFileState[]>(printFiles);
+  useEffect(() => { printFilesRef.current = printFiles; }, [printFiles]);
+
+  const totalBytes = useMemo(
+    () => printFiles.reduce((sum, file) => sum + ((file as any).file?.size ?? 0), 0),
+    [printFiles],
+  );
+
+  const overallProgress = useMemo(
+    () =>
+      uploadProgress.length
+        ? Math.round(uploadProgress.reduce((sum, v) => sum + v, 0) / uploadProgress.length)
+        : 0,
+    [uploadProgress],
+  );
+
+  const pricingForCards = useMemo(
+    () =>
+      selectedShop
+        ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor }
+        : undefined,
+    [selectedShop?.priceBW, selectedShop?.priceColor],
+  );
 
   const debounceSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPersistedOptionsRef = useRef<Record<string, PrintOptions>>({});
@@ -430,23 +462,14 @@ export default function HomePage({
   }, [isWhatsappSynced]);
 
   useEffect(() => {
-    const stored = storage.get("lastReviewVerificationCode");
-    if (stored) {
-      setVerificationCode(stored);
-      storage.remove("lastReviewVerificationCode");
-    }
-  }, []);
-
-  useEffect(() => {
-    if (showSteps || verificationCode) {
+    if (showSteps) {
       setWalkthroughStep(null);
       return;
     }
-
     if (onboardingEligible) {
       setWalkthroughStep((current) => current ?? "upload");
     }
-  }, [onboardingEligible, showSteps, verificationCode]);
+  }, [onboardingEligible, showSteps]);
 
 
 
@@ -583,6 +606,26 @@ export default function HomePage({
       void fetchWebDraft();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    getShops()
+      .then((fetched) => {
+        setShops(fetched);
+        setSelectedShop((current) => {
+          if (current) return current;
+          try {
+            const recents = JSON.parse(localStorage.getItem("printowl_recent_shops") ?? "[]") as PrintShopInfo[];
+            if (recents.length > 0) {
+              const lastUsed = fetched.find((s) => s.shopId === recents[0]?.shopId);
+              if (lastUsed) return lastUsed;
+            }
+          } catch {}
+          return fetched[0] ?? null;
+        });
+      })
+      .catch(() => {});
   }, [userId]);
 
   useEffect(() => {
@@ -921,7 +964,7 @@ export default function HomePage({
   );
 
   const removeFile = useCallback(async (idx: number) => {
-    const target = printFiles[idx];
+    const target = printFilesRef.current[idx];
     if (target?.id) {
       try {
         await deleteUserFile(target.id);
@@ -931,7 +974,7 @@ export default function HomePage({
     }
     setPrintFiles((prev) => prev.filter((_, i) => i !== idx));
     setExpandedIdx((prev) => (prev === idx ? null : prev));
-  }, [printFiles]);
+  }, []);
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -968,57 +1011,61 @@ export default function HomePage({
     [walkthroughFileIndex, walkthroughStep],
   );
 
-  const onSubmit = async () => {
+  const onSubmit = () => {
     if (!userId || !printFiles.length || isSubmitting || !draftJobId) return;
+    if (!selectedShop) {
+      setShowShopPicker(true);
+      return;
+    }
+    if (totalBytes > MAX_JOB_UPLOAD_BYTES) {
+      setError(`Total upload too large (max ${MAX_JOB_UPLOAD_MB} MB per job). Remove some files to continue.`);
+      return;
+    }
+    setShowConfirmModal(true);
+  };
+
+  const doSubmit = async () => {
+    if (!userId || !printFiles.length || isSubmitting || !draftJobId || !selectedShop) return;
 
     if (walkthroughStep === "submit") {
       setWalkthroughStep(null);
       void markOnboardingCompleted();
     }
 
-
-
-    if (totalBytes > MAX_JOB_UPLOAD_BYTES) {
-      setError(
-        `Total upload too large (max ${MAX_JOB_UPLOAD_MB} MB per job). Remove some files to continue.`,
-      );
-      return;
-    }
-
+    const capturedJobId = draftJobId;
+    setShowConfirmModal(false);
     setUploadStage("creating");
     setIsSubmitting(true);
     setError(null);
     setUploadProgress(printFiles.map(() => 0));
 
     try {
-      const result = await submitWhatsappJobReview({
-        jobId: draftJobId,
+      await submitWhatsappJobReview({
+        jobId: capturedJobId,
+        shopId: selectedShop.shopId,
         files: printFiles.map((pf) => ({
           id: pf.id!,
           options: pf.options,
         })),
       });
 
-      setVerificationCode(String(result.verificationCode));
+      saveRecentShop(selectedShop);
       setPrintFiles([]);
       setDraftJobId(null);
       setExpandedIdx(null);
-
+      setSelectedShop(null);
       setRefreshTrigger((t) => t + 1);
+      setSubmittedJobId(capturedJobId);
     } catch (err) {
-      const errMsg =
-        err instanceof Error
-          ? err.message
-          : "Something went wrong.";
+      const errMsg = err instanceof Error ? err.message : "Something went wrong.";
       notify(`${errMsg} Please try again now.`, { variant: "error" });
-
     } finally {
       setIsSubmitting(false);
       setUploadProgress([]);
     }
   };
 
-  const totals = buildJobTotals(printFiles);
+  const totals = buildJobTotals(printFiles, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor } : undefined);
 
   const hasErrors = printFiles.some(
     (f) =>
@@ -1032,7 +1079,20 @@ export default function HomePage({
     !hasErrors &&
     !isSubmitting &&
     totalBytes <= MAX_JOB_UPLOAD_BYTES;
-  const successDigits = verificationCode ? verificationCode.split("") : [];
+  const [confirmModalOpenedPicker, setConfirmModalOpenedPicker] = useState(false);
+  const handleShopSelected = (shop: PrintShopInfo) => {
+    setSelectedShop(shop);
+    setShowShopPicker(false);
+    if (confirmModalOpenedPicker) {
+      setConfirmModalOpenedPicker(false);
+      setShowConfirmModal(true);
+    }
+  };
+  const openPickerFromConfirm = () => {
+    setShowConfirmModal(false);
+    setConfirmModalOpenedPicker(true);
+    setShowShopPicker(true);
+  };
   const isWalkthroughActive = walkthroughStep !== null;
   const showCallout =
     walkthroughStep === "upload" ||
@@ -1252,51 +1312,7 @@ export default function HomePage({
                 )}
               </div>
 
-          {verificationCode ? (
-            <div className="success-stack">
-              <div className="success-card">
-                <p>Job submitted successfully</p>
-                <div
-                  className="otp-digits"
-                  aria-label={`Verification code ${verificationCode}`}
-                >
-                  {successDigits.map((digit, idx) => (
-                    <div key={`${digit}-${idx}`} className="otp-digit">
-                      {digit}
-                    </div>
-                  ))}
-                </div>
-                <span className="highlight-text">
-                  Show this to the shopkeeper and collect your prints.
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => setVerificationCode(null)}
-                >
-                  Create More Jobs
-                </button>
-              </div>
-              <div className="feedback-card">
-                <div>
-                  <p className="feedback-title">We are in beta</p>
-                  <p className="feedback-note highlight-text">
-                    We are also from TCET and would love to hear your feedback
-                    and ideas.
-                  </p>
-                </div>
-                <a
-                  className="btn feedback-btn"
-                  href="https://forms.gle/sMmC5ePS5RxP6ZLJ7"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Share Feedback
-                </a>
-              </div>
-            </div>
-          ) : (
-            <>
+          <>
               <div
                 className={
                   isDragActive ? "upload-dropzone active" : "upload-dropzone"
@@ -1549,32 +1565,30 @@ export default function HomePage({
                       <FileCard
                         key={pf.id || `${pf.name}-${idx}`}
                         pf={pf}
+                        idx={idx}
                         expanded={expandedIdx === idx}
-                        onToggle={() => handleFileToggle(idx)}
+                        onToggle={handleFileToggle}
                         isWalkthroughTarget={
                           walkthroughStep === "customize" &&
                           idx === walkthroughFileIndex
                         }
                         walkthroughRef={
                           idx === walkthroughFileIndex
-                            ? (node) => {
-                                fileOptionsRef.current = node;
-                              }
+                            ? (node) => { fileOptionsRef.current = node; }
                             : undefined
                         }
                         titleRef={
                           idx === walkthroughFileIndex
-                            ? (node) => {
-                                fileTitleRef.current = node;
-                              }
+                            ? (node) => { fileTitleRef.current = node; }
                             : undefined
                         }
                         isTitleWalkthroughTarget={
                           walkthroughStep === "file-select" &&
                           idx === walkthroughFileIndex
                         }
-                        onUpdate={(patch) => updateOptions(idx, patch)}
-                        onRemove={() => removeFile(idx)}
+                        onUpdate={updateOptions}
+                        onRemove={removeFile}
+                        pricing={pricingForCards}
                       />
                     ))}
                     </AnimatePresence>
@@ -1611,37 +1625,53 @@ export default function HomePage({
                     </div>
                   )}
 
-                  <div
-                    ref={summaryCardRef}
-                    className="summary-card"
-                  >
-                    <p>Total</p>
-                    <strong>Rs {totals.totalCost}</strong>
-                    <span>
-                      {printFiles.length} file(s) • {totals.totalPages} pages •{" "}
-                      {totals.estimatedTime} min
-                    </span>
-                  </div>
+                  <div className="submit-panel" ref={summaryCardRef}>
+                    <div className="submit-panel-summary">
+                      <div className="submit-panel-price">
+                        <span className="submit-panel-price-label">Total</span>
+                        <strong className="submit-panel-price-value">Rs {totals.totalCost}</strong>
+                      </div>
+                      <div className="submit-panel-stats">
+                        <span>{printFiles.length} file{printFiles.length !== 1 ? "s" : ""}</span>
+                        <span className="submit-panel-dot">·</span>
+                        <span>{totals.totalPages} page{totals.totalPages !== 1 ? "s" : ""}</span>
+                      </div>
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={onSubmit}
-                    disabled={!canSubmit}
-                    ref={submitButtonRef}
-                    className={`${
-                      canSubmit
-                        ? "btn btn-primary submit-btn"
-                        : "btn btn-disabled submit-btn"
-                    }${walkthroughStep === "submit" ? " walkthrough-target" : ""}`}
-                  >
-                    {isSubmitting
-                      ? "Uploading and Submitting..."
-                      : "Confirm and Print"}
-                  </button>
+                    <button
+                      type="button"
+                      className="shop-inline-row submit-panel-shop"
+                      onClick={() => setShowShopPicker(true)}
+                    >
+                      <MapPin size={13} className="shop-inline-pin" />
+                      <span className="shop-inline-label">Printing at</span>
+                      <span className="shop-inline-name">
+                        {selectedShop ? (selectedShop.name || selectedShop.username) : "Select shop"}
+                      </span>
+                      <span className="shop-inline-change">Change</span>
+                    </button>
+
+                    <div className="submit-panel-action">
+                      <button
+                        type="button"
+                        onClick={onSubmit}
+                        disabled={!canSubmit}
+                        ref={submitButtonRef}
+                        className={`${
+                          canSubmit
+                            ? "btn btn-primary submit-btn"
+                            : "btn btn-disabled submit-btn"
+                        }${walkthroughStep === "submit" ? " walkthrough-target" : ""}`}
+                      >
+                        {isSubmitting
+                          ? "Uploading and Submitting..."
+                          : "Review Order"}
+                      </button>
+                    </div>
+                  </div>
                 </>
               )}
             </>
-          )}
         </motion.section>
 
             <input
@@ -1654,7 +1684,12 @@ export default function HomePage({
             />
           </>
 
-        <PrintJobsList userId={userId} refreshTrigger={refreshTrigger} />
+        <PrintJobsList
+          userId={userId}
+          refreshTrigger={refreshTrigger}
+          openJobId={submittedJobId}
+          onJobPanelClose={() => setSubmittedJobId(null)}
+        />
       </main>
       <footer className="site-footer">
         <div className="site-footer-inner">
@@ -2034,6 +2069,128 @@ export default function HomePage({
           </div>
         )}
       </AnimatePresence>
+
+      {showShopPicker && (
+        <ShopPickerModal
+          shops={shops}
+          onSelect={handleShopSelected}
+          onClose={() => {
+            setShowShopPicker(false);
+            if (confirmModalOpenedPicker) {
+              setConfirmModalOpenedPicker(false);
+              setShowConfirmModal(true);
+            }
+          }}
+        />
+      )}
+
+      {showConfirmModal && selectedShop && (
+        <div
+          className="modal-shell"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-modal-title"
+          onClick={() => setShowConfirmModal(false)}
+        >
+          <div className="modal-card confirm-submit-card" onClick={(e) => e.stopPropagation()}>
+
+            {/* Modal Header */}
+            <div className="confirm-modal-header">
+              <h2 className="confirm-modal-title" id="confirm-modal-title">Confirm Details</h2>
+              <p className="confirm-modal-subtitle">Review your print files and location before submitting</p>
+            </div>
+
+            {/* Files — topmost, scrollable */}
+            <div className="confirm-files-section">
+              <p className="confirm-files-heading">
+                {printFiles.length} file{printFiles.length !== 1 ? "s" : ""} · {totals.totalPages} pages
+              </p>
+              <ul className="confirm-files-list">
+                {printFiles.map((pf, idx) => {
+                  const cost = calculateFileCost(pf.detectedPages, pf.options, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor } : undefined);
+                  return (
+                    <li key={pf.id || idx} className="confirm-file-row">
+                      <div className="confirm-file-row-head">
+                        <div className="confirm-file-icon">
+                          <FileText size={12} />
+                        </div>
+                        <div className="confirm-file-info">
+                          <p className="confirm-file-name">{pf.name}</p>
+                          <span className="confirm-file-meta">
+                            {pf.detectedPages}p · Rs {cost}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="confirm-file-tags">
+                        <span className={`confirm-file-tag${pf.options.colorMode === "COLOR" ? " confirm-file-tag--color" : ""}`}>
+                          {pf.options.colorMode === "COLOR" ? "Color" : "B&W"}
+                        </span>
+                        <span className="confirm-file-tag">
+                          {pf.options.duplex === "BOTH" ? "Both Sides" : "One Side"}
+                        </span>
+                        {pf.options.orientation === "LANDSCAPE" && (
+                          <span className="confirm-file-tag">Landscape</span>
+                        )}
+                        {pf.options.pagesPerSheet > 1 && (
+                          <span className="confirm-file-tag">{pf.options.pagesPerSheet}-up</span>
+                        )}
+                        {pf.options.copies > 1 && (
+                          <span className="confirm-file-tag confirm-file-tag--copies">{pf.options.copies}×</span>
+                        )}
+                        {pf.options.pageRange === "CUSTOM" && pf.options.customRange && (
+                          <span className="confirm-file-tag">pp. {pf.options.customRange}</span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            {/* Total block */}
+            <div className="confirm-total-block">
+              <span className="confirm-total-label">Total</span>
+              <span className="confirm-total-value">Rs {totals.totalCost}</span>
+            </div>
+
+            {/* Shop */}
+            <div className="confirm-shop-block">
+              <div className="confirm-shop-label-row">
+                <MapPin size={12} />
+                <span>Printing at</span>
+              </div>
+              <div className="confirm-shop-name-row">
+                <span className="confirm-shop-name">{selectedShop.name || selectedShop.username}</span>
+                <button
+                  type="button"
+                  className="confirm-change-btn"
+                  onClick={openPickerFromConfirm}
+                >
+                  Change
+                </button>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="btn confirm-cancel-btn"
+                onClick={() => setShowConfirmModal(false)}
+              >
+                Go Back
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary confirm-submit-btn"
+                onClick={() => void doSubmit()}
+              >
+                Submit Job
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -177,13 +177,15 @@ model PrintJob {
   deleted          Boolean  @default(false)
   expired          Boolean  @default(false)
   status           PrintJobStatus @default(PENDING)
-  verificationCode Int?           @unique
+  verificationCode Int?
   oldOtp           Int?
   colorMode        ColorMode      @default(BW)
   createdAt        DateTime @default(now())
   notified         Boolean  @default(false)
   shopId           String?
   shop             PrintShop?     @relation(fields: [shopId], references: [shopId], onDelete: SetNull, map: "printjob_shopId_fkey")
+
+  @@unique([verificationCode, shopId], name: "printjob_code_shop_unique")
 }
 
 model User {
@@ -382,9 +384,17 @@ model CouponRedemption {
 
 model PrintShop {
   id        String     @id @default(uuid())
+  name      String     @default("")
   username  String     @unique
   password  String
   shopId    String     @unique
+  landmark  String?
+  imageUrl  String?
+  latitude  Float?
+  longitude Float?
+  priceBW   Float      @default(2)
+  priceColor Float     @default(7)
+  upiId     String?
   isActive  Boolean    @default(true)
   createdAt DateTime   @default(now())
   printJobs PrintJob[]

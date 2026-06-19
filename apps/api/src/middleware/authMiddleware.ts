@@ -20,6 +20,7 @@ export interface ExtendedRequest extends Request {
     uid: string;
     role: string;
     createdAt: number;
+    shopId?: string;
   };
 }
 
@@ -44,6 +45,7 @@ export function authMiddleware(allowedRoles: string[] = []) {
         uid: string;
         role: string;
         createdAt: number;
+        shopId?: string;
       };
 
       req.user = decoded;

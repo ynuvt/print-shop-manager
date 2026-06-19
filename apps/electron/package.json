@@ -10,7 +10,7 @@
     "dist:win:portable": "npm run build && electron-builder --win portable --x64",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
-    "devv": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
     "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort",
     "dev:main": "tsc -p tsconfig.node.json --watch --preserveWatchOutput",
     "dev:electron": "wait-on tcp:5174 dist-electron/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5174 electron dist-electron/main.js",

@@ -21,6 +21,7 @@
     "db:seed-test-coupons": "node --loader ts-node/esm scripts/seedTestCoupons.ts",
     "update:printoption": "node --loader ts-node/esm scripts/updatePrintOption.ts",
     "build": "npx prisma generate && npx tsc -b",
+    "dev": "npx prisma generate && npx tsc -b",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

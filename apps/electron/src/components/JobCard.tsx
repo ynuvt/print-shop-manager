@@ -56,7 +56,7 @@ export default function JobCard({ job, selected, onSelect }: JobCardProps) {
             #
           </span>
           <p className="font-mono text-sm font-bold text-[var(--text)] leading-none tracking-tight">
-            {job.verificationCode}
+            {String(job.verificationCode).padStart(4, "0")}
           </p>
         </div>
         <StatusBadge status={job.status} />

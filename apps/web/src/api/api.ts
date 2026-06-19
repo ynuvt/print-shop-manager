@@ -1,9 +1,27 @@
 import type { PrintFileOption } from "@printowl/types";
 import axios from "axios";
-// src/api/api.ts
+
 const API_ORIGIN =
   import.meta.env.VITE_API_ORIGIN ?? "https://zopy.devlocstudio.in";
 const BASE_URL = `${API_ORIGIN}/api/v1`;
+
+// ── Frontend in-memory cache ───────────────────────────────────────────────
+// Prevents duplicate network calls when multiple components fetch the same data
+// within a short window (e.g. PrintJobsList + JobDetailPanel both calling getUserPrintJobs).
+interface CacheEntry { data: unknown; expires: number }
+const apiCache = new Map<string, CacheEntry>();
+
+async function cachedFetch<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const hit = apiCache.get(key);
+  if (hit && Date.now() < hit.expires) return hit.data as T;
+  const data = await fn();
+  apiCache.set(key, { data, expires: Date.now() + ttlMs });
+  return data;
+}
+
+export function invalidateApiCache(key: string) {
+  apiCache.delete(key);
+}
 const MAX_JOB_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export type UserPrintJobFile = {
@@ -56,6 +74,8 @@ export type UserPrintJob = {
     phoneNumber: string;
     name?: string | null;
   } | null;
+  shopUpiId?: string | null;
+  shopName?: string | null;
 };
 
 export type UserSession = {
@@ -335,8 +355,33 @@ export async function addFilesToWebDraft(
   return res.data as { job: UserPrintJob };
 }
 
+export type PrintShopInfo = {
+  id: string;
+  name: string;
+  username: string;
+  shopId: string;
+  latitude: number | null;
+  longitude: number | null;
+  landmark: string | null;
+  imageUrl: string | null;
+  priceBW: number;
+  priceColor: number;
+  upiId?: string | null;
+};
+
+export async function getShops(): Promise<PrintShopInfo[]> {
+  return cachedFetch("shops", 60_000, async () => {
+    const token = getToken();
+    const res = await axios.get(`${BASE_URL}/jobs/shops`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    return (res.data?.shops ?? []) as PrintShopInfo[];
+  });
+}
+
 export async function submitWhatsappJobReview(input: {
   jobId: string;
+  shopId: string;
   files: Array<{ id: string; options: PrintFileOption }>;
 }): Promise<{ verificationCode: number }> {
   const token = getToken();
@@ -418,16 +463,16 @@ export async function updateUserFilePrintOptions(
 }
 
 // Fetch all print jobs for the currently logged-in user.
+// Cached for 3 seconds so opening a job detail panel doesn't re-fetch the full list.
 export async function getUserPrintJobs(): Promise<UserPrintJob[]> {
-  const token = getToken();
-  const res = await axios.get(`${BASE_URL}/jobs/user-jobs`, {
-    headers: {
-      authorization: `Bearer ${token}`,
-    },
+  return cachedFetch("user-jobs", 3_000, async () => {
+    const token = getToken();
+    const res = await axios.get(`${BASE_URL}/jobs/user-jobs`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.data) throw new Error("Failed to fetch user print jobs");
+    return res.data;
   });
-
-  if (!res.data) throw new Error("Failed to fetch user print jobs");
-  return res.data;
 }
 
 export async function getPrintJobByIdPublic(id: string): Promise<UserPrintJob> {
@@ -515,6 +560,7 @@ export async function deleteUserPrintJob(id: string): Promise<void> {
     },
   });
 
+  invalidateApiCache("user-jobs");
   if (!res.data) throw new Error("Failed to delete print job");
 }
 
@@ -531,6 +577,7 @@ export async function resubmitCompletedPrintJob(id: string): Promise<void> {
     },
   );
 
+  invalidateApiCache("user-jobs");
   if (!res.data) throw new Error("Failed to submit job again");
 }
 

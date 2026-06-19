@@ -40,9 +40,80 @@ export default function App() {
   const [newShopUsername, setNewShopUsername] = useState("");
   const [newShopPassword, setNewShopPassword] = useState("");
   const [newShopId, setNewShopId] = useState("");
+  const [newShopName, setNewShopName] = useState("");
+  const [newShopLandmark, setNewShopLandmark] = useState("");
+  const [newShopImageUrl, setNewShopImageUrl] = useState("");
+  const [newShopLatitude, setNewShopLatitude] = useState<string>("");
+  const [newShopLongitude, setNewShopLongitude] = useState<string>("");
+  const [newShopPriceBW, setNewShopPriceBW] = useState(2);
+  const [newShopPriceColor, setNewShopPriceColor] = useState(7);
+  const [newShopUpiId, setNewShopUpiId] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
   const [createSuccess, setCreateSuccess] = useState("");
   const [createError, setCreateError] = useState("");
+
+  // Editing Shop state
+  const [editingShop, setEditingShop] = useState<any>(null);
+  const [editName, setEditName] = useState("");
+  const [editLandmark, setEditLandmark] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [editLatitude, setEditLatitude] = useState<string>("");
+  const [editLongitude, setEditLongitude] = useState<string>("");
+  const [editPriceBW, setEditPriceBW] = useState(2);
+  const [editPriceColor, setEditPriceColor] = useState(7);
+  const [editUpiId, setEditUpiId] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editSuccess, setEditSuccess] = useState("");
+
+  // Uploading state
+  const [uploadingNew, setUploadingNew] = useState(false);
+  const [uploadingEdit, setUploadingEdit] = useState(false);
+
+  const handleImageUpload = async (file: File, isEdit: boolean) => {
+    const setUploading = isEdit ? setUploadingEdit : setUploadingNew;
+    const setImageUrl = isEdit ? setEditImageUrl : setNewShopImageUrl;
+    const setError = isEdit ? setEditError : setCreateError;
+
+    setUploading(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/analysis/presign-upload`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to get upload URL.");
+      }
+
+      const { uploadUrl, publicUrl } = await res.json();
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error("Failed to upload image file to R2.");
+      }
+
+      setImageUrl(publicUrl);
+    } catch (err: any) {
+      setError(err.message || "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,6 +214,14 @@ export default function App() {
           username: newShopUsername.trim(),
           password: newShopPassword.trim(),
           shopId: newShopId.trim().toUpperCase(),
+          name: newShopName.trim(),
+          landmark: newShopLandmark.trim() || null,
+          imageUrl: newShopImageUrl.trim() || null,
+          latitude: newShopLatitude ? Number(newShopLatitude) : null,
+          longitude: newShopLongitude ? Number(newShopLongitude) : null,
+          priceBW: Number(newShopPriceBW),
+          priceColor: Number(newShopPriceColor),
+          upiId: newShopUpiId.trim() || null,
         }),
       });
 
@@ -155,11 +234,64 @@ export default function App() {
       setNewShopUsername("");
       setNewShopPassword("");
       setNewShopId("");
+      setNewShopName("");
+      setNewShopLandmark("");
+      setNewShopImageUrl("");
+      setNewShopLatitude("");
+      setNewShopLongitude("");
+      setNewShopPriceBW(2);
+      setNewShopPriceColor(7);
+      setNewShopUpiId("");
       if (token) fetchAnalytics(token);
     } catch (err: any) {
       setCreateError(err.message || "Something went wrong.");
     } finally {
       setCreateLoading(false);
+    }
+  };
+
+  const handleUpdateShop = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingShop) return;
+    
+    setEditLoading(true);
+    setEditError("");
+    setEditSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/analysis/shops/${editingShop.shopId}`, {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: editName.trim(),
+          landmark: editLandmark.trim() || null,
+          imageUrl: editImageUrl.trim() || null,
+          latitude: editLatitude ? Number(editLatitude) : null,
+          longitude: editLongitude ? Number(editLongitude) : null,
+          priceBW: Number(editPriceBW),
+          priceColor: Number(editPriceColor),
+          upiId: editUpiId.trim() || null,
+          isActive: editIsActive,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update shop.");
+      }
+
+      setEditSuccess(`Shop "${data.username}" updated successfully!`);
+      if (token) fetchAnalytics(token);
+      setTimeout(() => {
+        setEditingShop(null);
+        setEditSuccess("");
+      }, 1000);
+    } catch (err: any) {
+      setEditError(err.message || "Something went wrong.");
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -542,21 +674,70 @@ export default function App() {
                       <thead>
                         <tr className="border-b border-gray-800 text-gray-400 text-xs font-semibold uppercase tracking-wider">
                           <th className="pb-3 pr-2">Username / Shop ID</th>
-                          <th className="pb-3 px-2 text-right">Completed Jobs</th>
-                          <th className="pb-3 px-2 text-right">Pages Printed</th>
-                          <th className="pb-3 pl-2 text-right">Revenue</th>
+                          <th className="pb-3 px-2">Name / Landmark</th>
+                          <th className="pb-3 px-2 text-right">Pricing (B&W / Color)</th>
+                          <th className="pb-3 px-2 text-right">Jobs</th>
+                          <th className="pb-3 px-2 text-right">Pages</th>
+                          <th className="pb-3 px-2 text-right">Revenue</th>
+                          <th className="pb-3 pl-2 text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800/50">
                         {shopsData.shops.map((shop: any) => (
-                          <tr key={shop.id} className="hover:bg-gray-800/10 transition-colors">
+                          <tr key={shop.id} className={`hover:bg-gray-800/10 transition-colors ${!shop.isActive ? "opacity-50" : ""}`}>
                             <td className="py-3.5 pr-2">
-                              <p className="font-bold text-white">{shop.username}</p>
-                              <p className="text-xs text-gray-500 font-mono mt-0.5">{shop.shopId}</p>
+                              <div className="flex items-center gap-2">
+                                <span className={`w-2 h-2 rounded-full ${shop.isActive ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-red-500"}`} title={shop.isActive ? "Active" : "Inactive"}></span>
+                                <p className="font-bold text-white">{shop.username}</p>
+                              </div>
+                              <p className="text-xs text-gray-500 font-mono mt-0.5 ml-4">{shop.shopId}</p>
+                            </td>
+                            <td className="py-3.5 px-2">
+                              <p className="text-sm font-semibold text-gray-200">{shop.name || "—"}</p>
+                              {shop.landmark && (
+                                <p className="text-xs text-gray-400 italic mt-0.5 flex items-center gap-1">
+                                  📍 {shop.landmark}
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-2 text-right font-mono text-gray-300">
+                              <span>₹{shop.priceBW} / ₹{shop.priceColor}</span>
                             </td>
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">{shop.completedJobsCount}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">{shop.totalPagesPrinted}</td>
-                            <td className="py-3.5 pl-2 text-right font-mono text-amber-500 font-bold">₹{shop.totalRevenue}</td>
+                            <td className="py-3.5 px-2 text-right font-mono text-amber-500 font-bold">₹{shop.totalRevenue}</td>
+                            <td className="py-3.5 pl-2 text-center">
+                              <button
+                                onClick={() => {
+                                  setEditingShop(shop);
+                                  setEditName(shop.name || "");
+                                  setEditLandmark(shop.landmark || "");
+                                  setEditImageUrl(shop.imageUrl || "");
+                                  setEditLatitude(shop.latitude?.toString() || "");
+                                  setEditLongitude(shop.longitude?.toString() || "");
+                                  setEditPriceBW(shop.priceBW ?? 2);
+                                  setEditPriceColor(shop.priceColor ?? 7);
+                                  setEditUpiId(shop.upiId || "");
+                                  setEditIsActive(shop.isActive);
+                                  setEditError("");
+                                  setEditSuccess("");
+                                }}
+                                className="bg-amber-500 hover:bg-amber-600 text-gray-950 text-xs font-bold py-1 px-2.5 rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer active:scale-95 transition-all"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                                Edit
+                              </button>
+                              {shop.imageUrl && (
+                                <a
+                                  href={shop.imageUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-bold py-1.5 px-2.5 rounded-lg transition-colors inline-flex items-center ml-2 cursor-pointer active:scale-95 transition-all"
+                                >
+                                  Photo
+                                </a>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -619,6 +800,141 @@ export default function App() {
                       />
                     </div>
 
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                        Display Name
+                      </label>
+                      <input
+                        type="text"
+                        value={newShopName}
+                        onChange={(e) => setNewShopName(e.target.value)}
+                        placeholder="e.g. TCET Harshad Shop"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-sans"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                        Landmark
+                      </label>
+                      <input
+                        type="text"
+                        value={newShopLandmark}
+                        onChange={(e) => setNewShopLandmark(e.target.value)}
+                        placeholder="e.g. Near main canteen"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-sans"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 font-sans">
+                          Shop Image
+                        </label>
+                        {uploadingNew && (
+                          <span className="text-[10px] text-amber-500 font-bold animate-pulse">
+                            Uploading to R2...
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newShopImageUrl}
+                            onChange={(e) => setNewShopImageUrl(e.target.value)}
+                            placeholder="Image URL or upload file..."
+                            className="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-sans"
+                          />
+                          <label className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-bold py-3 px-4 rounded-xl transition-colors cursor-pointer inline-flex items-center justify-center shrink-0 active:scale-95 transition-all">
+                            Upload File
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleImageUpload(file, false);
+                              }}
+                              disabled={uploadingNew}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                          Latitude
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={newShopLatitude}
+                          onChange={(e) => setNewShopLatitude(e.target.value)}
+                          placeholder="e.g. 19.2856"
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                          Longitude
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={newShopLongitude}
+                          onChange={(e) => setNewShopLongitude(e.target.value)}
+                          placeholder="e.g. 72.8691"
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                          B&W Price (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0.1"
+                          step="0.1"
+                          required
+                          value={newShopPriceBW}
+                          onChange={(e) => setNewShopPriceBW(Number(e.target.value))}
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                          Color Price (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0.1"
+                          step="0.1"
+                          required
+                          value={newShopPriceColor}
+                          onChange={(e) => setNewShopPriceColor(Number(e.target.value))}
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">UPI ID (optional)</label>
+                      <input
+                        type="text"
+                        value={newShopUpiId}
+                        onChange={(e) => setNewShopUpiId(e.target.value)}
+                        placeholder="shopname@upi"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                      />
+                      <p className="text-xs text-gray-600 mt-1">Used to generate Pay Now links for customers.</p>
+                    </div>
+
                     {createError && (
                       <div className="bg-red-950/50 border border-red-900/50 text-red-400 text-xs p-3 rounded-lg flex items-center gap-2 font-sans">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
@@ -646,6 +962,232 @@ export default function App() {
             </div>
           </div>
         )}
+      {/* Edit Shop Modal */}
+      {editingShop && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6 relative animate-scale-in">
+            <button
+              onClick={() => setEditingShop(null)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white p-2 rounded-xl hover:bg-gray-800/50 transition-colors cursor-pointer"
+              title="Close"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            </button>
+
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <span className="w-2.5 h-2.5 bg-amber-500 rounded-full"></span>
+                Edit Shop Details
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Modify parameters for {editingShop.username} ({editingShop.shopId}).
+              </p>
+            </div>
+
+            <form onSubmit={handleUpdateShop} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Shop ID (Read-only)
+                  </span>
+                  <div className="bg-gray-950/50 border border-gray-800/60 rounded-xl px-4 py-2.5 text-sm font-mono text-gray-400">
+                    {editingShop.shopId}
+                  </div>
+                </div>
+                <div>
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                    Username (Read-only)
+                  </span>
+                  <div className="bg-gray-950/50 border border-gray-800/60 rounded-xl px-4 py-2.5 text-sm font-mono text-gray-400">
+                    {editingShop.username}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="e.g. TCET Harshad Shop"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-sans"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                  Landmark
+                </label>
+                <input
+                  type="text"
+                  value={editLandmark}
+                  onChange={(e) => setEditLandmark(e.target.value)}
+                  placeholder="e.g. Near main canteen"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-sans"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 font-sans">
+                    Shop Image
+                  </label>
+                  {uploadingEdit && (
+                    <span className="text-[10px] text-amber-500 font-bold animate-pulse">
+                      Uploading to R2...
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={editImageUrl}
+                      onChange={(e) => setEditImageUrl(e.target.value)}
+                      placeholder="Image URL or upload file..."
+                      className="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-sans"
+                    />
+                    <label className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-bold py-3 px-4 rounded-xl transition-colors cursor-pointer inline-flex items-center justify-center shrink-0 active:scale-95 transition-all">
+                      Upload File
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(file, true);
+                        }}
+                        disabled={uploadingEdit}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editLatitude}
+                    onChange={(e) => setEditLatitude(e.target.value)}
+                    placeholder="e.g. 19.2856"
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editLongitude}
+                    onChange={(e) => setEditLongitude(e.target.value)}
+                    placeholder="e.g. 72.8691"
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                    B&W Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    required
+                    value={editPriceBW}
+                    onChange={(e) => setEditPriceBW(Number(e.target.value))}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                    Color Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    required
+                    value={editPriceColor}
+                    onChange={(e) => setEditPriceColor(Number(e.target.value))}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5 font-sans">
+                  UPI ID (optional)
+                </label>
+                <input
+                  type="text"
+                  value={editUpiId}
+                  onChange={(e) => setEditUpiId(e.target.value)}
+                  placeholder="shopname@upi"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                />
+                <p className="text-xs text-gray-600 mt-1">Used to generate Pay Now links for customers.</p>
+              </div>
+
+              <div className="flex items-center gap-3 bg-gray-950/30 border border-gray-800/80 rounded-2xl p-4">
+                <input
+                  type="checkbox"
+                  id="editIsActive"
+                  checked={editIsActive}
+                  onChange={(e) => setEditIsActive(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-800 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                />
+                <label htmlFor="editIsActive" className="text-sm font-semibold text-gray-300 select-none cursor-pointer font-sans">
+                  Is Active (Open for orders)
+                </label>
+              </div>
+
+              {editError && (
+                <div className="bg-red-950/50 border border-red-900/50 text-red-400 text-xs p-3 rounded-lg flex items-center gap-2 font-sans">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                  {editError}
+                </div>
+              )}
+
+              {editSuccess && (
+                <div className="bg-emerald-950/50 border border-emerald-900/50 text-emerald-400 text-xs p-3 rounded-lg flex items-center gap-2 font-semibold font-sans">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                  {editSuccess}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingShop(null)}
+                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-400 hover:text-white border border-gray-800 hover:bg-gray-800 transition-colors cursor-pointer font-sans"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editLoading}
+                  className="bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold px-6 py-2.5 rounded-xl text-sm transition-all transform active:scale-95 disabled:opacity-50 cursor-pointer font-sans"
+                >
+                  {editLoading ? "Updating..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

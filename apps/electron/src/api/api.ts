@@ -97,8 +97,11 @@ export async function fetchAllJobs(): Promise<PrintJobSummary[]> {
   return res.json() as Promise<PrintJobSummary[]>;
 }
 
-export async function fetchJobByCode(code: string): Promise<PrintJob> {
-  const res = await fetch(`${API_BASE}/jobs/${code}`, {
+export async function fetchJobByCode(code: string, shopId?: string): Promise<PrintJob> {
+  const url = shopId
+    ? `${API_BASE}/jobs/${code}?shopId=${encodeURIComponent(shopId)}`
+    : `${API_BASE}/jobs/${code}`;
+  const res = await fetch(url, {
     headers: buildHeaders(),
   });
 
@@ -129,8 +132,11 @@ export async function updateJobStatus(
 
 export interface PrintShopInfo {
   id: string;
+  name: string;
   username: string;
   shopId: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export async function fetchActiveShops(): Promise<PrintShopInfo[]> {

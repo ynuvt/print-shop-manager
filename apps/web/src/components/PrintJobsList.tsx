@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileText } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Check, Copy, FileText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   deleteUserPrintJob,
@@ -59,7 +59,7 @@ function FileOptionCard({
 }) {
   const opt = file.option;
   const colorLabel =
-    opt?.colorMode === "COLOR" ? "Color" : "B\u0026W";
+    opt?.colorMode === "COLOR" ? "Color" : "B&W";
   const duplexLabel = opt?.duplex === "BOTH" ? "Both Sides" : "One Side";
   const paperLabel = opt?.paperSize ?? "A4";
 
@@ -101,16 +101,82 @@ function FileOptionCard({
   );
 }
 
-function JobDetailModal({
+function PayNowBlock({
+  upiId,
+  shopName,
+  amount,
+  jobId,
+}: {
+  upiId: string;
+  shopName: string;
+  amount: number;
+  jobId: string;
+}) {
+  const [copied, setCopied] = useState<"upi" | "amount" | null>(null);
+
+  const callbackUrl = `${window.location.origin}/?pret=1&jid=${encodeURIComponent(jobId)}`;
+  // Do NOT encode the UPI ID itself — the @ must stay raw in the pa= param
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(shopName)}&am=${amount.toFixed(2)}&cu=INR&tn=Print+Job+Payment&url=${encodeURIComponent(callbackUrl)}`;
+
+  const copy = (text: string, key: "upi" | "amount") => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  return (
+    <div className="job-pay-block">
+      <button
+        type="button"
+        className="btn btn-primary job-pay-btn"
+        onClick={() => { window.location.href = upiLink; }}
+      >
+        Pay {formatPrice(amount)}
+      </button>
+
+      <div className="job-pay-details">
+        <div className="job-pay-detail-row">
+          <span className="job-pay-detail-label">UPI ID</span>
+          <span className="job-pay-detail-value">{upiId}</span>
+          <button
+            type="button"
+            className="job-pay-copy-btn"
+            onClick={() => copy(upiId, "upi")}
+            title="Copy UPI ID"
+          >
+            {copied === "upi" ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        </div>
+        <div className="job-pay-detail-row">
+          <span className="job-pay-detail-label">Amount</span>
+          <span className="job-pay-detail-value">{formatPrice(amount)}</span>
+          <button
+            type="button"
+            className="job-pay-copy-btn"
+            onClick={() => copy(amount.toFixed(2), "amount")}
+            title="Copy amount"
+          >
+            {copied === "amount" ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobDetailPanel({
   jobId,
   onClose,
   onJobUpdated,
   onJobDeleted,
+  paymentStatus,
 }: {
   jobId: string;
   onClose: () => void;
   onJobUpdated: (job: UserPrintJob) => void;
   onJobDeleted: (jobId: string) => void;
+  paymentStatus?: "success" | "failure" | "submitted" | null;
 }) {
   const { notify } = useNotifications();
   const [job, setJob] = useState<UserPrintJob | null>(null);
@@ -122,7 +188,6 @@ function JobDetailModal({
   const loadJob = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
       const fetched = await getUserPrintJobById(jobId);
       setJob(fetched);
@@ -142,39 +207,38 @@ function JobDetailModal({
 
   useEffect(() => {
     const socket = getSocket();
-
     const handler = (_userId: string, updatedJobId: string) => {
-      if (updatedJobId === jobId) {
-        console.log(`Job ${jobId} updated, reloading details...`);
-        void loadJob();
-      }
+      if (updatedJobId === jobId) void loadJob();
     };
-
     socket.on("job-status-updated", handler);
-    return () => {
-      socket.off("job-status-updated", handler);
-    };
+    return () => { socket.off("job-status-updated", handler); };
   }, [jobId, loadJob]);
 
-  const displayOtp = job?.verificationCode ?? job?.oldOtp;
-  const otpDigits = displayOtp ? String(displayOtp).split("") : [];
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const displayOtpString =
+    job?.verificationCode !== null && job?.verificationCode !== undefined
+      ? String(job.verificationCode).padStart(4, "0")
+      : (job?.oldOtp ? String(job.oldOtp) : "");
+  const otpDigits = displayOtpString ? displayOtpString.split("") : [];
   const isExpired = !!job?.expired;
   const canDelete = job ? (ACTIVE_STATUSES.includes(job.status) && !isExpired) : false;
   const canResubmit = job ? (COMPLETED_STATUSES.includes(job.status) && !isExpired) : false;
   const canViewFiles = job ? (!["REJECTED", "CANCELED"].includes(job.status) && !isExpired) : false;
 
-  const handleRefreshStatus = async () => {
-    await loadJob();
-  };
+  const handleRefreshStatus = async () => { await loadJob(); };
 
   const handleDeleteJob = async () => {
     if (!job || !canDelete || isDeleting) return;
-
     const confirmed = window.confirm(
       "Are you sure you want to delete this print job? This will permanently remove the job and its files from cloud storage.",
     );
     if (!confirmed) return;
-
     setIsDeleting(true);
     try {
       await deleteUserPrintJob(job.id);
@@ -182,9 +246,7 @@ function JobDetailModal({
       onJobDeleted(job.id);
       onClose();
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to delete this job";
-      notify(msg, { variant: "error" });
+      notify(err instanceof Error ? err.message : "Failed to delete this job", { variant: "error" });
     } finally {
       setIsDeleting(false);
     }
@@ -192,7 +254,6 @@ function JobDetailModal({
 
   const handleSubmitAgain = async () => {
     if (!job || !canResubmit || isResubmitting) return;
-
     setIsResubmitting(true);
     try {
       await resubmitCompletedPrintJob(job.id);
@@ -201,9 +262,7 @@ function JobDetailModal({
       onJobUpdated(refreshed);
       notify("Job submitted again", { variant: "success" });
     } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to submit job again";
-      notify(msg, { variant: "error" });
+      notify(err instanceof Error ? err.message : "Failed to submit job again", { variant: "error" });
     } finally {
       setIsResubmitting(false);
     }
@@ -211,161 +270,177 @@ function JobDetailModal({
 
   return (
     <div
-      className="modal-shell"
+      className="job-detail-panel"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
+      aria-label="Job Details"
     >
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
+      <div className="job-detail-panel-inner" onClick={(e) => e.stopPropagation()}>
+        {/* Sticky header */}
+        <div className="job-detail-panel-header">
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Back">
+            <ArrowLeft size={18} />
+          </button>
+          <div className="job-detail-panel-title">
             <p className="modal-label">Print Job</p>
             <h2>Job Details</h2>
-            {job && (
-              <p className="modal-helper">
-                {new Date(job.createdAt).toLocaleString()}
-              </p>
-            )}
-            {loading && <div className="skeleton skeleton-title" style={{ marginTop: "8px" }}></div>}
           </div>
-          <button type="button" className="icon-btn" onClick={onClose}>
-            x
-          </button>
         </div>
 
-        {error && (
-          <div style={{ padding: "20px 0" }}>
-            <p className="modal-error">{error}</p>
-            <button type="button" className="btn btn-primary" style={{ marginTop: "12px" }} onClick={onClose}>
-              Close
-            </button>
-          </div>
-        )}
+        {/* Scrollable content */}
+        <div className="job-detail-panel-content">
+          {/* Payment return banner */}
+          {paymentStatus === "success" && (
+            <div className="payment-status-banner payment-status-banner--success">
+              Payment received — show the OTP below to collect your prints.
+            </div>
+          )}
+          {paymentStatus === "failure" && (
+            <div className="payment-status-banner payment-status-banner--failure">
+              Payment failed or was cancelled. You can try again using Pay Now below.
+            </div>
+          )}
+          {paymentStatus === "submitted" && (
+            <div className="payment-status-banner payment-status-banner--pending">
+              Payment submitted and is being processed. Please wait a moment.
+            </div>
+          )}
 
-        {!error && (
-          <>
-            <div className="otp-card">
-              {loading ? (
-                <div className="skeleton skeleton-modal-otp" style={{ margin: 0 }}></div>
-              ) : job ? (
-                <>
-                  <p className="otp-title">
-                    {job.verificationCode
-                      ? "Verification Code"
-                      : isExpired
-                        ? "Previous Verification Code"
-                        : "Verification Code"}
+          {job && !loading && (
+            <p className="job-detail-panel-time">
+              {new Date(job.createdAt).toLocaleString()}
+            </p>
+          )}
+          {loading && <div className="skeleton skeleton-title" style={{ width: "180px", height: "14px" }} />}
+
+          {error && (
+            <div>
+              <p className="modal-error">{error}</p>
+              <button type="button" className="btn btn-primary" style={{ marginTop: "12px" }} onClick={onClose}>
+                Close
+              </button>
+            </div>
+          )}
+
+          {!error && (
+            <>
+              <div className="otp-card">
+                {loading ? (
+                  <div className="skeleton skeleton-modal-otp" style={{ margin: 0 }} />
+                ) : job ? (
+                  <>
+                    <p className="otp-title">
+                      {isExpired ? "Previous Verification Code" : "Verification Code"}
+                    </p>
+                    {otpDigits.length > 0 ? (
+                      <>
+                        <div className="otp-digits" aria-label={`Verification code ${displayOtpString}`}>
+                          {otpDigits.map((digit, idx) => (
+                            <div key={`${digit}-${idx}`} className="otp-digit">{digit}</div>
+                          ))}
+                        </div>
+                        <span className="otp-helper">
+                          {isExpired
+                            ? "This job has expired. Files have been removed."
+                            : "Show this to the shopkeeper and collect your prints."}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="otp-helper">OTP no longer available</span>
+                    )}
+                  </>
+                ) : null}
+              </div>
+
+              <div className="modal-summary">
+                {loading ? (
+                  <div className="skeleton skeleton-text" style={{ height: "40px", margin: 0 }} />
+                ) : job ? (
+                  <>
+                    <div>
+                      <p className="modal-label">Total Price</p>
+                      <h3>{formatPrice(job.totalCost ?? 0)}</h3>
+                    </div>
+                    <span className={getStatusBadgeClass(job.status, isExpired)}>
+                      {getStatusDisplayText(job.status, isExpired)}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+
+              <div>
+                {loading ? (
+                  <div className="skeleton skeleton-text" style={{ width: "30%" }} />
+                ) : job ? (
+                  <p className="modal-helper summary-meta">
+                    {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
                   </p>
-                  {otpDigits.length > 0 ? (
-                    <>
-                      <div
-                        className="otp-digits"
-                        aria-label={`Verification code ${displayOtp}`}
+                ) : null}
+              </div>
+
+              {/* Pay Now block */}
+              {!loading && job && job.shopUpiId && !isExpired && (job.totalCost ?? 0) > 0 && (
+                <PayNowBlock
+                  upiId={job.shopUpiId}
+                  shopName={job.shopName ?? "Print Shop"}
+                  amount={job.totalCost ?? 0}
+                  jobId={job.id}
+                />
+              )}
+
+              <div className="modal-actions">
+                {loading ? (
+                  <>
+                    <div className="skeleton" style={{ height: "42px", flex: 1, borderRadius: "10px" }} />
+                    <div className="skeleton" style={{ height: "42px", flex: 1, borderRadius: "10px" }} />
+                  </>
+                ) : job ? (
+                  <>
+                    {!isExpired && (
+                      <button type="button" className="btn" onClick={() => void handleRefreshStatus()}>
+                        Refresh Status
+                      </button>
+                    )}
+                    {canResubmit && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => void handleSubmitAgain()}
+                        disabled={isResubmitting}
                       >
-                        {otpDigits.map((digit, idx) => (
-                          <div key={`${digit}-${idx}`} className="otp-digit">
-                            {digit}
-                          </div>
-                        ))}
-                      </div>
-                      <span className="otp-helper">
-                        {isExpired
-                          ? "This job has expired. Files have been removed."
-                          : "Show this to the shopkeeper and collect your prints."}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="otp-helper">OTP no longer available</span>
-                  )}
-                </>
-              ) : null}
-            </div>
+                        {isResubmitting ? "Submitting..." : "Submit For Print Again"}
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        onClick={() => void handleDeleteJob()}
+                        disabled={isDeleting}
+                      >
+                        {isDeleting ? "Deleting..." : "Delete Job"}
+                      </button>
+                    )}
+                  </>
+                ) : null}
+              </div>
 
-            <div className="modal-summary">
-              {loading ? (
-                <div className="skeleton skeleton-text" style={{ height: "40px", margin: 0 }}></div>
-              ) : job ? (
-                <>
-                  <div>
-                    <p className="modal-label">Total Price</p>
-                    <h3>{formatPrice(job.totalCost ?? 0)}</h3>
-                  </div>
-                  <span className={getStatusBadgeClass(job.status, isExpired)}>
-                    {getStatusDisplayText(job.status, isExpired)}
-                  </span>
-                </>
-              ) : null}
-            </div>
-
-            <div style={{ marginTop: "12px" }}>
-              {loading ? (
-                <div className="skeleton skeleton-text" style={{ width: "30%" }}></div>
-              ) : job ? (
-                <p className="modal-helper summary-meta">
-                  {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
-                </p>
-              ) : null}
-            </div>
-
-            <div className="modal-actions">
-              {loading ? (
-                <>
-                  <div className="skeleton" style={{ height: "42px", flex: 1, borderRadius: "10px" }}></div>
-                  <div className="skeleton" style={{ height: "42px", flex: 1, borderRadius: "10px" }}></div>
-                </>
-              ) : job ? (
-                <>
-                  {!isExpired && (
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => void handleRefreshStatus()}
-                    >
-                      Refresh Status
-                    </button>
-                  )}
-                  {canResubmit && (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={() => void handleSubmitAgain()}
-                      disabled={isResubmitting}
-                    >
-                      {isResubmitting ? "Submitting..." : "Submit For Print Again"}
-                    </button>
-                  )}
-                  {canDelete && (
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      onClick={() => void handleDeleteJob()}
-                      disabled={isDeleting}
-                    >
-                      {isDeleting ? "Deleting..." : "Delete Job"}
-                    </button>
-                  )}
-                </>
-              ) : null}
-            </div>
-
-            <div className="modal-files-list">
-              {loading ? (
-                <>
-                  <div className="skeleton skeleton-file-card"></div>
-                  <div className="skeleton skeleton-file-card"></div>
-                </>
-              ) : job ? (
-                job.files.map((file) => (
-                  <FileOptionCard
-                    key={file.id}
-                    file={file}
-                    canViewFile={canViewFiles}
-                  />
-                ))
-              ) : null}
-            </div>
-          </>
-        )}
+              <div className="modal-files-list">
+                {loading ? (
+                  <>
+                    <div className="skeleton skeleton-file-card" />
+                    <div className="skeleton skeleton-file-card" />
+                  </>
+                ) : job ? (
+                  job.files.map((file) => (
+                    <FileOptionCard key={file.id} file={file} canViewFile={canViewFiles} />
+                  ))
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -374,22 +449,55 @@ function JobDetailModal({
 export default function PrintJobsList({
   userId,
   refreshTrigger,
+  openJobId,
+  onJobPanelClose,
 }: {
   userId: string | null;
   refreshTrigger: number;
+  openJobId?: string | null;
+  onJobPanelClose?: () => void;
 }) {
   const [jobs, setJobs] = useState<UserPrintJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<"success" | "failure" | "submitted" | null>(null);
   const [showLinkWhatsappModal, setShowLinkWhatsappModal] = useState(false);
   const [activeTab, setActiveTab] = useState<JobsTab>("ACTIVE");
   const [currentPage, setCurrentPage] = useState(1);
   const navigate = useNavigate();
+  const didCheckPaymentReturn = useRef(false);
+
+  // Detect return from UPI payment app via callback URL params
+  useEffect(() => {
+    if (didCheckPaymentReturn.current) return;
+    didCheckPaymentReturn.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const pret = params.get("pret");
+    const jid = params.get("jid");
+    const status = (params.get("Status") ?? params.get("status") ?? "").toUpperCase();
+
+    if (pret === "1" && jid) {
+      // Clean the URL so refreshing doesn't re-trigger
+      window.history.replaceState({}, "", window.location.pathname);
+
+      const mapped =
+        status === "SUCCESS" ? "success" :
+        status === "FAILURE" || status === "FAILED" ? "failure" :
+        status === "SUBMITTED" ? "submitted" : null;
+
+      setSelectedJobId(jid);
+      setPaymentStatus(mapped);
+    }
+  }, []);
+
+  // Open panel when parent passes openJobId (e.g. right after submit)
+  useEffect(() => {
+    if (openJobId) setSelectedJobId(openJobId);
+  }, [openJobId]);
 
   const handleJobUpdated = useCallback((updatedJob: UserPrintJob) => {
-    setJobs((prev) =>
-      prev.map((job) => (job.id === updatedJob.id ? updatedJob : job)),
-    );
+    setJobs((prev) => prev.map((job) => (job.id === updatedJob.id ? updatedJob : job)));
   }, []);
 
   const handleJobDeleted = useCallback((jobId: string) => {
@@ -397,56 +505,45 @@ export default function PrintJobsList({
     setSelectedJobId((prev) => (prev === jobId ? null : prev));
   }, []);
 
-  const load = useCallback(
-    async () => {
-      if (!userId) return;
-      setLoading(true);
-      try {
-        const fetched = await getUserPrintJobs();
-        const sorted = [...fetched].sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-        setJobs(sorted);
+  const handlePanelClose = useCallback(() => {
+    setSelectedJobId(null);
+    setPaymentStatus(null);
+    onJobPanelClose?.();
+  }, [onJobPanelClose]);
 
-      } finally {
-        setLoading(false);
-      }
-    },
-    [userId],
-  );
+  const load = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    try {
+      const fetched = await getUserPrintJobs();
+      const sorted = [...fetched].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+      setJobs(sorted);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
 
-  useEffect(() => {
-    void load();
-  }, [load, refreshTrigger]);
+  useEffect(() => { void load(); }, [load, refreshTrigger]);
 
   useEffect(() => {
     const socket = getSocket();
-
     const handler = (_userId: string, updatedJobId: string) => {
       void load();
-
-      if (selectedJobId !== updatedJobId) {
-        setSelectedJobId(updatedJobId);
-      }
+      if (selectedJobId !== updatedJobId) setSelectedJobId(updatedJobId);
     };
-
     socket.on("job-status-updated", handler);
-    return () => {
-      socket.off("job-status-updated", handler);
-    };
+    return () => { socket.off("job-status-updated", handler); };
   }, [load, selectedJobId]);
 
   const filteredJobs = useMemo(() => {
     const nonDraftJobs = jobs.filter((job) => job.status !== "DRAFT");
-
     if (activeTab === "ACTIVE") {
       return nonDraftJobs.filter((job) => ACTIVE_STATUSES.includes(job.status) && !job.expired);
     }
-    
     if (activeTab === "COMPLETED") {
       const completed = nonDraftJobs.filter((job) => COMPLETED_STATUSES.includes(job.status));
-      // Sort: Not expired first, then by date desc
       return completed.sort((a, b) => {
         if (!!a.expired === !!b.expired) {
           return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -454,31 +551,22 @@ export default function PrintJobsList({
         return a.expired ? 1 : -1;
       });
     }
-
     if (activeTab === "HISTORY") {
-      return nonDraftJobs.filter((job) => 
-        REJECTED_STATUSES.includes(job.status) || 
-        CANCELED_STATUSES.includes(job.status) || 
+      return nonDraftJobs.filter((job) =>
+        REJECTED_STATUSES.includes(job.status) ||
+        CANCELED_STATUSES.includes(job.status) ||
         (job.expired && !COMPLETED_STATUSES.includes(job.status))
       );
     }
-
     return [];
   }, [activeTab, jobs]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeTab]);
+  useEffect(() => { setCurrentPage(1); }, [activeTab]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredJobs.length / JOBS_PER_PAGE),
-  );
+  const totalPages = Math.max(1, Math.ceil(filteredJobs.length / JOBS_PER_PAGE));
 
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
+    if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
   const paginatedJobs = useMemo(() => {
@@ -486,19 +574,17 @@ export default function PrintJobsList({
     return filteredJobs.slice(start, start + JOBS_PER_PAGE);
   }, [currentPage, filteredJobs]);
 
-  const activeCount = jobs.filter((job) =>
-    ACTIVE_STATUSES.includes(job.status) && !job.expired && job.status !== "DRAFT"
-  ).length;
-  const completedCount = jobs.filter((job) =>
-    COMPLETED_STATUSES.includes(job.status) && job.status !== "DRAFT"
-  ).length;
-  const historyCount = jobs.filter((job) =>
-    job.status !== "DRAFT" && (
-      REJECTED_STATUSES.includes(job.status) || 
-      CANCELED_STATUSES.includes(job.status) || 
-      (job.expired && !COMPLETED_STATUSES.includes(job.status))
-    )
-  ).length;
+  const [activeCount, completedCount, historyCount] = useMemo(() => [
+    jobs.filter((job) => ACTIVE_STATUSES.includes(job.status) && !job.expired && job.status !== "DRAFT").length,
+    jobs.filter((job) => COMPLETED_STATUSES.includes(job.status) && job.status !== "DRAFT").length,
+    jobs.filter((job) =>
+      job.status !== "DRAFT" && (
+        REJECTED_STATUSES.includes(job.status) ||
+        CANCELED_STATUSES.includes(job.status) ||
+        (job.expired && !COMPLETED_STATUSES.includes(job.status))
+      )
+    ).length,
+  ], [jobs]);
 
   return (
     <>
@@ -506,60 +592,13 @@ export default function PrintJobsList({
         <div className="jobs-panel-head">
           <h3>Recent Jobs</h3>
           <div className="jobs-panel-actions">
-            {/* <button
-              type="button"
-              className="ghost-link"
-              onClick={async () => {
-                if (isResyncing) return;
-                setIsResyncing(true);
-                try {
-                  const result = await resyncWhatsappJobs();
-                  await load({ notification: false });
-                  if (result.updatedCount > 0) {
-                    notify(`Synced ${result.updatedCount} WhatsApp job(s).`, {
-                      variant: "success",
-                    });
-                  } else {
-                    notify(`WhatsApp jobs are up to date.`, {
-                      variant: "info",
-                    });
-                  }
-                } catch (err) {
-                  const errorMsg =
-                    err instanceof Error
-                      ? err.message
-                      : "Failed to sync WhatsApp jobs.";
-                  if (
-                    errorMsg ===
-                    "Please sync your WhatsApp account before syncing jobs."
-                  ) {
-                    setShowLinkWhatsappModal(true);
-                  } else {
-                    notify(errorMsg, { variant: "error" });
-                  }
-                } finally {
-                  setIsResyncing(false);
-                }
-              }}
-              disabled={isResyncing}
-            >
-              {isResyncing ? "Syncing..." : "Sync WhatsApp"}
-            </button> */}
-            <button
-              type="button"
-              className="ghost-link"
-              onClick={() => void load()}
-            >
+            <button type="button" className="ghost-link" onClick={() => void load()}>
               Refresh
             </button>
           </div>
         </div>
 
-        <div
-          className="jobs-tabs"
-          role="tablist"
-          aria-label="Filter jobs by status"
-        >
+        <div className="jobs-tabs" role="tablist" aria-label="Filter jobs by status">
           <button
             type="button"
             className={`jobs-tab ${activeTab === "ACTIVE" ? "active" : ""}`}
@@ -591,9 +630,9 @@ export default function PrintJobsList({
 
         {loading ? (
           <div className="jobs-list">
-            <div className="skeleton skeleton-job-card"></div>
-            <div className="skeleton skeleton-job-card"></div>
-            <div className="skeleton skeleton-job-card"></div>
+            <div className="skeleton skeleton-job-card" />
+            <div className="skeleton skeleton-job-card" />
+            <div className="skeleton skeleton-job-card" />
           </div>
         ) : filteredJobs.length === 0 ? (
           <p className="jobs-empty">No jobs found for this view.</p>
@@ -621,7 +660,7 @@ export default function PrintJobsList({
                       <p className="job-row-code">
                         {job.status === "DRAFT"
                           ? "Draft Job"
-                          : `OTP: ${job.verificationCode ?? job.oldOtp ?? "N/A"}`}
+                          : `OTP: ${job.verificationCode !== null && job.verificationCode !== undefined ? String(job.verificationCode).padStart(4, "0") : (job.oldOtp ?? "N/A")}`}
                       </p>
                       <p className="job-row-meta">
                         {job.files.length} file(s) • {(job.totalPages ?? 0)} pages
@@ -631,13 +670,10 @@ export default function PrintJobsList({
                       </p>
                     </div>
                   </div>
-
                   <div className="job-row-footer">
                     <div>
                       <p className="job-row-price-label">Total Price</p>
-                      <p className="job-row-price">
-                        {formatPrice(job.totalCost ?? 0)}
-                      </p>
+                      <p className="job-row-price">{formatPrice(job.totalCost ?? 0)}</p>
                     </div>
                     <span className={getStatusBadgeClass(job.status, job.expired)}>
                       {getStatusDisplayText(job.status, job.expired)}
@@ -657,15 +693,11 @@ export default function PrintJobsList({
                 >
                   Prev
                 </button>
-                <span className="jobs-page-info">
-                  Page {currentPage} of {totalPages}
-                </span>
+                <span className="jobs-page-info">Page {currentPage} of {totalPages}</span>
                 <button
                   type="button"
                   className="jobs-page-btn"
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
                 >
                   Next
@@ -677,11 +709,12 @@ export default function PrintJobsList({
       </section>
 
       {selectedJobId && (
-        <JobDetailModal
+        <JobDetailPanel
           jobId={selectedJobId}
-          onClose={() => setSelectedJobId(null)}
+          onClose={handlePanelClose}
           onJobUpdated={handleJobUpdated}
           onJobDeleted={handleJobDeleted}
+          paymentStatus={paymentStatus}
         />
       )}
 
@@ -689,38 +722,19 @@ export default function PrintJobsList({
         <div className="modal-shell" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="modal-head">
-              <div>
-                <h2>Sync WhatsApp</h2>
-              </div>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setShowLinkWhatsappModal(false)}
-              >
-                x
-              </button>
+              <div><h2>Sync WhatsApp</h2></div>
+              <button type="button" className="icon-btn" onClick={() => setShowLinkWhatsappModal(false)}>x</button>
             </div>
             <p className="modal-helper" style={{ marginTop: "16px", marginBottom: "24px" }}>
               You are not synced with WhatsApp. Click sync below and send "sync" on WhatsApp to continue.
             </p>
             <div className="modal-actions">
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowLinkWhatsappModal(false)}
-              >
-                Close
-              </button>
+              <button type="button" className="btn" onClick={() => setShowLinkWhatsappModal(false)}>Close</button>
               <button
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
-                  const digits = "918369757906";
-                  window.open(
-                    `https://wa.me/${digits}?text=sync`,
-                    "_blank",
-                    "noopener,noreferrer"
-                  );
+                  window.open(`https://wa.me/918369757906?text=sync`, "_blank", "noopener,noreferrer");
                   setShowLinkWhatsappModal(false);
                 }}
               >

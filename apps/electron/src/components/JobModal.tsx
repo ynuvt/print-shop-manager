@@ -53,7 +53,7 @@ export default function JobModal({
     printPhase === "completed" ? "COMPLETED" : job.status;
 
   useEffect(() => {
-    console.log(`[JobModal] Opening job #${job.verificationCode}:`, JSON.stringify(job, null, 2));
+    console.log(`[JobModal] Opening job #${String(job.verificationCode).padStart(4, "0")}:`, JSON.stringify(job, null, 2));
     setError(null);
     // Sync job-local printers when job or global printers change
     setLocalBwPrinter(selectedPrinter);
@@ -91,7 +91,7 @@ export default function JobModal({
   });
 
   async function handleReject() {
-    if (!window.confirm(`Reject job #${job.verificationCode}?`)) return;
+    if (!window.confirm(`Reject job #${String(job.verificationCode).padStart(4, "0")}?`)) return;
     setRejectLoading(true);
     setError(null);
     try {
@@ -218,7 +218,7 @@ export default function JobModal({
                   className="font-mono text-xl font-bold tracking-tight"
                   style={{ color: "var(--text)" }}
                 >
-                  {job.verificationCode}
+                  {String(job.verificationCode).padStart(4, "0")}
                 </h2>
                 <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{created}</p>
               </div>
@@ -358,7 +358,7 @@ export default function JobModal({
               </div>
               <div>
                 <p className="text-sm font-semibold text-emerald-500">All files sent to printer</p>
-                <p className="text-xs text-emerald-400 mt-0.5">Job #{job.verificationCode} completed successfully</p>
+                <p className="text-xs text-emerald-400 mt-0.5">Job #{String(job.verificationCode).padStart(4, "0")} completed successfully</p>
               </div>
             </div>
           )}

@@ -98,7 +98,7 @@ router.post("/shop-login", async (req, res) => {
       return res.status(401).json({ error: "Invalid username or password." });
     }
 
-    const { token } = generateUserToken("admin");
+    const { token } = generateUserToken("admin", { shopId: shop.shopId });
 
     res.status(200).json({
       message: "Shop login successful!",

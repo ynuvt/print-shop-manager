@@ -25,6 +25,7 @@ import {
 } from "../utils/r2Storage.js";
 import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
 import { sendWhatsAppTextMessage, isWithinWhatsAppWindow } from "../modules/whatsappServices.js";
+import { shopListCache } from "../utils/cache.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
 import {
   ColorMode,
@@ -193,17 +194,19 @@ function mapDuplexToEnum(duplexMode: "ONE" | "BOTH") {
  * both "see" the same candidate as free.
  */
 async function generateUniqueVerificationCode(
+  shopId: string,
   tx?: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
 ): Promise<number> {
   const client = tx ?? prisma;
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const candidate = Math.floor(1000 + Math.random() * 9000);
-    // Check ALL jobs — verificationCode has a @unique constraint in the schema,
-    // so we must avoid collisions with completed/rejected jobs too.
+    const candidate = Math.floor(Math.random() * 10000); // 0-9999 inclusive
+    // OTP uniqueness is scoped per shop — same code can exist across different shops.
     const existing = await client.printJob.findFirst({
       where: {
         verificationCode: candidate,
+        shopId,
+        status: { in: [PrintJobStatus.PENDING, PrintJobStatus.PROCESSING] },
       },
       select: { id: true },
     });
@@ -214,7 +217,7 @@ async function generateUniqueVerificationCode(
   }
 
   throw new PrintJobAnalysisError(
-    "Unable to generate a unique verification code. Too many active jobs.",
+    "Unable to generate a unique verification code for this shop. Too many active jobs.",
     500,
   );
 }
@@ -261,11 +264,12 @@ type UploadedFileForCreate = {
 async function buildPrintJobCreateDataFromProcessedFiles(
   files: UploadedFileForCreate[],
   userId: string,
+  shopId: string,
   tx?: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
 ) {
   const totalPages = files.reduce((sum, file) => sum + file.pages, 0);
   const totalCost = files.reduce((sum, file) => sum + file.cost, 0);
-  const verificationCode = await generateUniqueVerificationCode(tx);
+  const verificationCode = await generateUniqueVerificationCode(shopId, tx);
 
   return {
     userId,
@@ -274,6 +278,7 @@ async function buildPrintJobCreateDataFromProcessedFiles(
     estimatedTime: calculateEstimatedTime(totalPages),
     status: mapStatus("PENDING"),
     verificationCode,
+    shopId,
     files: {
       create: files.map((file) => ({
         name: file.name,
@@ -692,6 +697,11 @@ app.post(
 
 
 
+    const shopIdParam = typeof req.body.shopId === "string" ? req.body.shopId.trim() : "";
+    if (!shopIdParam) {
+      return res.status(400).json({ error: "shopId is required." });
+    }
+
     let incomingFiles: UrlFileForCreate[] = [];
 
     try {
@@ -783,6 +793,7 @@ app.post(
         const data = await buildPrintJobCreateDataFromProcessedFiles(
           uploadedFiles,
           req.user!.uid,
+          shopIdParam,
           tx,
         );
         return tx.printJob.create({ data });
@@ -1367,9 +1378,17 @@ app.post(
 //   },
 // );
 
-app.get("/all", authMiddleware(["admin"]), async (req, res) => {
+app.get("/all", authMiddleware(["admin"]), async (req: ExtendedRequest, res) => {
   try {
+    const shopId = req.user?.shopId;
+    if (!shopId) {
+      return res.status(403).json({
+        error: "Shop credentials required. Please sign out and sign in again with your shop username and password.",
+        requiresRelogin: true,
+      });
+    }
     const jobs = await prisma.printJob.findMany({
+      where: { shopId },
       orderBy: { createdAt: "desc" },
       take: 1000,
     });
@@ -1380,18 +1399,31 @@ app.get("/all", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
-app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
+app.get("/shops", authMiddleware(["admin", "customer"]), async (req, res) => {
   try {
+    const cached = shopListCache.get("active_shops");
+    if (cached) return res.status(200).json(cached);
+
     const shops = await prisma.printShop.findMany({
       where: { isActive: true },
       select: {
         id: true,
+        name: true,
         username: true,
         shopId: true,
+        landmark: true,
+        imageUrl: true,
+        latitude: true,
+        longitude: true,
+        priceBW: true,
+        priceColor: true,
+        upiId: true,
       },
-      orderBy: { username: "asc" },
+      orderBy: { name: "asc" },
     });
-    res.status(200).json({ shops });
+    const payload = { shops };
+    shopListCache.set("active_shops", payload, 60_000);
+    return res.status(200).json(payload);
   } catch (error) {
     console.error("[jobs/shops] Error:", error);
     res.status(500).json({ error: "Failed to fetch active print shops." });
@@ -1474,56 +1506,49 @@ app.get(
     }
     try {
       console.log("Fetching jobs for user:", req.user.uid);
-      const linked = await prisma.whatsAppUser.findFirst({
-        where: { userId: req.user.uid },
-        select: { phoneNumber: true },
-      });
+      const [linked, jobs] = await Promise.all([
+        prisma.whatsAppUser.findFirst({
+          where: { userId: req.user.uid },
+          select: { phoneNumber: true },
+        }),
+        prisma.printJob.findMany({
+          where: {
+            OR: [
+              { userId: req.user.uid },
+              { owners: { some: { userId: req.user.uid } } },
+            ],
+          },
+          include: {
+            files: {
+              include: { option: true },
+              orderBy: { createdAt: "asc" },
+            },
+            owners: { select: { userId: true } },
+            shop: { select: { upiId: true, name: true } },
+          },
+        }),
+      ]);
       const viewerPhone = linked?.phoneNumber ?? null;
 
-      const jobs = await prisma.printJob.findMany({
-        where: {
-          OR: [
-            { userId: req.user.uid },
-            { owners: { some: { userId: req.user.uid } } },
-          ],
-        },
-        include: {
-          files: {
-            include: {
-              option: true,
-            },
-            orderBy: { createdAt: "asc" },
-          },
-          owners: { select: { userId: true } },
-        },
-      });
-
       const scoped = jobs.map((job) => {
+        const shopUpiId = (job as any).shop?.upiId ?? null;
+        const shopName = (job as any).shop?.name ?? null;
+        const { shop: _shop, ...jobWithoutShop } = job as any;
+        const base = { ...jobWithoutShop, shopUpiId, shopName };
+
         const isOwner = job.userId === req.user!.uid;
         if (isOwner || job.status !== PrintJobStatus.DRAFT) {
-          return job;
+          return base;
         }
 
         const visibleFiles = job.files.filter((file) => {
-          if (file.uploadedByUserId && file.uploadedByUserId === req.user!.uid) {
-            return true;
-          }
-          if (
-            viewerPhone &&
-            file.uploadedByPhoneNumber &&
-            file.uploadedByPhoneNumber === viewerPhone
-          ) {
-            return true;
-          }
+          if (file.uploadedByUserId && file.uploadedByUserId === req.user!.uid) return true;
+          if (viewerPhone && file.uploadedByPhoneNumber && file.uploadedByPhoneNumber === viewerPhone) return true;
           return false;
         });
 
-        const { totalCost: _tc, totalPages: _tp, estimatedTime: _et, ...safeJob } =
-          job as any;
-        return {
-          ...safeJob,
-          files: visibleFiles,
-        };
+        const { totalCost: _tc, totalPages: _tp, estimatedTime: _et, ...safeJob } = base;
+        return { ...safeJob, files: visibleFiles };
       });
 
       res.status(200).json(scoped);
@@ -1810,11 +1835,17 @@ app.post(
         return res.status(403).json({ error: "You do not have access to this job." });
       }
 
-      const linked = await prisma.whatsAppUser.findFirst({
-        where: { userId: req.user.uid },
-        select: { phoneNumber: true },
-      });
-      const viewerPhone = linked?.phoneNumber ?? null;
+      const [linkedWa, user] = await Promise.all([
+        prisma.whatsAppUser.findFirst({
+          where: { userId: viewerId },
+          select: { phoneNumber: true, name: true },
+        }),
+        prisma.user.findUnique({
+          where: { id: viewerId },
+          select: { name: true },
+        }),
+      ]);
+      const viewerPhone = linkedWa?.phoneNumber ?? null;
 
       const myFiles = job.files.filter((file) => {
         if (file.uploadedByUserId && file.uploadedByUserId === viewerId) return true;
@@ -1827,16 +1858,6 @@ app.post(
         0,
       );
 
-      const user = await prisma.user.findUnique({
-        where: { id: viewerId },
-        select: { name: true },
-      });
-
-      // Resolve collaborator's WhatsApp display name
-      const linkedWa = await prisma.whatsAppUser.findFirst({
-        where: { userId: viewerId },
-        select: { name: true, phoneNumber: true },
-      });
       const collabDisplayName = linkedWa?.name || linkedWa?.phoneNumber || user?.name || "A collaborator";
 
       socket.emit("job-collaborator-confirmed", id, {
@@ -1850,42 +1871,45 @@ app.post(
         data: { isDone: true },
       });
 
-      // Notify the job owner via WhatsApp (only if within 20h messaging window)
+      res.status(200).json({ message: "Confirmed.", userCost });
+
+      // Fire-and-forget: notify job owner via WhatsApp without blocking the response
       if (job.userId) {
-        const ownerWa = await prisma.whatsAppUser.findFirst({
-          where: { userId: job.userId },
-          select: { phoneNumber: true },
-        });
-        if (ownerWa?.phoneNumber) {
-          const withinWindow = await isWithinWhatsAppWindow(ownerWa.phoneNumber);
-          if (withinWindow) {
-            const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-            if (phoneNumberId) {
-              try {
-                await sendWhatsAppTextMessage({
-                  to: ownerWa.phoneNumber,
-                  phoneNumberId,
-                  message: [
-                    `*${collabDisplayName}* has finished adding files.`,
-                    "",
-                    `Their files total: *Rs ${userCost}*`,
-                    "",
-                    `You can now review and submit the job.`,
-                    "",
-                    `Type *"EDIT"* to open the review link.`,
-                  ].join("\n"),
-                });
-              } catch (err) {
-                console.error("Failed to notify owner via WhatsApp:", err);
-              }
+        const ownerId = job.userId;
+        (async () => {
+          try {
+            const ownerWa = await prisma.whatsAppUser.findFirst({
+              where: { userId: ownerId },
+              select: { phoneNumber: true },
+            });
+            if (!ownerWa?.phoneNumber) return;
+            const withinWindow = await isWithinWhatsAppWindow(ownerWa.phoneNumber);
+            if (!withinWindow) {
+              console.log(`Skipping WhatsApp notify for ${ownerWa.phoneNumber}: outside 20h messaging window`);
+              return;
             }
-          } else {
-            console.log(`Skipping WhatsApp notify for ${ownerWa.phoneNumber}: outside 20h messaging window`);
+            const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+            if (!phoneNumberId) return;
+            await sendWhatsAppTextMessage({
+              to: ownerWa.phoneNumber,
+              phoneNumberId,
+              message: [
+                `*${collabDisplayName}* has finished adding files.`,
+                "",
+                `Their files total: *Rs ${userCost}*`,
+                "",
+                `You can now review and submit the job.`,
+                "",
+                `Type *"EDIT"* to open the review link.`,
+              ].join("\n"),
+            });
+          } catch (err) {
+            console.error("Failed to notify owner via WhatsApp:", err);
           }
-        }
+        })();
       }
 
-      return res.status(200).json({ message: "Confirmed.", userCost });
+      return;
     } catch (error) {
       console.error("review confirm failed:", error);
       return res.status(500).json({ error: "Failed to confirm files." });
@@ -1897,14 +1921,19 @@ app.post(
   "/submit-whatsapp-job",
   authMiddleware(["customer"]),
   async (req: ExtendedRequest, res) => {
-    const { jobId, files } = req.body as {
+    const { jobId, files, shopId } = req.body as {
       jobId?: string;
       files?: Array<{ id: string; options: unknown }>;
+      shopId?: string;
     };
     const userId = req.user!.uid;
 
     if (!jobId || typeof jobId !== "string") {
       return res.status(400).json({ error: "Job ID is required." });
+    }
+
+    if (!shopId || typeof shopId !== "string" || !shopId.trim()) {
+      return res.status(400).json({ error: "shopId is required. Please select a print shop before submitting." });
     }
 
     if (!Array.isArray(files) || !files.length) {
@@ -1959,6 +1988,18 @@ app.post(
     }
 
     try {
+      // Fetch shop to get per-shop pricing
+      const shop = await prisma.printShop.findUnique({
+        where: { shopId: shopId.trim().toUpperCase() },
+        select: { shopId: true, priceBW: true, priceColor: true, isActive: true },
+      });
+
+      if (!shop || !shop.isActive) {
+        return res.status(400).json({ error: "Selected shop is not available." });
+      }
+
+      const shopPricing = { priceBW: shop.priceBW, priceColor: shop.priceColor };
+
       const job = await prisma.printJob.findUnique({
         where: { id: jobId },
         include: {
@@ -2041,7 +2082,7 @@ app.post(
           duplex: file.options.duplex,
           copies: file.options.copies,
           pagesPerSheet: file.options.pagesPerSheet || 1,
-        });
+        }, shopPricing);
 
         return {
           fileId: file.id,
@@ -2059,9 +2100,10 @@ app.post(
       const totalCost = updateEntries.reduce((sum, file) => sum + file.cost, 0);
 
       const verificationCode = await prisma.$transaction(async (tx) => {
-        // Generate verification code INSIDE the transaction for atomicity
+        // Generate verification code INSIDE the transaction for atomicity.
+        // OTP uniqueness is scoped to the shop — each shop has its own 9000-code namespace.
         const code =
-          job.verificationCode ?? (await generateUniqueVerificationCode(tx));
+          job.verificationCode ?? (await generateUniqueVerificationCode(shop.shopId, tx));
 
         for (const entry of updateEntries) {
           await tx.printOption.update({
@@ -2108,78 +2150,17 @@ app.post(
             status: PrintJobStatus.PENDING,
             colorMode: isJobColor ? "COLOR" : "BW",
             verificationCode: code,
+            shopId: shop.shopId,
           },
         });
 
         return code;
       });
 
-      await Promise.allSettled(
-        removedFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
-      );
-
-      // --- NEW: Calculate Cost Breakdown for Owner's WhatsApp Message ---
-      const perUserMap = new Map<
-        string,
-        { key: string; displayName: string; role: string; cost: number }
-      >();
-
-      for (const entry of updateEntries) {
-        const f = job.files.find(f => f.id === entry.fileId);
-        if (!f) continue;
-        const key =
-          f.uploadedByUserId ||
-          f.uploadedByPhoneNumber ||
-          f.uploadedByDisplayName ||
-          "unknown";
-        const displayName =
-          f.uploadedByDisplayName || f.uploadedByPhoneNumber || "Unknown";
-        const existing = perUserMap.get(key) ?? {
-          key,
-          displayName,
-          role: f.uploadedByRole,
-          cost: 0,
-        };
-        existing.cost += entry.cost;
-        perUserMap.set(key, existing);
-      }
-      const perUserCosts = [...perUserMap.values()].sort((a, b) => b.cost - a.cost);
-      
-      // Notify owner via WhatsApp with OTP and Cost Breakdown (only if within 20h window)
-      if (userId) {
-        const ownerWa = await prisma.whatsAppUser.findFirst({
-          where: { userId },
-          select: { phoneNumber: true },
-        });
-        if (ownerWa?.phoneNumber) {
-          const withinWindow = await isWithinWhatsAppWindow(ownerWa.phoneNumber);
-          if (withinWindow) {
-            const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-            if (phoneNumberId) {
-              const message = [
-                `*Job Submitted Successfully!*`,
-                ``,
-                `Your Verification Code (OTP) is: *${verificationCode}*`,
-                `Share this code with the shopkeeper to collect your prints.`,
-                ``,
-                `*Total:* Rs ${totalCost}`
-              ].join("\n");
-              
-              try {
-                const { sendWhatsAppTextMessage: sendWaText } = await import("../modules/whatsappServices.js");
-                await sendWaText({
-                  to: ownerWa.phoneNumber,
-                  phoneNumberId,
-                  message,
-                });
-              } catch (err) {
-                console.error("Failed to send OTP whatsapp message", err);
-              }
-            }
-          } else {
-            console.log(`Skipping WhatsApp OTP message for ${ownerWa.phoneNumber}: outside 20h messaging window`);
-          }
-        }
+      // Fire-and-forget R2 cleanup for removed files
+      if (removedFiles.length) {
+        Promise.allSettled(removedFiles.map((file) => deleteObjectFromR2ByUrl(file.url)))
+          .catch((err) => console.error("[R2] Cleanup error:", err));
       }
 
       const statusText = PrintJobStatus.PENDING;
@@ -2187,10 +2168,46 @@ app.post(
       socket.emit("job-status-updated", userId, job.id, msg);
       socket.emit("job-created", "admin");
 
-      return res.status(200).json({
-        message: "Job updated successfully.",
-        verificationCode,
-      });
+      res.status(200).json({ message: "Job updated successfully.", verificationCode });
+
+      // Fire-and-forget: notify owner via WhatsApp with OTP without blocking the response
+      if (userId) {
+        const capturedCode = verificationCode;
+        const capturedCost = totalCost;
+        (async () => {
+          try {
+            const ownerWa = await prisma.whatsAppUser.findFirst({
+              where: { userId },
+              select: { phoneNumber: true },
+            });
+            if (!ownerWa?.phoneNumber) return;
+            const withinWindow = await isWithinWhatsAppWindow(ownerWa.phoneNumber);
+            if (!withinWindow) {
+              console.log(`Skipping WhatsApp OTP message for ${ownerWa.phoneNumber}: outside 20h messaging window`);
+              return;
+            }
+            const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+            if (!phoneNumberId) return;
+            const { sendWhatsAppTextMessage: sendWaText } = await import("../modules/whatsappServices.js");
+            await sendWaText({
+              to: ownerWa.phoneNumber,
+              phoneNumberId,
+              message: [
+                `*Job Submitted Successfully!*`,
+                ``,
+                `Your Verification Code (OTP) is: *${capturedCode}*`,
+                `Share this code with the shopkeeper to collect your prints.`,
+                ``,
+                `*Total:* Rs ${capturedCost}`,
+              ].join("\n"),
+            });
+          } catch (err) {
+            console.error("Failed to send OTP whatsapp message", err);
+          }
+        })();
+      }
+
+      return;
     } catch (error) {
       if (error instanceof PrintJobAnalysisError) {
         return res.status(error.statusCode).json({ error: error.message });
@@ -2205,17 +2222,35 @@ app.post(
 app.get(
   "/:verificationCode",
   authMiddleware(["admin", "customer"]),
-  async (req, res) => {
+  async (req: ExtendedRequest, res) => {
     const { verificationCode } = req.params;
+
     if (isNaN(Number(verificationCode))) {
       return res
         .status(400)
         .json({ error: "Verification code must be a number." });
     }
+
+    // For shop operators (admin role with shopId in token), always scope to their shop.
+    // For customers, use the shopId query param they provide.
+    let shopIdFilter: string | undefined;
+    if (req.user?.role === "admin") {
+      if (!req.user.shopId) {
+        return res.status(403).json({
+          error: "Shop credentials required. Please re-login with your shop username and password.",
+          requiresRelogin: true,
+        });
+      }
+      shopIdFilter = req.user.shopId;
+    } else {
+      shopIdFilter = typeof req.query.shopId === "string" ? req.query.shopId.trim() : undefined;
+    }
+
     try {
       const job = await prisma.printJob.findFirst({
         where: {
           verificationCode: Number(verificationCode),
+          ...(shopIdFilter ? { shopId: shopIdFilter } : {}),
         },
         include: {
           files: {

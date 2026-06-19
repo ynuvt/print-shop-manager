@@ -95,7 +95,7 @@ function JobPill({
         {/* Text content */}
         <div className="min-w-0 flex-1 text-left">
           <p className="text-sm font-black leading-tight tracking-wide">
-            #{verificationCode}
+            #{String(verificationCode).padStart(4, "0")}
           </p>
           <p className="text-[10px] font-bold leading-tight opacity-80 uppercase tracking-widest mt-1">
             {statusText}

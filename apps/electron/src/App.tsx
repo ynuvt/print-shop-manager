@@ -182,6 +182,25 @@ export default function App() {
     setCurrentShop(null);
   }, []);
 
+  // ── Force re-login if token has no shopId (old admin token) ──
+  useEffect(() => {
+    if (!token) return;
+    // Decode the JWT payload without verifying (client-side check only)
+    try {
+      const parts = token.split(".");
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]!));
+        if (!payload.shopId) {
+          // Old token without shopId — force re-login
+          handleLogout();
+        }
+      }
+    } catch {
+      // Malformed token — force re-login
+      handleLogout();
+    }
+  }, [token, handleLogout]);
+
   // ── Restore saved theme on mount ──────────────────
   useEffect(() => {
     const saved = localStorage.getItem("zopy_theme");
@@ -353,7 +372,7 @@ export default function App() {
   const handleSelectJob = useCallback(async (job: PrintJobSummary) => {
     setLoadError(null);
     try {
-      const full = await fetchJobByCode(String(job.verificationCode));
+      const full = await fetchJobByCode(String(job.verificationCode).padStart(4, "0"), selectedShopId || undefined);
       setSelectedJob(full);
       setJobModalOpen(true);
     } catch (error) {
@@ -387,12 +406,12 @@ export default function App() {
       );
 
       const matches = tabMatches.filter((j) =>
-        String(j.verificationCode).includes(code),
+        String(j.verificationCode).padStart(4, "0").includes(code),
       );
 
       if (matches.length === 0) {
         try {
-          const fetched = await fetchJobByCode(code);
+          const fetched = await fetchJobByCode(code, selectedShopId || undefined);
           setSelectedJob(fetched);
           setJobModalOpen(true);
 

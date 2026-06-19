@@ -49,6 +49,8 @@ async function restoreTable(tableName: string, model: any) {
 try {
   // Restore in dependency order
   await restoreTable("User", prisma.user);
+  await restoreTable("PrintShop", prisma.printShop);
+  await restoreTable("Brand", prisma.brand);
   await restoreTable("WhatsAppUser", prisma.whatsAppUser);
   await restoreTable("PrintJob", prisma.printJob);
   await restoreTable("PrintJobOwner", prisma.printJobOwner);
@@ -57,6 +59,11 @@ try {
   await restoreTable("WhatsAppLoginOtp", prisma.whatsAppLoginOtp);
   await restoreTable("UserEvent", prisma.userEvent);
   await restoreTable("MobileSyncOtp", prisma.mobileSyncOtp);
+  await restoreTable("Outlet", prisma.outlet);
+  await restoreTable("OutletWorker", prisma.outletWorker);
+  await restoreTable("BrandOffer", prisma.brandOffer);
+  await restoreTable("Coupon", prisma.coupon);
+  await restoreTable("CouponRedemption", prisma.couponRedemption);
 
   console.log(`\nFull database restore completed!`);
 } catch (error) {

@@ -116,8 +116,11 @@ export function calculateSheetCount(
 export function calculateFileCost(
   totalPages: number,
   options: PrintOptions,
+  pricing?: { priceBW?: number; priceColor?: number },
 ): number {
-  const pricePerSheet = options.colorMode === "COLOR" ? PRICE_COLOR : PRICE_BW;
+  const priceBW = pricing?.priceBW ?? PRICE_BW;
+  const priceColor = pricing?.priceColor ?? PRICE_COLOR;
+  const pricePerSheet = options.colorMode === "COLOR" ? priceColor : priceBW;
   const sheets = calculateSheetCount(totalPages, options);
 
   return sheets * pricePerSheet * options.copies;
@@ -159,14 +162,17 @@ export type PrintFileState = {
  * Aggregates totals across all selected files.
  * Returns totalCost, totalPages, and estimatedTime (in minutes) for the job summary.
  */
-export function buildJobTotals(files: PrintFileState[]): {
+export function buildJobTotals(
+  files: PrintFileState[],
+  pricing?: { priceBW?: number; priceColor?: number },
+): {
   totalCost: number;
   totalPages: number;
   estimatedTime: number;
 } {
   const totalPages = files.reduce((sum, f) => sum + f.detectedPages, 0);
   const totalCost = files.reduce(
-    (sum, f) => sum + calculateFileCost(f.detectedPages, f.options),
+    (sum, f) => sum + calculateFileCost(f.detectedPages, f.options, pricing),
     0,
   );
   const estimatedTime = calculateEstimatedTime(totalPages);

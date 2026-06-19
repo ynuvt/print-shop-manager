@@ -63,7 +63,7 @@ export default function JobDetails({ job, loading }: JobDetailsProps) {
       <div className="px-5 py-4">
         <div className="mb-1 flex items-start justify-between gap-2">
           <p className="font-mono text-xl font-bold text-zinc-100 leading-none">
-            #{job.verificationCode}
+            #{String(job.verificationCode).padStart(4, "0")}
           </p>
           <StatusBadge status={job.status} />
         </div>
