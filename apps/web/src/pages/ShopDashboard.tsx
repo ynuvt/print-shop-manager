@@ -114,6 +114,7 @@ export default function ShopDashboard({
   const [jobsSearch, setJobsSearch] = useState("");
   const [jobsDate, setJobsDate] = useState("");
   const [jobsSearchInput, setJobsSearchInput] = useState("");
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
@@ -322,9 +323,30 @@ export default function ShopDashboard({
             <button onClick={onToggleTheme} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "10px", width: "36px", height: "36px", cursor: "pointer", fontSize: "16px" }}>
               {isDark ? "🌙" : "☀️"}
             </button>
+            <button onClick={() => setConfirmLogout(true)} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "10px", padding: "6px 14px", fontSize: "12px", fontWeight: "700", color: muted, cursor: "pointer" }}>
+              Logout
+            </button>
           </div>
         </div>
       </nav>
+
+      {confirmLogout && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: "var(--panel)", border: `1px solid ${border}`, borderRadius: "16px", padding: "28px 24px", maxWidth: "320px", width: "100%", textAlign: "center" }}>
+            <div style={{ fontSize: "22px", marginBottom: "10px" }}>🚪</div>
+            <div style={{ fontWeight: "800", fontSize: "16px", color: textColor, marginBottom: "8px" }}>Log out?</div>
+            <div style={{ fontSize: "13px", color: muted, marginBottom: "24px" }}>You'll need to log in again to access the shop portal.</div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={() => setConfirmLogout(false)} style={{ flex: 1, background: "none", border: `1px solid ${border}`, borderRadius: "10px", padding: "10px", fontSize: "14px", fontWeight: "700", color: muted, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button onClick={() => { setConfirmLogout(false); logout(); }} style={{ flex: 1, background: "#ef4444", border: "none", borderRadius: "10px", padding: "10px", fontSize: "14px", fontWeight: "700", color: "#fff", cursor: "pointer" }}>
+                Log out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ maxWidth: "900px", margin: "0 auto", padding: "28px 20px" }}>
         <div style={{ display: "flex", gap: "24px", borderBottom: `1px solid ${border}`, marginBottom: "28px" }}>

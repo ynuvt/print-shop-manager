@@ -36,8 +36,10 @@ export default function IOSInstallPrompt() {
 
   if (isStandalone() || dismissed) return null;
 
-  // Android / Desktop native install banner
+  // Android / Desktop native install banner — only on portal pages, not home
   if (!isIOS()) {
+    const path = window.location.pathname;
+    if (!path.startsWith("/shop") && !path.startsWith("/brand")) return null;
     if (!deferredPrompt) return null;
     return (
       <div className="pwa-install-banner">
