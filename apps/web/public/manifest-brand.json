@@ -1,0 +1,22 @@
+{
+  "id": "/brand",
+  "name": "Zopy for Brands",
+  "short_name": "Zopy Brand",
+  "description": "Manage your brand on Zopy",
+  "start_url": "/brand/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "browser"],
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "lang": "en",
+  "launch_handler": { "client_mode": "navigate-existing" },
+  "icons": [
+    {
+      "src": "/img/zopy.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

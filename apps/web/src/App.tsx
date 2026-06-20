@@ -27,6 +27,21 @@ function PageLoader() {
   return <div style={{ minHeight: "100dvh", background: "var(--bg)" }} />;
 }
 
+// Swap the manifest href so the installed PWA opens to the correct start_url.
+// Must run as early as possible (before beforeinstallprompt fires).
+function usePortalManifest() {
+  useEffect(() => {
+    const path = window.location.pathname;
+    const link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+    if (!link) return;
+    if (path.startsWith("/shop")) {
+      link.href = "/manifest-shop.json";
+    } else if (path.startsWith("/brand")) {
+      link.href = "/manifest-brand.json";
+    }
+  }, []);
+}
+
 // On Android, when the user opens the site in a browser tab but has the PWA installed,
 // use getInstalledRelatedApps() to detect the installation and re-navigate so Chrome
 // intercepts and opens the standalone PWA instead.
@@ -56,6 +71,7 @@ function usePWARedirect() {
 }
 
 export default function App() {
+  usePortalManifest();
   usePWARedirect();
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("themeMode");

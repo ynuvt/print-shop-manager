@@ -1,0 +1,22 @@
+{
+  "id": "/shop",
+  "name": "Zopy Print Shop",
+  "short_name": "Zopy Print",
+  "description": "Manage your Zopy print shop",
+  "start_url": "/shop",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "browser"],
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "lang": "en",
+  "launch_handler": { "client_mode": "navigate-existing" },
+  "icons": [
+    {
+      "src": "/img/zopy.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
