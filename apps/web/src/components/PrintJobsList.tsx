@@ -124,9 +124,7 @@ function PayNowBlock({
   const platformFee = computePlatformFee(printCost, platformChargeEnabled);
   const totalAmount = printCost + platformFee;
 
-  // mc=7338 (Quick Copy/Reproduction Services MCC) marks this as P2M, not P2P.
-  // Without mc, banks treat it as person-to-person and apply lower daily limits.
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(shopName)}&mc=7338&tn=${encodeURIComponent("Print Job Payment")}&am=${totalAmount.toFixed(2)}&cu=INR`;
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(shopName)}&tn=${encodeURIComponent("Print Job Payment")}&am=${totalAmount.toFixed(2)}&cu=INR`;
 
   const copy = (text: string, key: "upi" | "amount") => {
     navigator.clipboard.writeText(text).then(() => {
