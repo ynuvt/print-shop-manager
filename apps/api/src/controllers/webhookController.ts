@@ -1371,12 +1371,16 @@ Please try again.`,
                   }
 
                   const shopName = shopRecord.name || shopRecord.username;
-                  await sendWhatsAppMessage(userData.displayPhoneNumber, {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
                     message: `✅ Your shop is selected as *${shopName}*`,
+                    phoneNumberId,
                   });
                 } else {
-                  await sendWhatsAppMessage(userData.displayPhoneNumber, {
+                  await sendWhatsAppTextMessage({
+                    to: userData.displayPhoneNumber,
                     message: `❌ Shop not found. Please make sure you scanned the correct QR code.`,
+                    phoneNumberId,
                   });
                 }
               } catch (err) {
