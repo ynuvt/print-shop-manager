@@ -18,6 +18,8 @@ const BrandOffersPage = lazy(() => import("./pages/BrandOffersPage"));
 const BrandOutletsPage = lazy(() => import("./pages/BrandOutletsPage"));
 const BrandWorkersPage = lazy(() => import("./pages/BrandWorkersPage"));
 const BrandCouponsPage = lazy(() => import("./pages/BrandCouponsPage"));
+const ShopDashboard = lazy(() => import("./pages/ShopDashboard"));
+const SidRedirectPage = lazy(() => import("./pages/SidRedirectPage"));
 
 export type ThemeMode = "dark" | "light";
 
@@ -25,7 +27,36 @@ function PageLoader() {
   return <div style={{ minHeight: "100dvh", background: "var(--bg)" }} />;
 }
 
+// On Android, when the user opens the site in a browser tab but has the PWA installed,
+// use getInstalledRelatedApps() to detect the installation and re-navigate so Chrome
+// intercepts and opens the standalone PWA instead.
+function usePWARedirect() {
+  useEffect(() => {
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as any).standalone === true;
+    if (isStandalone) return; // already in PWA
+
+    const isAndroid = /android/i.test(navigator.userAgent);
+    if (!isAndroid) return;
+
+    // Guard: only attempt once per session to avoid infinite loops
+    if (sessionStorage.getItem("__pwa_redirect")) return;
+    sessionStorage.setItem("__pwa_redirect", "1");
+
+    if ("getInstalledRelatedApps" in navigator) {
+      (navigator as any).getInstalledRelatedApps().then((apps: any[]) => {
+        if (apps.length > 0) {
+          // PWA is installed — re-navigate so Chrome intercepts and opens it
+          window.location.href = window.location.href;
+        }
+      }).catch(() => {});
+    }
+  }, []);
+}
+
 export default function App() {
+  usePWARedirect();
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("themeMode");
     return saved === "dark" ? "dark" : "light";
@@ -63,6 +94,8 @@ export default function App() {
             <Route path="/about" element={<AboutPage theme={theme} onToggleTheme={toggleTheme} />} />
             <Route path="/rewards" element={<RewardsPage theme={theme} onToggleTheme={toggleTheme} />} />
             <Route path="/auth/otp" element={<AuthOtpPage />} />
+            <Route path="/shop" element={<ShopDashboard theme={theme} onToggleTheme={toggleTheme} />} />
+            <Route path="/sid/:shopId" element={<SidRedirectPage />} />
             <Route path="/brand/login" element={<BrandLoginPage />} />
             <Route path="/brand" element={<BrandLayout />}>
               <Route path="dashboard" element={<BrandDashboardPage />} />

@@ -697,7 +697,7 @@ app.post(
 
 
 
-    const shopIdParam = typeof req.body.shopId === "string" ? req.body.shopId.trim() : "";
+    const shopIdParam = typeof req.body.shopId === "string" ? req.body.shopId.trim().toUpperCase() : "";
     if (!shopIdParam) {
       return res.status(400).json({ error: "shopId is required." });
     }
@@ -705,6 +705,16 @@ app.post(
     let incomingFiles: UrlFileForCreate[] = [];
 
     try {
+      // Fetch shop from DB to use its actual prices and validate it's active
+      const shop = await prisma.printShop.findUnique({
+        where: { shopId: shopIdParam },
+        select: { shopId: true, priceBW: true, priceColor: true, isActive: true },
+      });
+      if (!shop || !shop.isActive) {
+        return res.status(404).json({ error: "Print shop not found or is not active." });
+      }
+      const shopPricing = { priceBW: shop.priceBW, priceColor: shop.priceColor };
+
       incomingFiles = parseUrlFilesFromBody(req.body.files);
 
       if (!incomingFiles.length) {
@@ -757,6 +767,7 @@ app.post(
           }
         }
 
+        // Use shop's actual prices from DB, not frontend-provided values
         const cost = calculateFileCost(pages, {
           paperSize: file.options.paperSize,
           colorMode: file.options.colorMode,
@@ -767,7 +778,7 @@ app.post(
           duplex: file.options.duplex,
           copies: file.options.copies,
           pagesPerSheet: file.options.pagesPerSheet || 1,
-        });
+        }, shopPricing);
 
         uploadedFiles.push({
           name: file.name,
@@ -1399,6 +1410,22 @@ app.get("/all", authMiddleware(["admin"]), async (req: ExtendedRequest, res) => 
   }
 });
 
+// Returns the shopId the authenticated user set via WhatsApp QR scan (SID:X command).
+app.get("/wa-shop", authMiddleware(["customer"]), async (req: ExtendedRequest, res) => {
+  const userId = req.user?.uid;
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const waUser = await prisma.whatsAppUser.findFirst({
+      where: { userId },
+      select: { defaultShopId: true },
+    });
+    res.json({ defaultShopId: waUser?.defaultShopId ?? null });
+  } catch (err) {
+    console.error("[wa-shop]", err);
+    res.status(500).json({ error: "Failed to fetch default shop." });
+  }
+});
+
 app.get("/shops", authMiddleware(["admin", "customer"]), async (req, res) => {
   try {
     const cached = shopListCache.get("active_shops");
@@ -1418,6 +1445,7 @@ app.get("/shops", authMiddleware(["admin", "customer"]), async (req, res) => {
         priceBW: true,
         priceColor: true,
         upiId: true,
+        platformChargeEnabled: true,
       },
       orderBy: { name: "asc" },
     });
@@ -1524,7 +1552,7 @@ app.get(
               orderBy: { createdAt: "asc" },
             },
             owners: { select: { userId: true } },
-            shop: { select: { upiId: true, name: true } },
+            shop: { select: { upiId: true, name: true, platformChargeEnabled: true } },
           },
         }),
       ]);
@@ -1533,8 +1561,9 @@ app.get(
       const scoped = jobs.map((job) => {
         const shopUpiId = (job as any).shop?.upiId ?? null;
         const shopName = (job as any).shop?.name ?? null;
+        const shopPlatformChargeEnabled = (job as any).shop?.platformChargeEnabled ?? false;
         const { shop: _shop, ...jobWithoutShop } = job as any;
-        const base = { ...jobWithoutShop, shopUpiId, shopName };
+        const base = { ...jobWithoutShop, shopUpiId, shopName, shopPlatformChargeEnabled };
 
         const isOwner = job.userId === req.user!.uid;
         if (isOwner || job.status !== PrintJobStatus.DRAFT) {

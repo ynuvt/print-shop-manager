@@ -149,10 +149,11 @@ export default function ShopPickerModal({ shops, onSelect, onClose }: ShopPicker
           className="shop-row-main"
           onClick={() => onSelect(shop)}
         >
-          {/* Shop ID Badge */}
+          {/* Shop ID Avatar */}
           <div className="shop-row-id-badge">
-            <span className="shop-row-id-label">ID</span>
-            <span className="shop-row-id-value">{shop.shopId}</span>
+            <span className="shop-row-id-value" style={{ fontSize: shop.shopId.length > 3 ? "11px" : shop.shopId.length > 2 ? "14px" : "18px" }}>
+              {shop.shopId.slice(0, 4).toUpperCase()}
+            </span>
           </div>
 
           <div className="shop-row-info">

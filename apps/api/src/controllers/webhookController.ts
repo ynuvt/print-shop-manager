@@ -1341,6 +1341,37 @@ Please try again.`,
               continue;
             }
 
+            // ─── SHOP QR SELECTION (SID:X) ──────────────────────────────────
+            // Matches "SID:TCET", "SID:1", or full QR message "PLEASE SEND THIS MESSAGE SID:1".
+            // Works for both synced and unsynced users. No reply is sent.
+            const sidMatch = incomingMessage.text?.body
+              ?.trim()
+              .match(/\bSID:([A-Z0-9]+)/i); // only alphanumeric shop ID chars
+            if (sidMatch && userData.displayPhoneNumber) {
+              const shopIdCandidate = sidMatch[1]!.toUpperCase().replace(/[^A-Z0-9]/g, "");
+              try {
+                const shopRecord = await prisma.printShop.findUnique({
+                  where: { shopId: shopIdCandidate },
+                  select: { shopId: true, isActive: true },
+                });
+                if (shopRecord?.isActive) {
+                  await prisma.whatsAppUser.upsert({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    create: {
+                      phoneNumber: userData.displayPhoneNumber,
+                      name: userData.displayName || null,
+                      defaultShopId: shopRecord.shopId,
+                    },
+                    update: { defaultShopId: shopRecord.shopId },
+                    select: { phoneNumber: true },
+                  });
+                }
+              } catch (err) {
+                console.error("[SID] shop selection error:", err);
+              }
+              continue;
+            }
+
             // ── For unsynced users: show welcome for unknown messages ──
             if (
               !isAuthenticated &&

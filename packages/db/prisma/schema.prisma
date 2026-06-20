@@ -147,6 +147,7 @@ model WhatsAppUser {
   lastFileBatchSentAt        DateTime?
   lastMessageAt      DateTime?
   userId             String?  @unique
+  defaultShopId      String?  // Set when user scans a shop QR code (SID:X command)
   user               User?    @relation(fields: [userId], references: [id], map: "whatsappuser_userId_fkey")
   printJobs          PrintJob[]
   uploadedFiles      file[]   @relation("WhatsAppUserUploadedFiles")
@@ -383,20 +384,34 @@ model CouponRedemption {
 
 
 model PrintShop {
-  id        String     @id @default(uuid())
-  name      String     @default("")
-  username  String     @unique
-  password  String
-  shopId    String     @unique
-  landmark  String?
-  imageUrl  String?
-  latitude  Float?
-  longitude Float?
-  priceBW   Float      @default(2)
-  priceColor Float     @default(7)
-  upiId     String?
-  isActive  Boolean    @default(true)
-  createdAt DateTime   @default(now())
-  printJobs PrintJob[]
+  id                    String            @id @default(uuid())
+  name                  String            @default("")
+  username              String            @unique
+  password              String
+  shopId                String            @unique
+  landmark              String?
+  imageUrl              String?
+  latitude              Float?
+  longitude             Float?
+  priceBW               Float             @default(2)
+  priceColor            Float             @default(7)
+  upiId                 String?
+  isActive              Boolean           @default(true)
+  platformChargeEnabled   Boolean           @default(false)
+  platformChargeEnabledAt DateTime?
+  createdAt               DateTime          @default(now())
+  printJobs             PrintJob[]
+  platformPayments      PlatformPayment[]
+}
+
+model PlatformPayment {
+  id        String    @id @default(cuid())
+  shopId    String
+  shop      PrintShop @relation(fields: [shopId], references: [shopId])
+  amount    Float
+  note      String?
+  createdAt DateTime  @default(now())
+
+  @@index([shopId])
 }
  

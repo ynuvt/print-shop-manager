@@ -1,19 +1,89 @@
+import { useEffect, useState, useCallback } from "react";
 import type { ThemeMode } from "../App";
-import { 
-  BarChart3, 
-  Users, 
-  MessageSquare, 
-  TrendingUp, 
-  Target,
-  Award,
-} from "lucide-react";
-import { useState } from "react";
 
-const PLANS = [
-  { id: 'standard', name: 'Standard', price: '499', features: ['Website Ads', 'Coupon Placement', 'Dashboard/Analytics'] },
-  { id: 'pro', name: 'Pro', price: '999', features: ['Website Ads', 'Coupon Placement', 'WhatsApp Coupon Texts', 'Targeted Ads', 'Dashboard/Analytics'] },
-  { id: 'pro_plus', name: 'Pro+', price: '1299', features: ['Website Ads', 'Coupon Placement', 'WhatsApp Template Coupons', 'WhatsApp Reminders', 'Targeted Ads', 'Custom Campaigns', 'Priority Visibility'] }
-];
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ??
+  (window.location.origin.includes("localhost")
+    ? "http://localhost:4000"
+    : window.location.origin)
+).replace(/\/$/, "") + "/api/v1";
+
+const TOKEN_KEY = "zopy_shop_token";
+
+interface ShopInfo {
+  shopId: string;
+  name: string;
+  username: string;
+  landmark?: string;
+  imageUrl?: string;
+  priceBW: number;
+  priceColor: number;
+  platformChargeEnabled: boolean;
+}
+
+interface DashboardStats {
+  completedJobsCount: number;
+  totalRevenue: number;
+  totalPages: number;
+  peakHours: number[];
+}
+
+interface ChargeTier {
+  minAmount: number;
+  charge: number;
+  label: string;
+}
+
+interface PlatformCharge {
+  enabled: boolean;
+  unpaidAmount: number;
+  tiers: ChargeTier[];
+  lastPayment: {
+    id: string;
+    amount: number;
+    note: string | null;
+    createdAt: string;
+  } | null;
+}
+
+interface RecentJob {
+  id: string;
+  totalCost: number;
+  totalPages: number;
+  colorMode: string;
+  createdAt: string;
+  verificationCode: number | null;
+  source: string;
+  platformCharge: number;
+}
+
+interface DashboardData {
+  shop: ShopInfo;
+  stats: DashboardStats;
+  platformCharge: PlatformCharge;
+  recentJobs: RecentJob[];
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
 export default function ShopDashboard({
   theme,
@@ -22,285 +92,497 @@ export default function ShopDashboard({
   theme: ThemeMode;
   onToggleTheme: () => void;
 }) {
-  const [selectedPlan, setSelectedPlan] = useState(PLANS[2]);
-  const [dateRange] = useState("Oct 12 - Oct 19, 2023");
-  
-  const hasAccess = (feature: string) => {
-    return selectedPlan.features.includes(feature) || selectedPlan.id === 'pro_plus';
+  const [token, setToken] = useState<string | null>(localStorage.getItem(TOKEN_KEY));
+  const [shopId, setShopId] = useState<string | null>(null);
+
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const [activeTab, setActiveTab] = useState<"overview" | "jobs" | "billing">("overview");
+
+  // Jobs tab — paginated with search + date
+  const [jobsData, setJobsData] = useState<{ jobs: RecentJob[]; total: number; totalPages: number } | null>(null);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState("");
+  const [jobsPage, setJobsPage] = useState(1);
+  const [jobsSearch, setJobsSearch] = useState("");
+  const [jobsDate, setJobsDate] = useState("");
+  const [jobsSearchInput, setJobsSearchInput] = useState("");
+
+  const logout = useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setShopId(null);
+    setData(null);
+  }, []);
+
+  const fetchDashboard = useCallback(
+    async (tok: string, sid: string) => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(`${API_BASE}/analysis/shops/${sid}/dashboard`, {
+          headers: { Authorization: `Bearer ${tok}` },
+        });
+        if (res.status === 401) { logout(); return; }
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error((d as any).error || "Failed to load dashboard.");
+        }
+        setData(await res.json() as DashboardData);
+      } catch (err: any) {
+        setError(err.message || "Something went wrong.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [logout]
+  );
+
+  const fetchJobs = useCallback(
+    async (tok: string, sid: string, page: number, search: string, date: string) => {
+      setJobsLoading(true);
+      setJobsError("");
+      try {
+        const params = new URLSearchParams({ page: String(page), limit: "20" });
+        if (search) params.set("search", search);
+        if (date)   params.set("date", date);
+        const res = await fetch(`${API_BASE}/analysis/shops/${sid}/jobs?${params}`, {
+          headers: { Authorization: `Bearer ${tok}` },
+        });
+        if (res.status === 401) { logout(); return; }
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error((d as any).error || "Failed to load jobs.");
+        }
+        const data = await res.json();
+        setJobsData({ jobs: data.jobs, total: data.total, totalPages: data.totalPages });
+      } catch (err: any) {
+        setJobsError(err.message || "Something went wrong.");
+      } finally {
+        setJobsLoading(false);
+      }
+    },
+    [logout]
+  );
+
+  useEffect(() => {
+    if (!token) return;
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]!));
+      const sid: string | undefined = payload.shopId;
+      if (!sid) { logout(); return; }
+      setShopId(sid);
+      fetchDashboard(token, sid);
+    } catch {
+      logout();
+    }
+  }, [token, logout, fetchDashboard]);
+
+  // Fetch jobs when the jobs tab is active or filters change
+  useEffect(() => {
+    if (activeTab === "jobs" && token && shopId) {
+      fetchJobs(token, shopId, jobsPage, jobsSearch, jobsDate);
+    }
+  }, [activeTab, token, shopId, jobsPage, jobsSearch, jobsDate, fetchJobs]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError("");
+    try {
+      const res = await fetch(`${API_BASE}/auth/shop-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim().toLowerCase(), password }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error((d as any).error || "Invalid credentials.");
+      localStorage.setItem(TOKEN_KEY, d.token);
+      setToken(d.token);
+    } catch (err: any) {
+      setLoginError(err.message || "Login failed.");
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
-  return (
-    <div className="app-shell" style={{ background: theme === 'dark' ? '#070708' : '#f4f4f7', minHeight: "100vh", padding: "0 0 80px" }}>
-      {/* Premium Dashboard Header */}
-      <nav style={{ 
-        padding: "16px 40px", 
-        background: "rgba(0,0,0,0.8)", 
-        borderBottom: "1px solid rgba(255,255,255,0.1)",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-        backdropFilter: "blur(20px)",
-        color: "#fff"
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <div style={{ width: "36px", height: "36px", background: "var(--brand)", borderRadius: "10px", display: "grid", placeItems: "center", fontWeight: "950", color: "#000" }}>Z</div>
-          <div>
-            <div style={{ fontWeight: "900", letterSpacing: "-0.01em", fontSize: "16px" }}>ZOPY BUSINESS</div>
-            <div style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", fontWeight: "700" }}>OUTLET PORTAL • v2.4</div>
+  const isDark = theme === "dark";
+  const bg = isDark ? "#09090b" : "#f4f4f7";
+  const card = isDark ? "#111113" : "#ffffff";
+  const border = isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.09)";
+  const textColor = isDark ? "#f4f4f5" : "#18181b";
+  const muted = isDark ? "#71717a" : "#888";
+
+  if (!token || !shopId) {
+    return (
+      <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
+        <div style={{ width: "100%", maxWidth: "380px", background: card, border: `1px solid ${border}`, borderRadius: "24px", padding: "32px", boxShadow: "0 8px 40px rgba(0,0,0,0.3)" }}>
+          <div style={{ textAlign: "center", marginBottom: "28px" }}>
+            <div style={{ width: "48px", height: "48px", background: "var(--brand)", borderRadius: "14px", display: "grid", placeItems: "center", fontWeight: "950", fontSize: "20px", color: "#000", margin: "0 auto 16px" }}>Z</div>
+            <h1 style={{ fontSize: "22px", fontWeight: "900", margin: "0 0 6px", color: textColor }}>Shop Portal</h1>
+            <p style={{ fontSize: "13px", color: muted, margin: 0 }}>Sign in with your shop credentials</p>
           </div>
-        </div>
-        
-        <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
-          <div style={{ display: "flex", background: "rgba(255,255,255,0.05)", borderRadius: "12px", padding: "4px" }}>
-             <button style={{ padding: "8px 16px", background: "transparent", border: "none", color: "#fff", fontSize: "13px", fontWeight: "700", cursor: "pointer", opacity: 0.5 }}>Analytics</button>
-             <button style={{ padding: "8px 16px", background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", fontSize: "13px", fontWeight: "700", cursor: "pointer", borderRadius: "8px" }}>Campaigns</button>
-             <button style={{ padding: "8px 16px", background: "transparent", border: "none", color: "#fff", fontSize: "13px", fontWeight: "700", cursor: "pointer", opacity: 0.5 }}>billing</button>
-          </div>
-          <button onClick={onToggleTheme} style={{ background: "rgba(255,255,255,0.05)", border: "none", width: "40px", height: "40px", borderRadius: "12px", cursor: "pointer", display: "grid", placeItems: "center" }}>
-            {theme === 'dark' ? "🌙" : "☀️"}
+
+          <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "6px" }}>Username</label>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="your shop username"
+                style={{ width: "100%", background: isDark ? "#0a0a0b" : "#f7f7f8", border: `1px solid ${border}`, borderRadius: "12px", padding: "12px 14px", fontSize: "14px", color: textColor, outline: "none", boxSizing: "border-box" }}
+              />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "6px" }}>Password</label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                style={{ width: "100%", background: isDark ? "#0a0a0b" : "#f7f7f8", border: `1px solid ${border}`, borderRadius: "12px", padding: "12px 14px", fontSize: "14px", color: textColor, outline: "none", boxSizing: "border-box" }}
+              />
+            </div>
+            {loginError && (
+              <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "10px 12px", fontSize: "12px", color: "#ef4444" }}>
+                {loginError}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={loginLoading}
+              style={{ background: "var(--brand)", color: "#000", border: "none", borderRadius: "12px", padding: "13px", fontSize: "14px", fontWeight: "800", cursor: loginLoading ? "not-allowed" : "pointer", opacity: loginLoading ? 0.6 : 1, marginTop: "4px" }}
+            >
+              {loginLoading ? "Signing in..." : "Sign In"}
+            </button>
+          </form>
+
+          <button onClick={onToggleTheme} style={{ display: "block", margin: "20px auto 0", background: "none", border: "none", cursor: "pointer", fontSize: "18px", opacity: 0.4 }}>
+            {isDark ? "🌙" : "☀️"}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  const shop = data?.shop;
+  const stats = data?.stats;
+  const charge = data?.platformCharge;
+  const jobs = data?.recentJobs ?? [];
+
+  const peakHour = stats
+    ? stats.peakHours.indexOf(Math.max(...stats.peakHours))
+    : null;
+
+  const formatHour = (h: number) =>
+    h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`;
+
+  const tabStyle = (tab: typeof activeTab): React.CSSProperties => ({
+    padding: "8px 0",
+    fontSize: "13px",
+    fontWeight: "700",
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    color: activeTab === tab ? "var(--brand)" : muted,
+    borderBottom: `2px solid ${activeTab === tab ? "var(--brand)" : "transparent"}`,
+    transition: "all 0.15s",
+  });
+
+  const statCard = (label: string, value: string | number, sub?: string, accent?: string) => (
+    <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "20px 22px" }}>
+      <div style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "6px" }}>{label}</div>
+      <div style={{ fontSize: "28px", fontWeight: "900", letterSpacing: "-0.02em", color: accent ?? textColor }}>{value}</div>
+      {sub && <div style={{ fontSize: "11px", color: muted, marginTop: "4px" }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: bg, paddingBottom: "60px" }}>
+      <nav style={{ position: "sticky", top: 0, zIndex: 100, background: isDark ? "rgba(9,9,11,0.9)" : "rgba(255,255,255,0.9)", backdropFilter: "blur(20px)", borderBottom: `1px solid ${border}`, padding: "0 20px" }}>
+        <div style={{ maxWidth: "900px", margin: "0 auto", height: "56px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ width: "34px", height: "34px", background: "var(--brand)", borderRadius: "10px", display: "grid", placeItems: "center", fontWeight: "950", fontSize: "16px", color: "#000" }}>Z</div>
+            <div>
+              <div style={{ fontWeight: "900", fontSize: "15px", color: textColor }}>{shop?.name || shop?.username || "Shop"}</div>
+              <div style={{ fontSize: "10px", color: muted, fontWeight: "700" }}>ZOPY PORTAL · {shopId}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <button onClick={onToggleTheme} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "10px", width: "36px", height: "36px", cursor: "pointer", fontSize: "16px" }}>
+              {isDark ? "🌙" : "☀️"}
+            </button>
+            <button onClick={logout} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "10px", padding: "6px 14px", fontSize: "12px", fontWeight: "700", color: muted, cursor: "pointer" }}>
+              Logout
+            </button>
+          </div>
         </div>
       </nav>
 
-      <main className="dashboard-content" style={{ maxWidth: "1600px", margin: "0 auto", padding: "40px" }}>
-        
-        {/* Plan Selection Row */}
-        <section style={{ marginBottom: "48px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "24px" }}>
-            <div>
-              <h2 style={{ fontSize: "24px", fontWeight: "900", margin: "0 0 4px" }}>Membership Plans</h2>
-              <p style={{ color: "var(--text-muted)", margin: 0, fontSize: "14px", fontWeight: "600" }}>Select a plan to unlock advanced analytics and marketing tools</p>
-            </div>
-            <div style={{ color: "var(--brand)", fontWeight: "900", fontSize: "14px" }}>ACTIVE: {selectedPlan.name.toUpperCase()}</div>
+      <div style={{ maxWidth: "900px", margin: "0 auto", padding: "28px 20px" }}>
+        <div style={{ display: "flex", gap: "24px", borderBottom: `1px solid ${border}`, marginBottom: "28px" }}>
+          <button style={tabStyle("overview")} onClick={() => setActiveTab("overview")}>Overview</button>
+          <button style={tabStyle("jobs")} onClick={() => setActiveTab("jobs")}>Recent Jobs</button>
+          {charge?.enabled && (
+            <button style={tabStyle("billing")} onClick={() => setActiveTab("billing")}>Billing</button>
+          )}
+        </div>
+
+        {loading && (
+          <div style={{ textAlign: "center", padding: "60px 0", color: muted, fontSize: "14px" }}>Loading...</div>
+        )}
+        {error && (
+          <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "16px", padding: "16px 20px", fontSize: "13px", color: "#ef4444", marginBottom: "24px" }}>
+            {error}
           </div>
-          
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px" }}>
-            {PLANS.map(plan => (
-              <div 
-                key={plan.id}
-                onClick={() => setSelectedPlan(plan)}
-                style={{
-                  background: selectedPlan.id === plan.id ? "var(--brand)" : "var(--panel)",
-                  padding: "24px",
-                  borderRadius: "24px",
-                  cursor: "pointer",
-                  transition: "all 0.3s ease",
-                  border: "2px solid",
-                  borderColor: selectedPlan.id === plan.id ? "var(--brand)" : "var(--border)",
-                  color: selectedPlan.id === plan.id ? "#000" : "var(--text)",
-                  transform: selectedPlan.id === plan.id ? "scale(1.02)" : "scale(1)",
-                  boxShadow: selectedPlan.id === plan.id ? "0 20px 40px rgba(250, 204, 21, 0.2)" : "none"
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
-                  <div style={{ fontSize: "20px", fontWeight: "950" }}>{plan.name}</div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: "18px", fontWeight: "950" }}>₹{plan.price}</div>
-                    <div style={{ fontSize: "10px", fontWeight: "800", opacity: 0.7 }}>/ MONTH</div>
+        )}
+
+        {!loading && data && activeTab === "overview" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
+              {statCard("Completed Jobs", stats!.completedJobsCount, "All time")}
+              {statCard("Total Revenue", `₹${stats!.totalRevenue.toFixed(0)}`, "Collected from customers", "var(--brand)")}
+              {statCard("Pages Printed", stats!.totalPages.toLocaleString(), "All completed jobs")}
+              {peakHour !== null && statCard("Peak Hour", formatHour(peakHour), `${stats!.peakHours[peakHour]} jobs at this hour`)}
+            </div>
+
+            {charge?.enabled && (charge.unpaidAmount ?? 0) > 0 && (
+              <div style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: "20px", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+                <div>
+                  <div style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a78bfa" }}>Zopy Platform Fee Due</div>
+                  <div style={{ fontSize: "13px", color: muted, marginTop: "4px" }}>Amount owed to Zopy · tap Billing tab for details</div>
+                </div>
+                <div style={{ fontSize: "32px", fontWeight: "900", color: "#a78bfa" }}>₹{charge.unpaidAmount}</div>
+              </div>
+            )}
+
+            <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "20px 22px" }}>
+              <div style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "14px" }}>Shop Details</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px 20px" }}>
+                {([
+                  ["Shop ID", shopId],
+                  ["B&W Price", `₹${shop?.priceBW ?? 2}/page`],
+                  ["Color Price", `₹${shop?.priceColor ?? 7}/page`],
+                  ...(shop?.landmark ? [["Landmark", shop.landmark]] : []),
+                ] as [string, string][]).map(([label, val]) => (
+                  <div key={label}>
+                    <div style={{ fontSize: "11px", color: muted, marginBottom: "2px" }}>{label}</div>
+                    <div style={{ fontSize: "14px", fontWeight: "700", color: textColor }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {stats && (
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "20px 22px" }}>
+                <div style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "16px" }}>Peak Hours (IST)</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "60px" }}>
+                  {stats.peakHours.map((count, h) => {
+                    const max = Math.max(...stats.peakHours, 1);
+                    const pct = Math.max(4, (count / max) * 100);
+                    return (
+                      <div key={h} title={`${formatHour(h)}: ${count} jobs`} style={{ flex: 1, background: h === peakHour ? "var(--brand)" : isDark ? "#27272a" : "#e4e4e7", borderRadius: "4px 4px 0 0", height: `${pct}%`, transition: "height 0.3s" }} />
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "9px", color: muted }}>
+                  <span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>11 PM</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "jobs" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Search + date filters */}
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flex: "1 1 160px", minWidth: 0, background: card, border: `1px solid ${border}`, borderRadius: "12px", overflow: "hidden", alignItems: "center", padding: "0 12px", gap: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="Search by code…"
+                  value={jobsSearchInput}
+                  onChange={(e) => setJobsSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      setJobsSearch(jobsSearchInput.trim());
+                      setJobsPage(1);
+                    }
+                  }}
+                  style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", fontSize: "13px", color: textColor, padding: "10px 0" }}
+                />
+                {jobsSearchInput && (
+                  <button onClick={() => { setJobsSearchInput(""); setJobsSearch(""); setJobsPage(1); }} style={{ background: "none", border: "none", cursor: "pointer", color: muted, fontSize: "16px", padding: 0, flexShrink: 0 }}>×</button>
+                )}
+              </div>
+              <input
+                type="date"
+                value={jobsDate}
+                onChange={(e) => { setJobsDate(e.target.value); setJobsPage(1); }}
+                style={{ flex: "1 1 120px", minWidth: 0, background: card, border: `1px solid ${border}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: jobsDate ? textColor : muted, outline: "none" }}
+              />
+              {(jobsDate || jobsSearch) && (
+                <button onClick={() => { setJobsDate(""); setJobsSearch(""); setJobsSearchInput(""); setJobsPage(1); }} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "12px", padding: "10px 14px", fontSize: "12px", fontWeight: "700", color: muted, cursor: "pointer", flexShrink: 0 }}>
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Job cards — mobile-first */}
+            {jobsLoading ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: muted, fontSize: "14px" }}>Loading…</div>
+            ) : jobsError ? (
+              <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "16px", padding: "16px 20px", fontSize: "13px", color: "#ef4444" }}>{jobsError}</div>
+            ) : !jobsData || jobsData.jobs.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: muted, fontSize: "14px", background: card, borderRadius: "20px", border: `1px solid ${border}` }}>No jobs found.</div>
+            ) : (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {jobsData.jobs.map((job) => (
+                    <div
+                      key={job.id}
+                      style={{ background: card, border: `1px solid ${border}`, borderRadius: "16px", padding: "14px 16px" }}
+                    >
+                      {/* Top row: code + source badge + date */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                        <span style={{ fontFamily: "monospace", fontWeight: "900", fontSize: "18px", color: textColor, letterSpacing: "-0.02em" }}>
+                          {job.verificationCode ?? "—"}
+                        </span>
+                        <span style={{ fontSize: "10px", fontWeight: "700", padding: "2px 8px", borderRadius: "99px", background: job.source === "WHATSAPP" ? "rgba(34,197,94,0.12)" : "rgba(59,130,246,0.12)", color: job.source === "WHATSAPP" ? "#22c55e" : "#3b82f6", flexShrink: 0 }}>
+                          {job.source === "WHATSAPP" ? "WA" : "WEB"}
+                        </span>
+                        <span style={{ fontSize: "12px", color: muted, marginLeft: "auto", whiteSpace: "nowrap" }}>
+                          {formatShortDate(job.createdAt)}
+                        </span>
+                      </div>
+
+                      {/* Bottom row: pages + amount + fee */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span style={{ fontSize: "12px", color: muted }}>
+                          {job.totalPages} page{job.totalPages !== 1 ? "s" : ""}
+                        </span>
+                        <span style={{ fontSize: "12px", color: muted }}>·</span>
+                        <span style={{ fontSize: "12px", color: muted, textTransform: "capitalize" }}>
+                          {job.colorMode?.toLowerCase() ?? "b&w"}
+                        </span>
+                        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span style={{ fontSize: "15px", fontWeight: "800", color: "var(--brand)" }}>₹{job.totalCost}</span>
+                          {charge?.enabled && (
+                            <span style={{ fontSize: "12px", fontWeight: "700", color: job.platformCharge > 0 ? "#a78bfa" : muted }}>
+                              {job.platformCharge > 0 ? `+₹${job.platformCharge} fee` : "no fee"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
+                  <span style={{ fontSize: "12px", color: muted }}>
+                    {((jobsPage - 1) * 20) + 1}–{Math.min(jobsPage * 20, jobsData.total)} of {jobsData.total} jobs
+                  </span>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      disabled={jobsPage <= 1}
+                      onClick={() => setJobsPage((p) => p - 1)}
+                      style={{ padding: "8px 14px", borderRadius: "10px", border: `1px solid ${border}`, background: card, color: jobsPage <= 1 ? muted : textColor, cursor: jobsPage <= 1 ? "not-allowed" : "pointer", fontSize: "12px", fontWeight: "700" }}
+                    >← Prev</button>
+                    <button
+                      disabled={jobsPage >= jobsData.totalPages}
+                      onClick={() => setJobsPage((p) => p + 1)}
+                      style={{ padding: "8px 14px", borderRadius: "10px", border: `1px solid ${border}`, background: card, color: jobsPage >= jobsData.totalPages ? muted : textColor, cursor: jobsPage >= jobsData.totalPages ? "not-allowed" : "pointer", fontSize: "12px", fontWeight: "700" }}
+                    >Next →</button>
                   </div>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                  {plan.features.slice(0, 3).map((f, i) => (
-                    <div key={i} style={{ fontSize: "11px", fontWeight: "800", padding: "4px 8px", background: "rgba(0,0,0,0.1)", borderRadius: "6px" }}>{f}</div>
+              </>
+            )}
+          </div>
+        )}
+
+        {!loading && data && activeTab === "billing" && charge?.enabled && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div style={{ background: card, border: "1px solid rgba(139,92,246,0.3)", borderRadius: "20px", padding: "24px" }}>
+              <div style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "#a78bfa", marginBottom: "8px" }}>Total Platform Fees to Pay Zopy</div>
+              <div style={{ fontSize: "40px", fontWeight: "900", letterSpacing: "-0.02em", color: "#a78bfa" }}>₹{charge.unpaidAmount}</div>
+              <div style={{ fontSize: "12px", color: muted, marginTop: "6px" }}>
+                Sum of ₹2/₹4 platform fees collected from customers since fees were enabled, minus payments already settled with Zopy.
+              </div>
+              {charge.tiers && charge.tiers.length > 0 && (
+                <div style={{ marginTop: "16px", padding: "14px", background: isDark ? "#18181b" : "#f4f4f7", borderRadius: "12px", fontSize: "12px", color: muted }}>
+                  <div style={{ fontWeight: "700", marginBottom: "6px", color: textColor }}>Charge breakdown:</div>
+                  {charge.tiers.map((tier) => (
+                    <div key={tier.minAmount}>
+                      • {tier.label}: <strong style={{ color: tier.charge > 0 ? textColor : muted }}>
+                        {tier.charge > 0 ? `₹${tier.charge} per job` : "₹0 (no charge)"}
+                      </strong>
+                    </div>
                   ))}
-                  {plan.features.length > 3 && <div style={{ fontSize: "11px", fontWeight: "800", padding: "4px 8px", background: "rgba(0,0,0,0.1)", borderRadius: "6px" }}>+{plan.features.length - 3} more</div>}
+                </div>
+              )}
+            </div>
+
+            {charge.lastPayment ? (
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "24px" }}>
+                <div style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "16px" }}>Last Payment Received</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+                  <div>
+                    <div style={{ fontSize: "28px", fontWeight: "900", color: "#22c55e" }}>₹{charge.lastPayment.amount}</div>
+                    <div style={{ fontSize: "12px", color: muted, marginTop: "4px" }}>{formatDate(charge.lastPayment.createdAt)}</div>
+                    {charge.lastPayment.note && (
+                      <div style={{ fontSize: "12px", color: muted, marginTop: "2px" }}>Note: {charge.lastPayment.note}</div>
+                    )}
+                  </div>
+                  <div style={{ padding: "8px 14px", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", borderRadius: "99px", fontSize: "12px", fontWeight: "700", color: "#22c55e" }}>
+                    Confirmed by Zopy
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Dynamic Analytics Section */}
-        <header style={{ marginBottom: "32px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1 style={{ fontSize: "36px", fontWeight: "950", margin: 0, letterSpacing: "-0.04em" }}>Madrasi Kaapi House Dashboard</h1>
-          <div style={{ display: "flex", background: "var(--panel)", padding: "8px 16px", borderRadius: "14px", border: "1px solid var(--border)", alignItems: "center", gap: "10px" }}>
-            <BarChart3 size={18} color="var(--brand)" />
-            <span style={{ fontWeight: "800", fontSize: "14px" }}>{dateRange}</span>
-          </div>
-        </header>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "24px", marginBottom: "40px" }}>
-          <StatCard icon={<Users size={20} />} label="Total Reach" value="4,821" trend="+12%" color="#3b82f6" sub="Total impressions" />
-          
-          <div style={{ position: "relative", opacity: hasAccess('WhatsApp Coupon Texts') ? 1 : 0.4, filter: hasAccess('WhatsApp Coupon Texts') ? 'none' : 'grayscale(1)' }}>
-             <StatCard icon={<MessageSquare size={20} />} label="WhatsApp Sent" value="1,284" trend="+12%" color="#22c55e" sub="Pro Membership" />
-             {!hasAccess('WhatsApp Coupon Texts') && <LockOverlay plan="Pro" />}
-          </div>
-
-          <div style={{ position: "relative", opacity: hasAccess('Targeted Ads') ? 1 : 0.4, filter: hasAccess('Targeted Ads') ? 'none' : 'grayscale(1)' }}>
-             <StatCard icon={<Target size={20} />} label="Targeted Leads" value="482" trend="+15%" color="#FACC15" sub="Frequent Users" />
-             {!hasAccess('Targeted Ads') && <LockOverlay plan="Pro" />}
-          </div>
-
-          <div style={{ position: "relative", opacity: hasAccess('Priority Visibility') ? 1 : 0.4, filter: hasAccess('Priority Visibility') ? 'none' : 'grayscale(1)' }}>
-             <StatCard icon={<Award size={20} />} label="Priority Score" value="98/100" trend="TOP 1%" color="#ef4444" sub="Max Exposure" />
-             {!hasAccess('Priority Visibility') && <LockOverlay plan="Pro+" />}
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "32px", marginBottom: "40px" }}>
-          <section className="hero-panel" style={{ padding: "32px", borderRadius: "32px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "32px" }}>
-              <h2 style={{ fontSize: "22px", fontWeight: "900", margin: 0 }}>Engagement Performance</h2>
-              <div style={{ display: "flex", gap: "16px" }}>
-                 <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: "800" }}>
-                   <div style={{ width: "12px", height: "12px", background: "var(--brand)", borderRadius: "4px" }} /> Impressions
-                 </div>
-                 <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: "800" }}>
-                   <div style={{ width: "12px", height: "12px", background: "#3b82f6", borderRadius: "4px" }} /> Conversions
-                 </div>
+            ) : (
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "24px", textAlign: "center", color: muted, fontSize: "13px" }}>
+                No payments recorded yet.
               </div>
-            </div>
-            <svg width="100%" height="300px" viewBox="0 0 1000 300" preserveAspectRatio="none">
-              <path d="M0,250 Q100,220 200,180 Q300,100 400,150 Q500,200 600,180 Q700,150 800,80 Q900,100 1000,50 L1000,300 L0,300 Z" fill="rgba(250, 204, 21, 0.1)" />
-              <path d="M0,250 Q100,220 200,180 Q300,100 400,150 Q500,200 600,180 Q700,150 800,80 Q900,100 1000,50" fill="none" stroke="var(--brand)" strokeWidth="5" strokeLinecap="round" />
-              <path d="M0,280 Q200,270 400,260 Q600,220 800,200 L1000,180" fill="none" stroke="#3b82f6" strokeWidth="4" strokeLinecap="round" strokeDasharray="10 10" />
-            </svg>
-          </section>
+            )}
 
-          <section className="hero-panel" style={{ padding: "32px", borderRadius: "32px" }}>
-            <h2 style={{ fontSize: "22px", fontWeight: "900", margin: "0 0 24px" }}>Funnel Analytics</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-              <ProgressBar label="Ad CTR" value={72} sub="Click-through rate on banner" color="var(--brand)" />
-              <ProgressBar label="Redemption Rate" value={45} sub="Coupon claims to shop visits" color="#3b82f6" />
-              <div style={{ position: "relative", opacity: hasAccess('Custom Campaigns') ? 1 : 0.4 }}>
-                 <ProgressBar label="Campaign Retention" value={88} sub="Repeat customers from WhatsApp" color="#22c55e" />
-                 {!hasAccess('Custom Campaigns') && <LockOverlay plan="Pro+" />}
+            {jobs.some((j) => j.platformCharge > 0) && (
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", overflow: "hidden" }}>
+                <div style={{ padding: "20px 22px 0", fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted }}>Fee Breakdown by Job</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", marginTop: "12px" }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${border}` }}>
+                        {["Code", "Date", "Job Amount", "Platform Fee"].map((h) => (
+                          <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: "10px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobs.filter((j) => j.platformCharge > 0).map((job, i, arr) => (
+                        <tr key={job.id} style={{ borderBottom: i < arr.length - 1 ? `1px solid ${border}` : "none" }}>
+                          <td style={{ padding: "11px 16px", fontFamily: "monospace", fontWeight: "700", color: textColor }}>{job.verificationCode ?? "—"}</td>
+                          <td style={{ padding: "11px 16px", color: muted, whiteSpace: "nowrap" }}>{formatShortDate(job.createdAt)}</td>
+                          <td style={{ padding: "11px 16px", fontWeight: "700", color: "var(--brand)" }}>₹{job.totalCost}</td>
+                          <td style={{ padding: "11px 16px", fontWeight: "800", color: "#a78bfa" }}>₹{job.platformCharge}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          </section>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "32px" }}>
-           <section className="hero-panel" style={{ gridColumn: "span 2", padding: "32px", borderRadius: "32px" }}>
-             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-               <h2 style={{ fontSize: "22px", fontWeight: "900", margin: 0 }}>Ad Configuration</h2>
-               <button className="theme-btn" style={{ padding: "8px 20px", background: "var(--brand)", border: "none", color: "#000" }}>Publish Changes</button>
-             </div>
-             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-               <div style={{ background: "var(--panel-muted)", padding: "20px", borderRadius: "20px" }}>
-                 <div style={{ fontWeight: "800", marginBottom: "12px", color: "var(--text-muted)" }}>LIVE BANNER</div>
-                 <div style={{ width: "100%", height: "160px", background: "url('/banner/banner1.jpeg') center/cover", borderRadius: "16px" }} />
-                 <button className="theme-btn" style={{ width: "100%", marginTop: "12px" }}>Change Artwork</button>
-               </div>
-               <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                 <div style={{ background: "var(--panel-muted)", padding: "20px", borderRadius: "20px" }}>
-                   <div style={{ fontWeight: "800", marginBottom: "8px", color: "var(--text-muted)" }}>BRAND ICON</div>
-                   <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                     <img src="/banner/logo/madrasi_kapi_loo.png" style={{ width: "48px", height: "48px", background: "#fff", padding: "4px", borderRadius: "50%" }} />
-                     <button className="theme-btn" style={{ flex: 1 }}>Update Icon</button>
-                   </div>
-                 </div>
-                 <div style={{ background: "var(--panel-muted)", padding: "20px", borderRadius: "20px" }}>
-                   <div style={{ fontWeight: "800", marginBottom: "8px", color: "var(--text-muted)" }}>HEADLINE</div>
-                   <input defaultValue="Flat 15% OFF at Madrasi Kaapi House!" style={{ width: "100%", background: "transparent", border: "none", color: "var(--text)", fontWeight: "700", fontSize: "14px" }} />
-                 </div>
-               </div>
-             </div>
-           </section>
-
-           <section className="hero-panel" style={{ padding: "32px", borderRadius: "32px", background: "linear-gradient(135deg, var(--panel) 0%, rgba(250, 204, 21, 0.05) 100%)" }}>
-             <h2 style={{ fontSize: "22px", fontWeight: "900", margin: "0 0 16px" }}>Campaign Health</h2>
-             <div style={{ textAlign: "center", padding: "20px 0" }}>
-               <div style={{ fontSize: "48px", fontWeight: "950", color: "#22c55e" }}>A+</div>
-               <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--text-muted)", marginTop: "8px" }}>EXCELLENT REACH</div>
-             </div>
-             <div style={{ borderTop: "1px solid var(--border)", paddingTop: "20px", marginTop: "20px" }}>
-               <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "12px", fontWeight: "700" }}>Active Features:</div>
-               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                 {selectedPlan.features.map((f, i) => (
-                   <div key={i} style={{ fontSize: "10px", fontWeight: "900", background: "var(--panel-muted)", padding: "6px 12px", borderRadius: "8px" }}>{f}</div>
-                 ))}
-               </div>
-             </div>
-           </section>
-        </div>
-      </main>
-
-      <style>{`
-        .hero-panel {
-          background: var(--panel);
-          border: 1px solid var(--border);
-          box-shadow: 0 15px 50px rgba(0,0,0,0.15);
-        }
-        .theme-btn {
-          background: var(--panel-muted);
-          color: var(--text);
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          font-weight: 800;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.2s ease;
-          padding: 10px;
-        }
-        .theme-btn:hover {
-          background: var(--border);
-          transform: translateY(-2px);
-        }
-      `}</style>
-    </div>
-  );
-}
-
-function LockOverlay({ plan }: { plan: string }) {
-  return (
-    <div style={{
-      position: "absolute",
-      inset: 0,
-      background: "rgba(0,0,0,0.4)",
-      backdropFilter: "blur(4px)",
-      borderRadius: "24px",
-      display: "grid",
-      placeItems: "center",
-      zIndex: 10
-    }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ background: "#000", padding: "8px 16px", borderRadius: "10px", color: "var(--brand)", fontWeight: "900", fontSize: "11px", letterSpacing: "0.1em" }}>
-          UNLOCK {plan}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function StatCard({ icon, label, value, trend, color, sub }: any) {
-  return (
-    <div className="hero-panel" style={{ padding: "24px", borderRadius: "24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
-        <div style={{ padding: "10px", background: `${color}20`, borderRadius: "14px", color }}>
-          {icon}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px", color: "#22c55e", fontSize: "12px", fontWeight: "900" }}>
-          <TrendingUp size={14} />
-          {trend}
-        </div>
-      </div>
-      <div style={{ fontSize: "28px", fontWeight: "950", color: "var(--text)", marginBottom: "4px" }}>{value}</div>
-      <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "8px", opacity: 0.6 }}>{sub}</div>
-    </div>
-  );
-}
-
-function ProgressBar({ label, value, sub, color }: any) {
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "8px" }}>
-        <div>
-          <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--text)" }}>{label}</div>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{sub}</div>
-        </div>
-        <div style={{ fontSize: "18px", fontWeight: "900", color }}>{value}%</div>
-      </div>
-      <div style={{ height: "10px", background: "var(--panel-muted)", borderRadius: "99px", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${value}%`, background: color, borderRadius: "99px", boxShadow: `0 0 15px ${color}40` }} />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

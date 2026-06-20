@@ -101,22 +101,32 @@ function FileOptionCard({
   );
 }
 
+function computePlatformFee(printCost: number, enabled: boolean): number {
+  if (!enabled || printCost <= 0) return 0;
+  if (printCost > 100) return 4;
+  if (printCost > 20) return 2;
+  return 0;
+}
+
 function PayNowBlock({
   upiId,
   shopName,
-  amount,
-  jobId,
+  printCost,
+  platformChargeEnabled,
 }: {
   upiId: string;
   shopName: string;
-  amount: number;
-  jobId: string;
+  printCost: number;
+  platformChargeEnabled: boolean;
 }) {
   const [copied, setCopied] = useState<"upi" | "amount" | null>(null);
 
-  const callbackUrl = `${window.location.origin}/?pret=1&jid=${encodeURIComponent(jobId)}`;
-  // Do NOT encode the UPI ID itself — the @ must stay raw in the pa= param
-  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(shopName)}&am=${amount.toFixed(2)}&cu=INR&tn=Print+Job+Payment&url=${encodeURIComponent(callbackUrl)}`;
+  const platformFee = computePlatformFee(printCost, platformChargeEnabled);
+  const totalAmount = printCost + platformFee;
+
+  // mc=7338 (Quick Copy/Reproduction Services MCC) marks this as P2M, not P2P.
+  // Without mc, banks treat it as person-to-person and apply lower daily limits.
+  const upiLink = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(shopName)}&mc=7338&tn=${encodeURIComponent("Print Job Payment")}&am=${totalAmount.toFixed(2)}&cu=INR`;
 
   const copy = (text: string, key: "upi" | "amount") => {
     navigator.clipboard.writeText(text).then(() => {
@@ -132,7 +142,7 @@ function PayNowBlock({
         className="btn btn-primary job-pay-btn"
         onClick={() => { window.location.href = upiLink; }}
       >
-        Pay {formatPrice(amount)}
+        Pay {formatPrice(totalAmount)}
       </button>
 
       <div className="job-pay-details">
@@ -148,13 +158,25 @@ function PayNowBlock({
             {copied === "upi" ? <Check size={12} /> : <Copy size={12} />}
           </button>
         </div>
+        {platformFee > 0 && (
+          <div className="job-pay-detail-row">
+            <span className="job-pay-detail-label">Print cost</span>
+            <span className="job-pay-detail-value">{formatPrice(printCost)}</span>
+          </div>
+        )}
+        {platformFee > 0 && (
+          <div className="job-pay-detail-row">
+            <span className="job-pay-detail-label">Platform fee</span>
+            <span className="job-pay-detail-value">+{formatPrice(platformFee)}</span>
+          </div>
+        )}
         <div className="job-pay-detail-row">
-          <span className="job-pay-detail-label">Amount</span>
-          <span className="job-pay-detail-value">{formatPrice(amount)}</span>
+          <span className="job-pay-detail-label">Total</span>
+          <span className="job-pay-detail-value">{formatPrice(totalAmount)}</span>
           <button
             type="button"
             className="job-pay-copy-btn"
-            onClick={() => copy(amount.toFixed(2), "amount")}
+            onClick={() => copy(totalAmount.toFixed(2), "amount")}
             title="Copy amount"
           >
             {copied === "amount" ? <Check size={12} /> : <Copy size={12} />}
@@ -384,8 +406,8 @@ function JobDetailPanel({
                 <PayNowBlock
                   upiId={job.shopUpiId}
                   shopName={job.shopName ?? "Print Shop"}
-                  amount={job.totalCost ?? 0}
-                  jobId={job.id}
+                  printCost={job.totalCost ?? 0}
+                  platformChargeEnabled={job.shopPlatformChargeEnabled ?? false}
                 />
               )}
 

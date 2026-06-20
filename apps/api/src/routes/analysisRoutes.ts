@@ -544,6 +544,46 @@ app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
       }])
     );
 
+    // Compute unpaid platform charges for charge-enabled shops
+    const chargeEnabledShopIds = shops.filter((s) => s.platformChargeEnabled).map((s) => s.shopId);
+    let payableMap = new Map<string, number>();
+
+    if (chargeEnabledShopIds.length > 0) {
+      const [lastPayments, allChargeableJobs] = await Promise.all([
+        Promise.all(
+          chargeEnabledShopIds.map((sid) =>
+            prisma.platformPayment.findFirst({
+              where: { shopId: sid },
+              orderBy: { createdAt: "desc" },
+              select: { shopId: true, createdAt: true },
+            })
+          )
+        ),
+        prisma.printJob.findMany({
+          where: { shopId: { in: chargeEnabledShopIds }, status: PrintJobStatus.COMPLETED },
+          select: { shopId: true, totalCost: true, createdAt: true },
+        }),
+      ]);
+
+      const lastPaymentMap = new Map(
+        lastPayments.filter(Boolean).map((p) => [p!.shopId, p!.createdAt])
+      );
+      const enabledAtMap = new Map(
+        shops.filter((s) => s.platformChargeEnabled).map((s) => [s.shopId, (s as any).platformChargeEnabledAt as Date | null])
+      );
+
+      for (const job of allChargeableJobs) {
+        if (!job.shopId) continue;
+        const paymentCutoff = lastPaymentMap.get(job.shopId) ?? null;
+        const enabledCutoff = enabledAtMap.get(job.shopId) ?? null;
+        // Skip jobs before platform fees were enabled for this shop
+        if (enabledCutoff && job.createdAt <= enabledCutoff) continue;
+        // Skip jobs already covered by a payment
+        if (paymentCutoff && job.createdAt <= paymentCutoff) continue;
+        payableMap.set(job.shopId, (payableMap.get(job.shopId) ?? 0) + computePlatformCharge(job.totalCost));
+      }
+    }
+
     const shopsWithStats = shops.map((shop) => {
       const s = statsMap.get(shop.shopId) || { completedCount: 0, totalPages: 0, revenue: 0 };
       return {
@@ -557,7 +597,10 @@ app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
         longitude: shop.longitude,
         priceBW: shop.priceBW,
         priceColor: shop.priceColor,
+        upiId: shop.upiId,
         isActive: shop.isActive,
+        platformChargeEnabled: shop.platformChargeEnabled,
+        platformPayable: payableMap.get(shop.shopId) ?? 0,
         createdAt: shop.createdAt,
         completedJobsCount: s.completedCount,
         totalPagesPrinted: s.totalPages,
@@ -638,9 +681,21 @@ app.post("/shops", authMiddleware(["admin"]), async (req, res) => {
   }
 });
 
+export const PLATFORM_CHARGE_TIERS = [
+  { minAmount: 100, charge: 4, label: "Jobs with amount >₹100" },
+  { minAmount: 20,  charge: 2, label: "Jobs with amount >₹20"  },
+  { minAmount: 0,   charge: 0, label: "Jobs with amount ≤₹20"  },
+] as const;
+
+function computePlatformCharge(totalCost: number): number {
+  if (totalCost > 100) return 4;
+  if (totalCost > 20) return 2;
+  return 0;
+}
+
 app.patch("/shops/:shopId", authMiddleware(["admin"]), async (req, res) => {
   const shopId = req.params.shopId as string;
-  const { name, landmark, imageUrl, latitude, longitude, priceBW, priceColor, upiId, isActive } = req.body;
+  const { name, landmark, imageUrl, latitude, longitude, priceBW, priceColor, upiId, isActive, platformChargeEnabled } = req.body;
 
   try {
     const existing = await prisma.printShop.findUnique({ where: { shopId } });
@@ -659,6 +714,17 @@ app.patch("/shops/:shopId", authMiddleware(["admin"]), async (req, res) => {
     if (typeof upiId === "string") updateData.upiId = upiId.trim() || null;
     if (upiId === null) updateData.upiId = null;
     if (typeof isActive === "boolean") updateData.isActive = isActive;
+    if (typeof platformChargeEnabled === "boolean") {
+      updateData.platformChargeEnabled = platformChargeEnabled;
+      // Record when fees were first enabled so payable starts from this date
+      if (platformChargeEnabled && !existing.platformChargeEnabled && !existing.platformChargeEnabledAt) {
+        updateData.platformChargeEnabledAt = new Date();
+      }
+      // Allowing manual reset: if disabling, clear the timestamp so re-enabling sets a fresh one
+      if (!platformChargeEnabled) {
+        updateData.platformChargeEnabledAt = null;
+      }
+    }
 
     const updated = await prisma.printShop.update({
       where: { shopId },
@@ -679,10 +745,189 @@ app.patch("/shops/:shopId", authMiddleware(["admin"]), async (req, res) => {
       priceBW: updated.priceBW,
       priceColor: updated.priceColor,
       isActive: updated.isActive,
+      platformChargeEnabled: updated.platformChargeEnabled,
     });
   } catch (error) {
     console.error("[analysis/shops] Patch error:", error);
     res.status(500).json({ error: "Failed to update shop." });
+  }
+});
+
+// Shop owner dashboard — accessible by the shop's own token or master admin
+app.get("/shops/:shopId/dashboard", authMiddleware(["admin"]), async (req, res) => {
+  const { shopId } = req.params as { shopId: string };
+
+  if ((req as any).user?.shopId && (req as any).user.shopId !== shopId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
+
+  try {
+    const shop = await prisma.printShop.findUnique({ where: { shopId } });
+    if (!shop) return res.status(404).json({ error: "Shop not found." });
+
+    const [completedJobs, lastPayment] = await Promise.all([
+      prisma.printJob.findMany({
+        where: { shopId, status: PrintJobStatus.COMPLETED },
+        select: { id: true, totalCost: true, totalPages: true, colorMode: true, createdAt: true, verificationCode: true, source: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.platformPayment.findFirst({
+        where: { shopId },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    const totalRevenue = completedJobs.reduce((sum, j) => sum + j.totalCost, 0);
+    const totalPages = completedJobs.reduce((sum, j) => sum + j.totalPages, 0);
+
+    const peakHours = new Array(24).fill(0);
+    completedJobs.forEach((j) => {
+      const istDate = new Date(j.createdAt.getTime() + 5.5 * 60 * 60 * 1000);
+      peakHours[istDate.getUTCHours()]++;
+    });
+
+    const jobsWithCharge = completedJobs.map((j) => ({
+      ...j,
+      platformCharge: computePlatformCharge(j.totalCost),
+    }));
+
+    let unpaidCharge = 0;
+    if (shop.platformChargeEnabled) {
+      const paymentCutoff = lastPayment?.createdAt ?? null;
+      const enabledCutoff = (shop as any).platformChargeEnabledAt as Date | null ?? null;
+      unpaidCharge = jobsWithCharge.reduce((sum, j) => {
+        if (enabledCutoff && j.createdAt <= enabledCutoff) return sum; // before fees started
+        if (paymentCutoff && j.createdAt <= paymentCutoff) return sum; // already paid
+        return sum + j.platformCharge;
+      }, 0);
+    }
+
+    res.json({
+      shop: {
+        shopId: shop.shopId,
+        name: shop.name,
+        username: shop.username,
+        landmark: shop.landmark,
+        imageUrl: shop.imageUrl,
+        priceBW: shop.priceBW,
+        priceColor: shop.priceColor,
+        platformChargeEnabled: shop.platformChargeEnabled,
+      },
+      stats: {
+        completedJobsCount: completedJobs.length,
+        totalRevenue,
+        totalPages,
+        peakHours,
+      },
+      platformCharge: {
+        enabled: shop.platformChargeEnabled,
+        unpaidAmount: unpaidCharge,
+        tiers: PLATFORM_CHARGE_TIERS,
+        lastPayment: lastPayment
+          ? { id: lastPayment.id, amount: lastPayment.amount, note: lastPayment.note, createdAt: lastPayment.createdAt }
+          : null,
+      },
+      recentJobs: jobsWithCharge.slice(0, 10),
+    });
+  } catch (error) {
+    console.error("[analysis/shops/dashboard] Error:", error);
+    res.status(500).json({ error: "Failed to fetch dashboard data." });
+  }
+});
+
+// Master admin marks a payment as received for a shop
+app.post("/shops/:shopId/mark-payment", authMiddleware(["admin"]), async (req, res) => {
+  const { shopId } = req.params as { shopId: string };
+
+  if ((req as any).user?.shopId) {
+    return res.status(403).json({ error: "Only master admin can mark payments." });
+  }
+
+  const { amount, note } = req.body as { amount: unknown; note?: unknown };
+  if (typeof amount !== "number" || amount <= 0) {
+    return res.status(400).json({ error: "amount must be a positive number." });
+  }
+
+  try {
+    const shop = await prisma.printShop.findUnique({ where: { shopId } });
+    if (!shop) return res.status(404).json({ error: "Shop not found." });
+
+    const payment = await prisma.platformPayment.create({
+      data: {
+        shopId,
+        amount,
+        note: typeof note === "string" && note.trim() ? note.trim() : null,
+      },
+    });
+
+    res.status(201).json({ payment });
+  } catch (error) {
+    console.error("[analysis/shops/mark-payment] Error:", error);
+    res.status(500).json({ error: "Failed to record payment." });
+  }
+});
+
+// Paginated jobs for a shop — used by the shop portal "Recent Jobs" tab
+app.get("/shops/:shopId/jobs", authMiddleware(["admin"]), async (req, res) => {
+  const { shopId } = req.params as { shopId: string };
+
+  if ((req as any).user?.shopId && (req as any).user.shopId !== shopId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
+
+  const page   = Math.max(1, parseInt(String(req.query.page  ?? "1"),  10) || 1);
+  const limit  = Math.min(50, Math.max(1, parseInt(String(req.query.limit ?? "20"), 10) || 20));
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  const date   = typeof req.query.date   === "string" ? req.query.date.trim()   : "";
+
+  try {
+    const shop = await prisma.printShop.findUnique({ where: { shopId } });
+    if (!shop) return res.status(404).json({ error: "Shop not found." });
+
+    // Build date filter (IST → UTC range)
+    let dateFilter: { gte: Date; lt: Date } | undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const parts = date.split("-").map(Number) as [number, number, number];
+      const [y, m, d] = parts;
+      // IST is UTC+5:30; convert IST midnight to UTC
+      const startIST = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - 5.5 * 60 * 60 * 1000);
+      const endIST   = new Date(startIST.getTime() + 24 * 60 * 60 * 1000);
+      dateFilter = { gte: startIST, lt: endIST };
+    }
+
+    const where: any = {
+      shopId,
+      status: PrintJobStatus.COMPLETED,
+      ...(dateFilter ? { createdAt: dateFilter } : {}),
+      ...(search ? { verificationCode: parseInt(search, 10) || -1 } : {}),
+    };
+
+    const [total, jobs] = await Promise.all([
+      prisma.printJob.count({ where }),
+      prisma.printJob.findMany({
+        where,
+        select: { id: true, totalCost: true, totalPages: true, colorMode: true, createdAt: true, verificationCode: true, source: true },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    const jobsWithCharge = jobs.map((j) => ({
+      ...j,
+      platformCharge: shop.platformChargeEnabled ? computePlatformCharge(j.totalCost) : 0,
+    }));
+
+    res.json({
+      jobs: jobsWithCharge,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error("[analysis/shops/jobs] Error:", error);
+    res.status(500).json({ error: "Failed to fetch jobs." });
   }
 });
 

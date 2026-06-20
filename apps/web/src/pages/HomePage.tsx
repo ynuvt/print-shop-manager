@@ -30,6 +30,7 @@ import {
   deleteUserFile,
   deleteUserPrintJob,
   getShops,
+  getWaDefaultShop,
   storage,
 } from "../api/api";
 import type { PrintShopInfo } from "../api/api";
@@ -363,6 +364,7 @@ export default function HomePage({
   const [selectedShop, setSelectedShop] = useState<PrintShopInfo | null>(null);
   const [showShopPicker, setShowShopPicker] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [costBreakdownOpen, setCostBreakdownOpen] = useState(false);
 
   // Keep a ref to the current printFiles so callbacks like removeFile can stay stable
   const printFilesRef = useRef<PrintFileState[]>(printFiles);
@@ -608,13 +610,31 @@ export default function HomePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  useEffect(() => {
+  const refreshShops = useCallback(() => {
     if (!userId) return;
+
+    // SID set by /sid/:shopId page landing — stored in sessionStorage, not recents
+    const rawSid = sessionStorage.getItem("printowl_session_sid") ?? "";
+    const sessionSid = rawSid.toUpperCase().replace(/[^A-Z0-9]/g, "") || null;
+
     getShops()
-      .then((fetched) => {
+      .then(async (fetched) => {
         setShops(fetched);
+
         setSelectedShop((current) => {
-          if (current) return current;
+          // If a shop is already selected, refresh its data only (platformChargeEnabled etc.)
+          if (current) {
+            const fresh = fetched.find((s) => s.shopId === current.shopId);
+            return fresh ?? current;
+          }
+
+          // 1. SID from /sid/:shopId route (stored in sessionStorage)
+          if (sessionSid) {
+            const fromSid = fetched.find((s) => s.shopId === sessionSid);
+            if (fromSid) return fromSid; // do NOT add to recents — it's a session pick
+          }
+
+          // 2. Last explicitly selected shop (recents localStorage)
           try {
             const recents = JSON.parse(localStorage.getItem("printowl_recent_shops") ?? "[]") as PrintShopInfo[];
             if (recents.length > 0) {
@@ -622,11 +642,39 @@ export default function HomePage({
               if (lastUsed) return lastUsed;
             }
           } catch {}
-          return fetched[0] ?? null;
+
+          // 3. No default — new users must pick or scan a QR
+          return null;
         });
+
+        // 4. WhatsApp defaultShopId — only if nothing else resolved (async)
+        if (!sessionSid) {
+          const waShopId = await getWaDefaultShop();
+          if (waShopId) {
+            setSelectedShop((current) => {
+              if (current) return current;
+              const shop = fetched.find((s) => s.shopId === waShopId);
+              return shop ?? null; // do NOT add to recents
+            });
+          }
+        }
       })
       .catch(() => {});
   }, [userId]);
+
+  useEffect(() => {
+    refreshShops();
+  }, [refreshShops]);
+
+  // Re-fetch shops when the tab comes back into focus so platformChargeEnabled
+  // changes made by admin are picked up without a full page reload.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshShops();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refreshShops]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1066,6 +1114,11 @@ export default function HomePage({
   };
 
   const totals = buildJobTotals(printFiles, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor } : undefined);
+  const platformFeeEnabled = !!(selectedShop?.platformChargeEnabled && totals.totalCost > 0);
+  const platformFee = platformFeeEnabled
+    ? (totals.totalCost > 100 ? 4 : totals.totalCost > 20 ? 2 : 0)
+    : 0;
+  const customerTotal = totals.totalCost + platformFee;
 
   const hasErrors = printFiles.some(
     (f) =>
@@ -1082,6 +1135,8 @@ export default function HomePage({
   const [confirmModalOpenedPicker, setConfirmModalOpenedPicker] = useState(false);
   const handleShopSelected = (shop: PrintShopInfo) => {
     setSelectedShop(shop);
+    // Persist immediately so reloads restore the user's explicit choice
+    saveRecentShop(shop);
     setShowShopPicker(false);
     if (confirmModalOpenedPicker) {
       setConfirmModalOpenedPicker(false);
@@ -1629,7 +1684,17 @@ export default function HomePage({
                     <div className="submit-panel-summary">
                       <div className="submit-panel-price">
                         <span className="submit-panel-price-label">Total</span>
-                        <strong className="submit-panel-price-value">Rs {totals.totalCost}</strong>
+                        <strong className="submit-panel-price-value">Rs {customerTotal}</strong>
+                        {platformFee > 0 && (
+                          <button
+                            type="button"
+                            className="cost-breakdown-toggle"
+                            onClick={() => setCostBreakdownOpen((o) => !o)}
+                            aria-label="Show cost breakdown"
+                          >
+                            <ChevronDown size={14} style={{ transform: costBreakdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                          </button>
+                        )}
                       </div>
                       <div className="submit-panel-stats">
                         <span>{printFiles.length} file{printFiles.length !== 1 ? "s" : ""}</span>
@@ -1637,6 +1702,18 @@ export default function HomePage({
                         <span>{totals.totalPages} page{totals.totalPages !== 1 ? "s" : ""}</span>
                       </div>
                     </div>
+                    {platformFee > 0 && costBreakdownOpen && (
+                      <div className="cost-breakdown">
+                        <div className="cost-breakdown-row">
+                          <span>Print cost</span>
+                          <span>Rs {totals.totalCost}</span>
+                        </div>
+                        <div className="cost-breakdown-row cost-breakdown-row--fee">
+                          <span>Zopy platform fee</span>
+                          <span>Rs {platformFee}</span>
+                        </div>
+                      </div>
+                    )}
 
                     <button
                       type="button"
@@ -2150,8 +2227,32 @@ export default function HomePage({
             {/* Total block */}
             <div className="confirm-total-block">
               <span className="confirm-total-label">Total</span>
-              <span className="confirm-total-value">Rs {totals.totalCost}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span className="confirm-total-value">Rs {customerTotal}</span>
+                {platformFee > 0 && (
+                  <button
+                    type="button"
+                    className="cost-breakdown-toggle"
+                    onClick={() => setCostBreakdownOpen((o) => !o)}
+                    aria-label="Show cost breakdown"
+                  >
+                    <ChevronDown size={14} style={{ transform: costBreakdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                  </button>
+                )}
+              </div>
             </div>
+            {platformFee > 0 && costBreakdownOpen && (
+              <div className="cost-breakdown cost-breakdown--modal">
+                <div className="cost-breakdown-row">
+                  <span>Print cost</span>
+                  <span>Rs {totals.totalCost}</span>
+                </div>
+                <div className="cost-breakdown-row cost-breakdown-row--fee">
+                  <span>Zopy platform fee</span>
+                  <span>Rs {platformFee}</span>
+                </div>
+              </div>
+            )}
 
             {/* Shop */}
             <div className="confirm-shop-block">

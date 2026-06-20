@@ -63,9 +63,18 @@ export default function App() {
   const [editPriceColor, setEditPriceColor] = useState(7);
   const [editUpiId, setEditUpiId] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
+  const [editPlatformChargeEnabled, setEditPlatformChargeEnabled] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
+
+  // Mark Payment state
+  const [markPaymentShop, setMarkPaymentShop] = useState<any>(null);
+  const [markPaymentAmount, setMarkPaymentAmount] = useState("");
+  const [markPaymentNote, setMarkPaymentNote] = useState("");
+  const [markPaymentLoading, setMarkPaymentLoading] = useState(false);
+  const [markPaymentError, setMarkPaymentError] = useState("");
+  const [markPaymentSuccess, setMarkPaymentSuccess] = useState("");
 
   // Uploading state
   const [uploadingNew, setUploadingNew] = useState(false);
@@ -274,6 +283,7 @@ export default function App() {
           priceColor: Number(editPriceColor),
           upiId: editUpiId.trim() || null,
           isActive: editIsActive,
+          platformChargeEnabled: editPlatformChargeEnabled,
         }),
       });
 
@@ -292,6 +302,37 @@ export default function App() {
       setEditError(err.message || "Something went wrong.");
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  const handleMarkPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!markPaymentShop) return;
+    const amount = parseFloat(markPaymentAmount);
+    if (!amount || amount <= 0) {
+      setMarkPaymentError("Enter a valid positive amount.");
+      return;
+    }
+    setMarkPaymentLoading(true);
+    setMarkPaymentError("");
+    setMarkPaymentSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/analysis/shops/${markPaymentShop.shopId}/mark-payment`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ amount, note: markPaymentNote.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to record payment.");
+      setMarkPaymentSuccess(`Payment of ₹${amount} recorded!`);
+      setMarkPaymentAmount("");
+      setMarkPaymentNote("");
+      if (token) fetchAnalytics(token);
+      setTimeout(() => { setMarkPaymentShop(null); setMarkPaymentSuccess(""); }, 1500);
+    } catch (err: any) {
+      setMarkPaymentError(err.message || "Something went wrong.");
+    } finally {
+      setMarkPaymentLoading(false);
     }
   };
 
@@ -679,6 +720,7 @@ export default function App() {
                           <th className="pb-3 px-2 text-right">Jobs</th>
                           <th className="pb-3 px-2 text-right">Pages</th>
                           <th className="pb-3 px-2 text-right">Revenue</th>
+                          <th className="pb-3 px-2 text-right">Payable</th>
                           <th className="pb-3 pl-2 text-center">Actions</th>
                         </tr>
                       </thead>
@@ -706,7 +748,29 @@ export default function App() {
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">{shop.completedJobsCount}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">{shop.totalPagesPrinted}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-amber-500 font-bold">₹{shop.totalRevenue}</td>
+                            <td className="py-3.5 px-2 text-right">
+                              {shop.platformChargeEnabled ? (
+                                <span className="font-mono font-bold text-violet-400">₹{shop.platformPayable ?? 0}</span>
+                              ) : (
+                                <span className="text-gray-600 text-xs">off</span>
+                              )}
+                            </td>
                             <td className="py-3.5 pl-2 text-center">
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {shop.platformChargeEnabled && (shop.platformPayable ?? 0) > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setMarkPaymentShop(shop);
+                                    setMarkPaymentAmount(String(shop.platformPayable ?? ""));
+                                    setMarkPaymentNote("");
+                                    setMarkPaymentError("");
+                                    setMarkPaymentSuccess("");
+                                  }}
+                                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold py-1 px-2 rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer active:scale-95"
+                                >
+                                  Mark Paid
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setEditingShop(shop);
@@ -719,6 +783,7 @@ export default function App() {
                                   setEditPriceColor(shop.priceColor ?? 7);
                                   setEditUpiId(shop.upiId || "");
                                   setEditIsActive(shop.isActive);
+                                  setEditPlatformChargeEnabled(shop.platformChargeEnabled ?? false);
                                   setEditError("");
                                   setEditSuccess("");
                                 }}
@@ -732,11 +797,12 @@ export default function App() {
                                   href={shop.imageUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-bold py-1.5 px-2.5 rounded-lg transition-colors inline-flex items-center ml-2 cursor-pointer active:scale-95 transition-all"
+                                  className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-bold py-1.5 px-2.5 rounded-lg transition-colors inline-flex items-center cursor-pointer active:scale-95 transition-all"
                                 >
                                   Photo
                                 </a>
                               )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1154,6 +1220,24 @@ export default function App() {
                 </label>
               </div>
 
+              <div className="flex items-center gap-3 bg-violet-950/20 border border-violet-900/40 rounded-2xl p-4">
+                <input
+                  type="checkbox"
+                  id="editPlatformChargeEnabled"
+                  checked={editPlatformChargeEnabled}
+                  onChange={(e) => setEditPlatformChargeEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-800 text-violet-500 focus:ring-violet-500 accent-violet-500 cursor-pointer"
+                />
+                <div>
+                  <label htmlFor="editPlatformChargeEnabled" className="text-sm font-semibold text-gray-300 select-none cursor-pointer font-sans">
+                    Platform Charge Enabled
+                  </label>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    Charge ₹2/job (above ₹20) or ₹4/job (above ₹100). Shop sees payable amount.
+                  </p>
+                </div>
+              </div>
+
               {editError && (
                 <div className="bg-red-950/50 border border-red-900/50 text-red-400 text-xs p-3 rounded-lg flex items-center gap-2 font-sans">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
@@ -1182,6 +1266,87 @@ export default function App() {
                   className="bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold px-6 py-2.5 rounded-xl text-sm transition-all transform active:scale-95 disabled:opacity-50 cursor-pointer font-sans"
                 >
                   {editLoading ? "Updating..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Mark Payment Modal */}
+      {markPaymentShop && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6 relative">
+            <button
+              onClick={() => setMarkPaymentShop(null)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white p-2 rounded-xl hover:bg-gray-800/50 transition-colors cursor-pointer"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            </button>
+
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <span className="w-2.5 h-2.5 bg-violet-500 rounded-full"></span>
+                Mark Payment Received
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Record that Zopy has received the platform fee from <strong className="text-gray-300">{markPaymentShop.username}</strong> ({markPaymentShop.shopId}).
+              </p>
+            </div>
+
+            <div className="bg-violet-950/20 border border-violet-900/40 rounded-2xl p-4 flex items-center justify-between">
+              <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Current Payable</span>
+              <span className="text-2xl font-black text-violet-400">₹{markPaymentShop.platformPayable ?? 0}</span>
+            </div>
+
+            <form onSubmit={handleMarkPayment} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                  Amount Received (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  required
+                  value={markPaymentAmount}
+                  onChange={(e) => setMarkPaymentAmount(e.target.value)}
+                  placeholder={String(markPaymentShop.platformPayable ?? "")}
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-violet-500 transition-colors font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                  Note (optional)
+                </label>
+                <input
+                  type="text"
+                  value={markPaymentNote}
+                  onChange={(e) => setMarkPaymentNote(e.target.value)}
+                  placeholder="e.g. UPI transfer"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-violet-500 transition-colors font-sans"
+                />
+              </div>
+
+              {markPaymentError && (
+                <div className="bg-red-950/50 border border-red-900/50 text-red-400 text-xs p-3 rounded-lg flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                  {markPaymentError}
+                </div>
+              )}
+              {markPaymentSuccess && (
+                <div className="bg-emerald-950/50 border border-emerald-900/50 text-emerald-400 text-xs p-3 rounded-lg flex items-center gap-2 font-semibold">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+                  {markPaymentSuccess}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setMarkPaymentShop(null)} className="px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-400 hover:text-white border border-gray-800 hover:bg-gray-800 transition-colors cursor-pointer">
+                  Cancel
+                </button>
+                <button type="submit" disabled={markPaymentLoading} className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-all active:scale-95 disabled:opacity-50 cursor-pointer">
+                  {markPaymentLoading ? "Recording..." : "Confirm Payment"}
                 </button>
               </div>
             </form>

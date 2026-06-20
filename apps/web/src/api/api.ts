@@ -76,6 +76,7 @@ export type UserPrintJob = {
   } | null;
   shopUpiId?: string | null;
   shopName?: string | null;
+  shopPlatformChargeEnabled?: boolean;
 };
 
 export type UserSession = {
@@ -367,6 +368,7 @@ export type PrintShopInfo = {
   priceBW: number;
   priceColor: number;
   upiId?: string | null;
+  platformChargeEnabled: boolean;
 };
 
 export async function getShops(): Promise<PrintShopInfo[]> {
@@ -377,6 +379,19 @@ export async function getShops(): Promise<PrintShopInfo[]> {
     });
     return (res.data?.shops ?? []) as PrintShopInfo[];
   });
+}
+
+export async function getWaDefaultShop(): Promise<string | null> {
+  try {
+    const token = getToken();
+    if (!token) return null;
+    const res = await axios.get(`${BASE_URL}/jobs/wa-shop`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    return (res.data?.defaultShopId as string | null) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function submitWhatsappJobReview(input: {

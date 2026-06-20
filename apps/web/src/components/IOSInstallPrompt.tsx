@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
-const DISMISSED_KEY = "pwa_ios_prompt_dismissed";
-const SHOWN_KEY = "pwa_ios_prompt_shown";
+// Separate dismiss/shown keys per portal so each user segment gets their own prompt
+function getStorageKeys(): { shown: string; dismissed: string } {
+  const path = window.location.pathname;
+  if (path.startsWith("/shop")) return { shown: "pwa_shop_prompt_shown", dismissed: "pwa_shop_prompt_dismissed" };
+  if (path.startsWith("/brand")) return { shown: "pwa_brand_prompt_shown", dismissed: "pwa_brand_prompt_dismissed" };
+  return { shown: "pwa_ios_prompt_shown", dismissed: "pwa_ios_prompt_dismissed" };
+}
+
+function getInstallLabel(): { title: string; sub: string; banner: string } {
+  const path = window.location.pathname;
+  if (path.startsWith("/shop")) return { title: "Add Shop Portal to Home Screen", sub: "Quick access to your shop dashboard", banner: "Open Shop Portal from your Home Screen" };
+  if (path.startsWith("/brand")) return { title: "Add Brand Dashboard to Home Screen", sub: "Quick access to your brand analytics", banner: "Open Brand Dashboard from your Home Screen" };
+  return { title: "Add Zopy to Home Screen", sub: "Get the full app experience", banner: "Open Zopy from your Home Screen for the best experience" };
+}
 
 function isIOS(): boolean {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -25,23 +37,20 @@ export default function IOSInstallPrompt() {
   const [mode, setMode] = useState<Mode>(null);
 
   useEffect(() => {
-    // Never show anything on Android or when already running as installed PWA
-    if (isAndroid() || isStandalone() || !isIOS()) return;
+    if (isStandalone()) return; // Already running as PWA — nothing to do
 
+    const { shown: SHOWN_KEY, dismissed: DISMISSED_KEY } = getStorageKeys();
     const shown = localStorage.getItem(SHOWN_KEY);
     const dismissed = localStorage.getItem(DISMISSED_KEY);
 
+    if (isAndroid() || !isIOS()) return; // Android redirect handled separately; skip desktop
+
     if (dismissed) {
-      // User explicitly closed the install prompt before — show a small
-      // "Open in App" reminder that slides in briefly then stays dismissable.
-      // This handles the case where someone opens a WhatsApp link in Safari
-      // but already has the app installed on their home screen.
       const t = setTimeout(() => setMode("banner"), 1200);
       return () => clearTimeout(t);
     }
 
     if (!shown) {
-      // First visit — show full install instructions
       const t = setTimeout(() => {
         localStorage.setItem(SHOWN_KEY, "1");
         setMode("prompt");
@@ -51,6 +60,9 @@ export default function IOSInstallPrompt() {
   }, []);
 
   if (!mode) return null;
+
+  const { dismissed: DISMISSED_KEY } = getStorageKeys();
+  const labels = getInstallLabel();
 
   function dismissPrompt() {
     localStorage.setItem(DISMISSED_KEY, "1");
@@ -66,7 +78,7 @@ export default function IOSInstallPrompt() {
       <div className="ios-open-banner">
         <img src="/img/zopy.png" alt="" className="ios-open-banner-icon" />
         <span className="ios-open-banner-text">
-          Open Zopy from your <strong>Home Screen</strong> for the best experience
+          {labels.banner}
         </span>
         <button className="ios-open-banner-close" onClick={dismissBanner} aria-label="Dismiss">
           <X size={14} />
@@ -85,8 +97,8 @@ export default function IOSInstallPrompt() {
         <div className="ios-install-header">
           <img src="/img/zopy.png" alt="Zopy" className="ios-install-icon" />
           <div>
-            <div className="ios-install-title">Add Zopy to Home Screen</div>
-            <div className="ios-install-sub">Get the full app experience</div>
+            <div className="ios-install-title">{labels.title}</div>
+            <div className="ios-install-sub">{labels.sub}</div>
           </div>
         </div>
 
