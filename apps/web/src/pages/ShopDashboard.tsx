@@ -85,6 +85,39 @@ function formatShortDate(iso: string): string {
   });
 }
 
+type FilterRange = "all" | "today" | "thisMonth" | "lastMonth" | "custom";
+
+function getDateParams(range: FilterRange, customStart: string, customEnd: string): { startDate?: string; endDate?: string } {
+  const IST_MS = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(Date.now() + IST_MS);
+  const dd = (d: Date) => d.toISOString().slice(0, 10);
+  switch (range) {
+    case "today": { const t = dd(ist); return { startDate: t, endDate: t }; }
+    case "thisMonth": {
+      const yr = ist.getUTCFullYear();
+      const mo = String(ist.getUTCMonth() + 1).padStart(2, "0");
+      return { startDate: `${yr}-${mo}-01`, endDate: dd(ist) };
+    }
+    case "lastMonth": {
+      const last  = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), 0));
+      const first = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), 1));
+      return { startDate: dd(first), endDate: dd(last) };
+    }
+    case "custom":
+      return customStart && customEnd ? { startDate: customStart, endDate: customEnd } : {};
+    default:
+      return {};
+  }
+}
+
+function getFilterLabel(range: FilterRange, customStart: string, customEnd: string): string {
+  if (range === "today") return "Today";
+  if (range === "thisMonth") return "This month";
+  if (range === "lastMonth") return "Last month";
+  if (range === "custom" && customStart && customEnd) return `${customStart} – ${customEnd}`;
+  return "All time";
+}
+
 export default function ShopDashboard({
   theme,
   onToggleTheme,
@@ -116,6 +149,11 @@ export default function ShopDashboard({
   const [jobsSearchInput, setJobsSearchInput] = useState("");
   const [confirmLogout, setConfirmLogout] = useState(false);
 
+  const [filterRange, setFilterRange] = useState<FilterRange>("all");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const [selectedHour, setSelectedHour] = useState<number | null>(null);
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);
@@ -124,11 +162,15 @@ export default function ShopDashboard({
   }, []);
 
   const fetchDashboard = useCallback(
-    async (tok: string, sid: string) => {
+    async (tok: string, sid: string, dateParams?: { startDate?: string; endDate?: string }) => {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(`${API_BASE}/analysis/shops/${sid}/dashboard`, {
+        const params = new URLSearchParams();
+        if (dateParams?.startDate) params.set("startDate", dateParams.startDate);
+        if (dateParams?.endDate) params.set("endDate", dateParams.endDate);
+        const qs = params.toString() ? `?${params}` : "";
+        const res = await fetch(`${API_BASE}/analysis/shops/${sid}/dashboard${qs}`, {
           headers: { Authorization: `Bearer ${tok}` },
         });
         if (res.status === 401) { logout(); return; }
@@ -172,6 +214,23 @@ export default function ShopDashboard({
     },
     [logout]
   );
+
+  const applyFilter = useCallback(
+    (range: FilterRange) => {
+      setFilterRange(range);
+      setSelectedHour(null);
+      if (!token || !shopId) return;
+      if (range === "custom") return;
+      fetchDashboard(token, shopId, getDateParams(range, customStart, customEnd));
+    },
+    [token, shopId, customStart, customEnd, fetchDashboard],
+  );
+
+  const applyCustomFilter = useCallback(() => {
+    if (!token || !shopId || !customStart || !customEnd) return;
+    setSelectedHour(null);
+    fetchDashboard(token, shopId, getDateParams("custom", customStart, customEnd));
+  }, [token, shopId, customStart, customEnd, fetchDashboard]);
 
   useEffect(() => {
     if (!token) return;
@@ -368,11 +427,62 @@ export default function ShopDashboard({
 
         {!loading && data && activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
-              {statCard("Completed Jobs", stats!.completedJobsCount, "All time")}
-              {statCard("Total Revenue", `₹${stats!.totalRevenue.toFixed(0)}`, "Collected from customers", "var(--brand)")}
-              {statCard("Pages Printed", stats!.totalPages.toLocaleString(), "All completed jobs")}
-              {peakHour !== null && statCard("Peak Hour", formatHour(peakHour), `${stats!.peakHours[peakHour]} jobs at this hour`)}
+
+            {/* Date range filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {(["all", "today", "thisMonth", "lastMonth", "custom"] as FilterRange[]).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => applyFilter(r)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: "99px",
+                      border: `1px solid ${filterRange === r ? "var(--brand)" : border}`,
+                      background: filterRange === r ? (isDark ? "rgba(234,179,8,0.14)" : "rgba(234,179,8,0.12)") : "transparent",
+                      color: filterRange === r ? "var(--brand)" : muted,
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {r === "all" ? "All time" : r === "today" ? "Today" : r === "thisMonth" ? "This month" : r === "lastMonth" ? "Last month" : "Custom"}
+                  </button>
+                ))}
+              </div>
+              {filterRange === "custom" && (
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                  <input
+                    type="date"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    style={{ flex: "1 1 130px", minWidth: 0, background: card, border: `1px solid ${border}`, borderRadius: "10px", padding: "8px 12px", fontSize: "13px", color: customStart ? textColor : muted, outline: "none" }}
+                  />
+                  <span style={{ color: muted }}>–</span>
+                  <input
+                    type="date"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    style={{ flex: "1 1 130px", minWidth: 0, background: card, border: `1px solid ${border}`, borderRadius: "10px", padding: "8px 12px", fontSize: "13px", color: customEnd ? textColor : muted, outline: "none" }}
+                  />
+                  <button
+                    onClick={applyCustomFilter}
+                    disabled={!customStart || !customEnd}
+                    style={{ padding: "8px 16px", background: "var(--brand)", border: "none", borderRadius: "10px", fontSize: "13px", fontWeight: "700", color: "#000", cursor: !customStart || !customEnd ? "not-allowed" : "pointer", opacity: !customStart || !customEnd ? 0.5 : 1, flexShrink: 0 }}
+                  >
+                    Apply
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Stat cards */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "14px" }}>
+              {statCard("Completed Jobs", stats!.completedJobsCount, getFilterLabel(filterRange, customStart, customEnd))}
+              {statCard("Total Revenue", `₹${stats!.totalRevenue.toFixed(0)}`, getFilterLabel(filterRange, customStart, customEnd), "var(--brand)")}
+              {statCard("Pages Printed", stats!.totalPages.toLocaleString(), getFilterLabel(filterRange, customStart, customEnd))}
             </div>
 
             {charge?.enabled && (charge.unpaidAmount ?? 0) > 0 && (
@@ -402,23 +512,129 @@ export default function ShopDashboard({
               </div>
             </div>
 
-            {stats && (
-              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "20px 22px" }}>
-                <div style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted, marginBottom: "16px" }}>Peak Hours (IST)</div>
-                <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "60px" }}>
-                  {stats.peakHours.map((count, h) => {
-                    const max = Math.max(...stats.peakHours, 1);
-                    const pct = Math.max(4, (count / max) * 100);
-                    return (
-                      <div key={h} title={`${formatHour(h)}: ${count} jobs`} style={{ flex: 1, background: h === peakHour ? "var(--brand)" : isDark ? "#27272a" : "#e4e4e7", borderRadius: "4px 4px 0 0", height: `${pct}%`, transition: "height 0.3s" }} />
-                    );
-                  })}
+            {/* Peak Hours — interactive chart */}
+            {stats && (() => {
+              const totalInPeriod = stats.peakHours.reduce((a, b) => a + b, 0);
+              const maxVal = Math.max(...stats.peakHours, 1);
+              const top4 = [...stats.peakHours.map((c, h) => ({ c, h }))]
+                .sort((a, b) => b.c - a.c)
+                .slice(0, 4)
+                .filter((x) => x.c > 0);
+
+              return (
+                <div style={{ background: card, border: `1px solid ${border}`, borderRadius: "20px", padding: "20px 22px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: muted }}>
+                      Peak Hours (IST)
+                    </div>
+                    {selectedHour !== null && (
+                      <button onClick={() => setSelectedHour(null)} style={{ background: "none", border: "none", cursor: "pointer", color: muted, fontSize: "11px", fontWeight: "700", padding: "2px 6px" }}>
+                        Clear ×
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Dynamic info line */}
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: textColor, margin: "10px 0 18px", minHeight: "22px" }}>
+                    {selectedHour !== null ? (
+                      <>
+                        <span style={{ color: "var(--brand)" }}>{formatHour(selectedHour)}</span>
+                        <span style={{ color: muted, fontWeight: "400" }}> · </span>
+                        <span style={{ color: "var(--brand)" }}>{stats.peakHours[selectedHour]} jobs</span>
+                        <span style={{ fontSize: "11px", color: muted, fontWeight: "500", marginLeft: "8px" }}>selected</span>
+                      </>
+                    ) : totalInPeriod === 0 ? (
+                      <span style={{ fontSize: "13px", color: muted, fontWeight: "500" }}>No jobs in this period</span>
+                    ) : peakHour !== null ? (
+                      <>
+                        {"Busiest at "}
+                        <span style={{ color: "var(--brand)" }}>{formatHour(peakHour)}</span>
+                        <span style={{ color: muted, fontWeight: "400" }}> · </span>
+                        <span style={{ color: "var(--brand)" }}>{stats.peakHours[peakHour]} jobs</span>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: "13px", color: muted, fontWeight: "500" }}>Tap a bar for details</span>
+                    )}
+                  </div>
+
+                  {/* Bar chart */}
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: "2px", height: "80px", position: "relative" }}>
+                    {stats.peakHours.map((count, h) => {
+                      const pct = count > 0 ? Math.max(6, (count / maxVal) * 100) : 3;
+                      const isSelected = h === selectedHour;
+                      const isPeak = h === peakHour && selectedHour === null && count > 0;
+                      return (
+                        <div
+                          key={h}
+                          onClick={() => count > 0 && setSelectedHour(isSelected ? null : h)}
+                          title={`${formatHour(h)}: ${count} jobs`}
+                          style={{
+                            flex: 1,
+                            height: `${pct}%`,
+                            background: isSelected ? "#ffffff" : isPeak ? "var(--brand)" : isDark ? "#27272a" : "#e4e4e7",
+                            borderRadius: "3px 3px 0 0",
+                            transition: "height 0.3s ease, background 0.15s",
+                            cursor: count > 0 ? "pointer" : "default",
+                            position: "relative",
+                          }}
+                        >
+                          {(isSelected || isPeak) && count > 0 && (
+                            <div style={{
+                              position: "absolute",
+                              bottom: "calc(100% + 3px)",
+                              left: "50%",
+                              transform: "translateX(-50%)",
+                              background: isSelected ? "#fff" : "var(--brand)",
+                              color: "#000",
+                              fontSize: "9px",
+                              fontWeight: "800",
+                              padding: "2px 5px",
+                              borderRadius: "4px",
+                              whiteSpace: "nowrap",
+                              pointerEvents: "none",
+                              zIndex: 1,
+                            }}>
+                              {count}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Time axis */}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "9px", color: muted }}>
+                    <span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>11 PM</span>
+                  </div>
+
+                  {/* Top busy hours as tappable chips — the main way to see numbers on mobile */}
+                  {top4.length > 0 && (
+                    <div style={{ marginTop: "16px", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+                      <span style={{ fontSize: "10px", color: muted, fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.04em", flexShrink: 0 }}>Top hours:</span>
+                      {top4.map((item, i) => (
+                        <button
+                          key={item.h}
+                          onClick={() => setSelectedHour(item.h === selectedHour ? null : item.h)}
+                          style={{
+                            padding: "5px 11px",
+                            borderRadius: "99px",
+                            border: `1px solid ${item.h === selectedHour ? "var(--brand)" : border}`,
+                            background: item.h === selectedHour ? (isDark ? "rgba(234,179,8,0.14)" : "rgba(234,179,8,0.12)") : "transparent",
+                            color: item.h === selectedHour ? "var(--brand)" : muted,
+                            fontSize: "11px",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                            transition: "all 0.15s",
+                          }}
+                        >
+                          #{i + 1} {formatHour(item.h)} · {item.c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "9px", color: muted }}>
-                  <span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>11 PM</span>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
 

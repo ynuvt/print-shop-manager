@@ -765,6 +765,20 @@ app.get("/shops/:shopId/dashboard", authMiddleware(["admin"]), async (req, res) 
     const shop = await prisma.printShop.findUnique({ where: { shopId } });
     if (!shop) return res.status(404).json({ error: "Shop not found." });
 
+    // Parse optional date range for stats (YYYY-MM-DD in IST → UTC)
+    const IST_MS = 5.5 * 60 * 60 * 1000;
+    const startStr = typeof req.query.startDate === "string" ? req.query.startDate.trim() : "";
+    const endStr   = typeof req.query.endDate   === "string" ? req.query.endDate.trim()   : "";
+    let statsFilter: { gte: Date; lt: Date } | undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(startStr) && /^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
+      const sp = startStr.split("-").map(Number) as [number, number, number];
+      const ep = endStr.split("-").map(Number) as [number, number, number];
+      statsFilter = {
+        gte: new Date(Date.UTC(sp[0], sp[1] - 1, sp[2],  0,  0,  0,   0) - IST_MS),
+        lt:  new Date(Date.UTC(ep[0], ep[1] - 1, ep[2], 23, 59, 59, 999) - IST_MS + 1),
+      };
+    }
+
     const [completedJobs, lastPayment] = await Promise.all([
       prisma.printJob.findMany({
         where: { shopId, status: PrintJobStatus.COMPLETED },
@@ -777,11 +791,16 @@ app.get("/shops/:shopId/dashboard", authMiddleware(["admin"]), async (req, res) 
       }),
     ]);
 
-    const totalRevenue = completedJobs.reduce((sum, j) => sum + j.totalCost, 0);
-    const totalPages = completedJobs.reduce((sum, j) => sum + j.totalPages, 0);
+    // Stats respect the date filter; billing always uses all jobs
+    const statsJobs = statsFilter
+      ? completedJobs.filter((j) => j.createdAt >= statsFilter!.gte && j.createdAt < statsFilter!.lt)
+      : completedJobs;
+
+    const totalRevenue = statsJobs.reduce((sum, j) => sum + j.totalCost, 0);
+    const totalPages = statsJobs.reduce((sum, j) => sum + j.totalPages, 0);
 
     const peakHours = new Array(24).fill(0);
-    completedJobs.forEach((j) => {
+    statsJobs.forEach((j) => {
       const istDate = new Date(j.createdAt.getTime() + 5.5 * 60 * 60 * 1000);
       peakHours[istDate.getUTCHours()]++;
     });
@@ -814,7 +833,7 @@ app.get("/shops/:shopId/dashboard", authMiddleware(["admin"]), async (req, res) 
         platformChargeEnabled: shop.platformChargeEnabled,
       },
       stats: {
-        completedJobsCount: completedJobs.length,
+        completedJobsCount: statsJobs.length,
         totalRevenue,
         totalPages,
         peakHours,

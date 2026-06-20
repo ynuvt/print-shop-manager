@@ -1371,15 +1371,29 @@ Please try again.`,
                   }
 
                   const shopName = shopRecord.name || shopRecord.username;
-                  await sendWhatsAppTextMessage({
+                  await sendWhatsAppButtonMessage({
                     to: userData.displayPhoneNumber,
-                    message: `✅ Your shop is selected as *${shopName}*`,
                     phoneNumberId,
+                    body: [
+                      `Your shop is selected as *${shopName}*`,
+                      ``,
+                      `${waBold("Welcome to Zopy!")} 🚀`,
+                      `Send your ${waBold("PDF, Word, or image files")} here.`,
+                      ``,
+                      `▸ ${waBold("Sync")} › Connect to web to edit & print`,
+                      `▸ ${waBold("Steps")} › See how it works`,
+                      `▸ ${waBold("Help")} › View all commands`,
+                    ].join("\n"),
+                    buttons: [
+                      { type: "reply", reply: { id: "sync", title: "Sync" } },
+                      { type: "reply", reply: { id: "steps", title: "Steps" } },
+                      { type: "reply", reply: { id: "help", title: "Help" } },
+                    ],
                   });
                 } else {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
-                    message: `❌ Shop not found. Please make sure you scanned the correct QR code.`,
+                    message: `Shop not found. Please make sure you scanned the correct QR code.`,
                     phoneNumberId,
                   });
                 }
