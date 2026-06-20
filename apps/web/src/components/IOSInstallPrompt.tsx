@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, ChevronUp, ChevronDown } from "lucide-react";
+
+const DISMISSED_KEY = "zopy_pwa_dismissed";
 
 function isStandalone(): boolean {
   return (
@@ -13,94 +15,198 @@ function isIOS(): boolean {
 }
 
 export default function IOSInstallPrompt() {
-  const [showIOS, setShowIOS] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const [show, setShow] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [ios, setIos] = useState(false);
 
   useEffect(() => {
+    // Already in PWA — never show
     if (isStandalone()) return;
+    // User previously dismissed — never show again
+    if (localStorage.getItem(DISMISSED_KEY)) return;
 
-    if (isIOS()) {
-      setShowIOS(true);
+    const path = window.location.pathname;
+    const iosDevice = isIOS();
+    setIos(iosDevice);
+
+    if (iosDevice) {
+      setShow(true);
       return;
     }
 
-    // Android / Desktop — capture the native install prompt
+    // Android/Desktop: only on portal pages, not home
+    if (!path.startsWith("/shop") && !path.startsWith("/brand")) return;
+
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      setShow(true);
     };
     window.addEventListener("beforeinstallprompt", handler);
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  if (isStandalone() || dismissed) return null;
+  const dismiss = () => {
+    localStorage.setItem(DISMISSED_KEY, "1");
+    setShow(false);
+    setExpanded(false);
+  };
 
-  // Android / Desktop native install banner — only on portal pages, not home
-  if (!isIOS()) {
-    const path = window.location.pathname;
-    if (!path.startsWith("/shop") && !path.startsWith("/brand")) return null;
-    if (!deferredPrompt) return null;
-    return (
-      <div className="pwa-install-banner">
-        <img src="/img/zopy.png" alt="Zopy" className="pwa-install-icon" />
-        <div className="pwa-install-text">
-          <span className="pwa-install-title">Install Zopy</span>
-          <span className="pwa-install-sub">Add to home screen for the best experience</span>
-        </div>
+  const handleInstall = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === "accepted") dismiss();
+  };
+
+  // Double-check: never render if already running as PWA
+  if (!show || isStandalone()) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 1000,
+        background: "var(--panel, #111113)",
+        borderTop: "1px solid var(--border, rgba(255,255,255,0.08))",
+        borderRadius: "20px 20px 0 0",
+        boxShadow: "0 -6px 36px rgba(0,0,0,0.28)",
+      }}
+    >
+      {/* Drag pill */}
+      <div style={{
+        width: "36px",
+        height: "4px",
+        borderRadius: "99px",
+        background: "var(--border, rgba(255,255,255,0.15))",
+        margin: "10px auto 0",
+      }} />
+
+      {/* Header row — tappable area + dismiss */}
+      <div style={{ display: "flex", alignItems: "center", padding: "10px 16px 12px", gap: "10px", position: "relative" }}>
         <button
-          className="pwa-install-btn"
-          onClick={async () => {
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            if (outcome === "accepted") setDismissed(true);
+          type="button"
+          onClick={() => setExpanded((x) => !x)}
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+            textAlign: "left",
+            minWidth: 0,
           }}
         >
-          Install
+          <img
+            src="/img/zopy.png"
+            alt="Zopy"
+            style={{ width: "30px", height: "30px", borderRadius: "8px", flexShrink: 0 }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "13px", fontWeight: "700", color: "var(--text, #f4f4f5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              Add Zopy to Home Screen
+            </div>
+            <div style={{ fontSize: "11px", color: "var(--text-muted, #71717a)", marginTop: "1px" }}>
+              {expanded ? "Follow the steps below" : "Tap to see how"}
+            </div>
+          </div>
+          {expanded
+            ? <ChevronDown size={16} color="var(--text-muted, #71717a)" style={{ flexShrink: 0 }} />
+            : <ChevronUp   size={16} color="var(--text-muted, #71717a)" style={{ flexShrink: 0 }} />
+          }
         </button>
-        <button className="pwa-install-close" onClick={() => setDismissed(true)} aria-label="Dismiss">
-          <X size={14} />
-        </button>
-      </div>
-    );
-  }
 
-  // iOS instructions sheet
-  if (!showIOS) return null;
-  return (
-    <div className="ios-install-backdrop" onClick={() => setDismissed(true)}>
-      <div className="ios-install-sheet" onClick={(e) => e.stopPropagation()}>
-        <button className="ios-install-close" onClick={() => setDismissed(true)} aria-label="Dismiss">
-          <X size={18} />
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss"
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--text-muted, #71717a)",
+            padding: "4px",
+            display: "flex",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          <X size={16} />
         </button>
-        <div className="ios-install-header">
-          <img src="/img/zopy.png" alt="Zopy" className="ios-install-icon" />
-          <div>
-            <div className="ios-install-title">Add Zopy to Home Screen</div>
-            <div className="ios-install-sub">Get the full app experience</div>
-          </div>
-        </div>
-        <div className="ios-install-steps">
-          <div className="ios-install-step">
-            <span className="ios-install-step-num">1</span>
-            <span className="ios-install-step-text">
-              Tap the{" "}
-              <svg className="ios-share-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                <polyline points="16 6 12 2 8 6" />
-                <line x1="12" y1="2" x2="12" y2="15" />
-              </svg>{" "}
-              <strong>Share</strong> button in Safari
-            </span>
-          </div>
-          <div className="ios-install-step">
-            <span className="ios-install-step-num">2</span>
-            <span className="ios-install-step-text">
-              Tap <strong>Add to Home Screen</strong>
-            </span>
-          </div>
-        </div>
       </div>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div style={{ padding: "0 16px 28px" }}>
+          {ios ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: "12px",
+                padding: "12px 14px",
+                background: "var(--panel-muted, rgba(255,255,255,0.04))",
+                borderRadius: "12px",
+              }}>
+                <div style={{
+                  width: "26px", height: "26px", borderRadius: "50%",
+                  background: "var(--brand, #eab308)", color: "#000",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: "800", fontSize: "12px", flexShrink: 0,
+                }}>1</div>
+                <span style={{ fontSize: "13px", color: "var(--text, #f4f4f5)", lineHeight: 1.5 }}>
+                  Tap the{" "}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: "inline-block", verticalAlign: "middle" }}>
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                    <polyline points="16 6 12 2 8 6" />
+                    <line x1="12" y1="2" x2="12" y2="15" />
+                  </svg>{" "}
+                  <strong>Share</strong> button in Safari
+                </span>
+              </div>
+              <div style={{
+                display: "flex", alignItems: "center", gap: "12px",
+                padding: "12px 14px",
+                background: "var(--panel-muted, rgba(255,255,255,0.04))",
+                borderRadius: "12px",
+              }}>
+                <div style={{
+                  width: "26px", height: "26px", borderRadius: "50%",
+                  background: "var(--brand, #eab308)", color: "#000",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontWeight: "800", fontSize: "12px", flexShrink: 0,
+                }}>2</div>
+                <span style={{ fontSize: "13px", color: "var(--text, #f4f4f5)", lineHeight: 1.5 }}>
+                  Scroll and tap <strong>Add to Home Screen</strong>
+                </span>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleInstall}
+              style={{
+                width: "100%",
+                padding: "13px",
+                background: "var(--brand, #eab308)",
+                border: "none",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: "800",
+                color: "#000",
+                cursor: "pointer",
+              }}
+            >
+              Install App
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
