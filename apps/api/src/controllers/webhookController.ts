@@ -1342,20 +1342,19 @@ Please try again.`,
             }
 
             // ─── SHOP QR SELECTION (SID:X) ──────────────────────────────────
-            // Matches "SID:TCET", "SID:1", or full QR message "PLEASE SEND THIS MESSAGE SID:1".
-            // Works for both synced and unsynced users. No reply is sent.
+            // Matches "SID:TCET", "SID:1", or "PLEASE SEND THIS MESSAGE SID:1".
             const sidMatch = incomingMessage.text?.body
               ?.trim()
-              .match(/\bSID:([A-Z0-9]+)/i); // only alphanumeric shop ID chars
+              .match(/\bSID:([A-Z0-9]+)/i);
             if (sidMatch && userData.displayPhoneNumber) {
               const shopIdCandidate = sidMatch[1]!.toUpperCase().replace(/[^A-Z0-9]/g, "");
               try {
                 const shopRecord = await prisma.printShop.findUnique({
                   where: { shopId: shopIdCandidate },
-                  select: { shopId: true, isActive: true },
+                  select: { shopId: true, name: true, username: true, isActive: true },
                 });
                 if (shopRecord?.isActive) {
-                  await prisma.whatsAppUser.upsert({
+                  const waUser = await prisma.whatsAppUser.upsert({
                     where: { phoneNumber: userData.displayPhoneNumber },
                     create: {
                       phoneNumber: userData.displayPhoneNumber,
@@ -1363,7 +1362,21 @@ Please try again.`,
                       defaultShopId: shopRecord.shopId,
                     },
                     update: { defaultShopId: shopRecord.shopId },
-                    select: { phoneNumber: true },
+                    select: { phoneNumber: true, userId: true },
+                  });
+
+                  // Push real-time shop change to the web app if user is synced
+                  if (waUser.userId) {
+                    socket.emit("sid-shop-changed", waUser.userId, shopRecord.shopId);
+                  }
+
+                  const shopName = shopRecord.name || shopRecord.username;
+                  await sendWhatsAppMessage(userData.displayPhoneNumber, {
+                    message: `✅ Your shop is selected as *${shopName}*`,
+                  });
+                } else {
+                  await sendWhatsAppMessage(userData.displayPhoneNumber, {
+                    message: `❌ Shop not found. Please make sure you scanned the correct QR code.`,
                   });
                 }
               } catch (err) {

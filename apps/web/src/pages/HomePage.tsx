@@ -647,14 +647,13 @@ export default function HomePage({
           return null;
         });
 
-        // 4. WhatsApp defaultShopId — only if nothing else resolved (async)
+        // 4. WhatsApp defaultShopId — overrides recents (user scanned a shop QR)
         if (!sessionSid) {
           const waShopId = await getWaDefaultShop();
           if (waShopId) {
-            setSelectedShop((current) => {
-              if (current) return current;
+            setSelectedShop(() => {
               const shop = fetched.find((s) => s.shopId === waShopId);
-              return shop ?? null; // do NOT add to recents
+              return shop ?? null;
             });
           }
         }
@@ -704,10 +703,20 @@ export default function HomePage({
       }
     };
 
+    const handleSidShopChanged = (uid: string, shopId: string) => {
+      if (uid !== userId) return;
+      setShops((prev) => {
+        const shop = prev.find((s) => s.shopId === shopId);
+        if (shop) setSelectedShop(shop);
+        return prev;
+      });
+    };
+
     socket.on("connect", onConnect);
     socket.on("job-file-added", handleJobFileAdded);
     socket.on("job-status-updated", handleJobStatusUpdated);
     socket.on("coupon-earned", handleCouponEarned);
+    socket.on("sid-shop-changed", handleSidShopChanged);
 
     return () => {
       socket.emit("leave-room", userId);
@@ -715,6 +724,7 @@ export default function HomePage({
       socket.off("job-file-added", handleJobFileAdded);
       socket.off("job-status-updated", handleJobStatusUpdated);
       socket.off("coupon-earned", handleCouponEarned);
+      socket.off("sid-shop-changed", handleSidShopChanged);
     };
   }, [userId, fetchWebDraft, notify]);
 
