@@ -42,6 +42,24 @@ function usePortalManifest() {
   }, []);
 }
 
+// When the PWA is opened in standalone mode and lands on "/" (the default start_url),
+// redirect to wherever the user saved their preferred start page.
+// ShopDashboard sets pwa_start_page = "/shop" when it mounts, so installs from /shop
+// will always redirect back there.
+function useStandaloneRedirect() {
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as any).standalone === true;
+    if (!standalone) return;
+    if (window.location.pathname !== "/") return; // already on the right page
+    const startPage = localStorage.getItem("pwa_start_page");
+    if (startPage && startPage !== "/") {
+      window.location.replace(startPage);
+    }
+  }, []);
+}
+
 // On Android, when the user opens the site in a browser tab but has the PWA installed,
 // use getInstalledRelatedApps() to detect the installation and re-navigate so Chrome
 // intercepts and opens the standalone PWA instead.
@@ -73,6 +91,7 @@ function usePWARedirect() {
 export default function App() {
   usePortalManifest();
   usePWARedirect();
+  useStandaloneRedirect();
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("themeMode");
     return saved === "dark" ? "dark" : "light";

@@ -154,6 +154,12 @@ export default function ShopDashboard({
   const [customEnd, setCustomEnd] = useState("");
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
 
+  // Record that this shop portal is where the user wants the PWA to start.
+  // App.tsx reads this on standalone launch and redirects away from "/" to here.
+  useEffect(() => {
+    localStorage.setItem("pwa_start_page", "/shop");
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);

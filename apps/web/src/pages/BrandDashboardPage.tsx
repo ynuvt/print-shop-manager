@@ -51,6 +51,7 @@ export default function BrandDashboardPage() {
 
   useEffect(() => {
     loadBrandProfileData();
+    localStorage.setItem("pwa_start_page", "/brand/dashboard");
   }, []);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
