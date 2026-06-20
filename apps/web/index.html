@@ -24,6 +24,22 @@
 
       gtag("config", "G-L8XDMWK7G5");
     </script>
+  <script>
+    // When launched as a standalone PWA at "/", redirect immediately to the
+    // saved start page (set by ShopDashboard / BrandDashboardPage on mount).
+    // This runs before React so there is no visible flash of the home page.
+    (function () {
+      var standalone =
+        window.matchMedia("(display-mode: standalone)").matches ||
+        navigator.standalone === true;
+      if (standalone && window.location.pathname === "/") {
+        var start = localStorage.getItem("pwa_start_page");
+        if (start && start !== "/") {
+          window.location.replace(start);
+        }
+      }
+    })();
+  </script>
   </head>
   <body>
     <div id="root"></div>
