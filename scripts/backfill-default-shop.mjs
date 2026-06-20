@@ -27,7 +27,7 @@ try {
   // Verify the shop exists and is active
   const shop = await prisma.printShop.findUnique({
     where: { shopId },
-    select: { shopId: true, name: true, username: true, isActive: true },
+    select: { shopId: true, username: true, isActive: true },
   });
 
   if (!shop) {
@@ -39,7 +39,7 @@ try {
     process.exit(1);
   }
 
-  console.log(`Target shop: ${shop.name || shop.username} (${shop.shopId})`);
+  console.log(`Target shop: ${shop.username} (${shop.shopId})`);
 
   // Count how many users will be updated
   const count = await prisma.whatsAppUser.count({

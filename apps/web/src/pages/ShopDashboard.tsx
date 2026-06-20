@@ -322,9 +322,6 @@ export default function ShopDashboard({
             <button onClick={onToggleTheme} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "10px", width: "36px", height: "36px", cursor: "pointer", fontSize: "16px" }}>
               {isDark ? "🌙" : "☀️"}
             </button>
-            <button onClick={logout} style={{ background: "none", border: `1px solid ${border}`, borderRadius: "10px", padding: "6px 14px", fontSize: "12px", fontWeight: "700", color: muted, cursor: "pointer" }}>
-              Logout
-            </button>
           </div>
         </div>
       </nav>
