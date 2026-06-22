@@ -11,7 +11,7 @@ export default function AuthOtpPage() {
   const [status, setStatus] = useState<"loading" | "success" | "error">(
     "loading",
   );
-  const [message, setMessage] = useState<string>("Syncing your account...");
+  const [message, setMessage] = useState<string>("Logging you in...");
 
   const code = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -26,7 +26,7 @@ export default function AuthOtpPage() {
   useEffect(() => {
     if (!code) {
       setStatus("error");
-      setMessage("Missing sync code. Please request a new link.");
+      setMessage("Missing login code. Please request a new link.");
       return;
     }
 
@@ -35,8 +35,8 @@ export default function AuthOtpPage() {
         // Handle already-verified OTP: redirect back to WhatsApp gracefully
         if (data.alreadyVerified) {
           setStatus("success");
-          setMessage("Already synced! Redirecting you to WhatsApp...");
-          notify("Your WhatsApp is already synced.", { variant: "success" });
+          setMessage("Already logged in! Redirecting you to WhatsApp...");
+          notify("Your WhatsApp is already logged in.", { variant: "success" });
           setTimeout(() => {
             window.location.href = "https://wa.me/918369757906";
           }, 1500);
@@ -53,8 +53,8 @@ export default function AuthOtpPage() {
 
 
         setStatus("success");
-        setMessage("Synced! Redirecting you now...");
-        notify("WhatsApp synced successfully.", { variant: "success" });
+        setMessage("Logged in! Redirecting you now...");
+        notify("WhatsApp login successful.", { variant: "success" });
 
         setTimeout(() => {
           if (source === "web") {
@@ -66,7 +66,7 @@ export default function AuthOtpPage() {
       })
       .catch((err) => {
         setStatus("error");
-        let errorMsg = "Failed to sync WhatsApp. Please try again.";
+        let errorMsg = "Failed to login with WhatsApp. Please try again.";
         if (axios.isAxiosError(err)) {
           const serverError = err.response?.data?.error;
           if (typeof serverError === "string" && serverError.trim()) {
@@ -84,7 +84,7 @@ export default function AuthOtpPage() {
       <main className="main-wrap">
         <section className="hero-panel">
           <div className="hero-header">
-            <h1>WhatsApp Sync</h1>
+            <h1>WhatsApp Login</h1>
             <p>
               {status === "loading"
                 ? "Verifying your link"
@@ -112,7 +112,7 @@ export default function AuthOtpPage() {
                   type="button"
                   className="btn btn-primary"
                   onClick={() => {
-                    window.location.href = "https://wa.me/918369757906?text=sync";
+                    window.location.href = "https://wa.me/918369757906?text=login";
                   }}
                 >
                   Try Again on WhatsApp

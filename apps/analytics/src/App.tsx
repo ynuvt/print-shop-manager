@@ -48,6 +48,7 @@ export default function App() {
   const [newShopPriceBW, setNewShopPriceBW] = useState(2);
   const [newShopPriceColor, setNewShopPriceColor] = useState(7);
   const [newShopUpiId, setNewShopUpiId] = useState("");
+  const [newShopDuplexRateApplicable, setNewShopDuplexRateApplicable] = useState(true);
   const [createLoading, setCreateLoading] = useState(false);
   const [createSuccess, setCreateSuccess] = useState("");
   const [createError, setCreateError] = useState("");
@@ -64,6 +65,7 @@ export default function App() {
   const [editUpiId, setEditUpiId] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
   const [editPlatformChargeEnabled, setEditPlatformChargeEnabled] = useState(false);
+  const [editDuplexRateApplicable, setEditDuplexRateApplicable] = useState(true);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
@@ -231,6 +233,7 @@ export default function App() {
           priceBW: Number(newShopPriceBW),
           priceColor: Number(newShopPriceColor),
           upiId: newShopUpiId.trim() || null,
+          duplexRateApplicable: newShopDuplexRateApplicable,
         }),
       });
 
@@ -251,6 +254,7 @@ export default function App() {
       setNewShopPriceBW(2);
       setNewShopPriceColor(7);
       setNewShopUpiId("");
+      setNewShopDuplexRateApplicable(true);
       if (token) fetchAnalytics(token);
     } catch (err: any) {
       setCreateError(err.message || "Something went wrong.");
@@ -284,6 +288,7 @@ export default function App() {
           upiId: editUpiId.trim() || null,
           isActive: editIsActive,
           platformChargeEnabled: editPlatformChargeEnabled,
+          duplexRateApplicable: editDuplexRateApplicable,
         }),
       });
 
@@ -743,7 +748,8 @@ export default function App() {
                               )}
                             </td>
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">
-                              <span>₹{shop.priceBW} / ₹{shop.priceColor}</span>
+                              <p>₹{shop.priceBW} / ₹{shop.priceColor}</p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">Duplex Discount: {shop.duplexRateApplicable ? "Yes" : "No"}</p>
                             </td>
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">{shop.completedJobsCount}</td>
                             <td className="py-3.5 px-2 text-right font-mono text-gray-300">{shop.totalPagesPrinted}</td>
@@ -784,6 +790,7 @@ export default function App() {
                                   setEditUpiId(shop.upiId || "");
                                   setEditIsActive(shop.isActive);
                                   setEditPlatformChargeEnabled(shop.platformChargeEnabled ?? false);
+                                  setEditDuplexRateApplicable(shop.duplexRateApplicable ?? true);
                                   setEditError("");
                                   setEditSuccess("");
                                 }}
@@ -999,6 +1006,24 @@ export default function App() {
                         className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
                       />
                       <p className="text-xs text-gray-600 mt-1">Used to generate Pay Now links for customers.</p>
+                    </div>
+
+                    <div className="flex items-center gap-3 bg-gray-950/30 border border-gray-800/80 rounded-2xl p-4">
+                      <input
+                        type="checkbox"
+                        id="newShopDuplexRateApplicable"
+                        checked={newShopDuplexRateApplicable}
+                        onChange={(e) => setNewShopDuplexRateApplicable(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-800 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                      />
+                      <div>
+                        <label htmlFor="newShopDuplexRateApplicable" className="text-sm font-semibold text-gray-300 select-none cursor-pointer font-sans">
+                          Duplex Discount Applicable
+                        </label>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          If checked, B&W double-sided printing uses half the sheets. Otherwise it is billed per page.
+                        </p>
+                      </div>
                     </div>
 
                     {createError && (
@@ -1218,6 +1243,24 @@ export default function App() {
                 <label htmlFor="editIsActive" className="text-sm font-semibold text-gray-300 select-none cursor-pointer font-sans">
                   Is Active (Open for orders)
                 </label>
+              </div>
+
+              <div className="flex items-center gap-3 bg-gray-950/30 border border-gray-800/80 rounded-2xl p-4">
+                <input
+                  type="checkbox"
+                  id="editDuplexRateApplicable"
+                  checked={editDuplexRateApplicable}
+                  onChange={(e) => setEditDuplexRateApplicable(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-800 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                />
+                <div>
+                  <label htmlFor="editDuplexRateApplicable" className="text-sm font-semibold text-gray-300 select-none cursor-pointer font-sans">
+                    Duplex Discount Applicable
+                  </label>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    If checked, B&W double-sided printing uses half the sheets. Otherwise it is billed per page.
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center gap-3 bg-violet-950/20 border border-violet-900/40 rounded-2xl p-4">

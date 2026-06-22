@@ -708,12 +708,12 @@ app.post(
       // Fetch shop from DB to use its actual prices and validate it's active
       const shop = await prisma.printShop.findUnique({
         where: { shopId: shopIdParam },
-        select: { shopId: true, priceBW: true, priceColor: true, isActive: true },
+        select: { shopId: true, priceBW: true, priceColor: true, isActive: true, duplexRateApplicable: true },
       });
       if (!shop || !shop.isActive) {
         return res.status(404).json({ error: "Print shop not found or is not active." });
       }
-      const shopPricing = { priceBW: shop.priceBW, priceColor: shop.priceColor };
+      const shopPricing = { priceBW: shop.priceBW, priceColor: shop.priceColor, duplexRateApplicable: shop.duplexRateApplicable };
 
       incomingFiles = parseUrlFilesFromBody(req.body.files);
 
@@ -1088,6 +1088,7 @@ app.post(
 
       return res.status(200).json({ job: updatedJob });
     } catch (error) {
+      console.error("[web-draft/add-files] error details:", error);
       if (error instanceof PrintJobAnalysisError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
@@ -1334,6 +1335,7 @@ app.post(
         addedCost,
       });
     } catch (error) {
+      console.error("[add-files-from-urls] error details:", error);
       await Promise.allSettled(
         incomingFiles.map((file) => deleteObjectFromR2ByUrl(file.url)),
       );
@@ -1446,6 +1448,7 @@ app.get("/shops", authMiddleware(["admin", "customer"]), async (req, res) => {
         priceColor: true,
         upiId: true,
         platformChargeEnabled: true,
+        duplexRateApplicable: true,
       },
       orderBy: { name: "asc" },
     });
@@ -1552,7 +1555,7 @@ app.get(
               orderBy: { createdAt: "asc" },
             },
             owners: { select: { userId: true } },
-            shop: { select: { upiId: true, name: true, platformChargeEnabled: true } },
+            shop: { select: { id: true, upiId: true, name: true, platformChargeEnabled: true } },
           },
         }),
       ]);
@@ -1561,9 +1564,10 @@ app.get(
       const scoped = jobs.map((job) => {
         const shopUpiId = (job as any).shop?.upiId ?? null;
         const shopName = (job as any).shop?.name ?? null;
+        const shopId = (job as any).shop?.id ?? null;
         const shopPlatformChargeEnabled = (job as any).shop?.platformChargeEnabled ?? false;
         const { shop: _shop, ...jobWithoutShop } = job as any;
-        const base = { ...jobWithoutShop, shopUpiId, shopName, shopPlatformChargeEnabled };
+        const base = { ...jobWithoutShop, shopUpiId, shopName, shopId, shopPlatformChargeEnabled };
 
         const isOwner = job.userId === req.user!.uid;
         if (isOwner || job.status !== PrintJobStatus.DRAFT) {
@@ -2020,14 +2024,14 @@ app.post(
       // Fetch shop to get per-shop pricing
       const shop = await prisma.printShop.findUnique({
         where: { shopId: shopId.trim().toUpperCase() },
-        select: { shopId: true, priceBW: true, priceColor: true, isActive: true },
+        select: { shopId: true, priceBW: true, priceColor: true, isActive: true, duplexRateApplicable: true },
       });
 
       if (!shop || !shop.isActive) {
         return res.status(400).json({ error: "Selected shop is not available." });
       }
 
-      const shopPricing = { priceBW: shop.priceBW, priceColor: shop.priceColor };
+      const shopPricing = { priceBW: shop.priceBW, priceColor: shop.priceColor, duplexRateApplicable: shop.duplexRateApplicable };
 
       const job = await prisma.printJob.findUnique({
         where: { id: jobId },
@@ -2513,6 +2517,173 @@ app.put(
       return res
         .status(500)
         .json({ error: "Failed to update global color mode." });
+    }
+  },
+);
+
+app.post(
+  "/change-shop/:id",
+  authMiddleware(["customer", "admin"]),
+  async (req: ExtendedRequest, res) => {
+    const { id } = req.params;
+    const { shopId } = req.body;
+
+    if (!id || typeof id !== "string") {
+      return res.status(400).json({ error: "Job ID is required." });
+    }
+
+    if (!shopId || typeof shopId !== "string" || !shopId.trim()) {
+      return res.status(400).json({ error: "Shop ID is required." });
+    }
+
+    try {
+      // 1. Find the old job with its files and options
+      const oldJob = await prisma.printJob.findUnique({
+        where: { id },
+        include: {
+          files: {
+            include: {
+              option: true,
+            },
+          },
+          owners: true,
+        },
+      });
+
+      if (!oldJob) {
+        return res.status(404).json({ error: "Job not found." });
+      }
+
+      // Check permissions
+      if (req.user?.role !== "admin" && oldJob.userId !== req.user?.uid) {
+        return res.status(403).json({ error: "You do not have access to this job." });
+      }
+
+      // Check if job is in active/changeable state (not completed, rejected, canceled)
+      if (
+        oldJob.status === PrintJobStatus.COMPLETED ||
+        oldJob.status === PrintJobStatus.REJECTED ||
+        oldJob.status === PrintJobStatus.CANCELED ||
+        oldJob.status === PrintJobStatus.FAILED
+      ) {
+        return res.status(400).json({ error: "Cannot change shop for completed or canceled jobs." });
+      }
+
+      // 2. Find the new shop
+      const newShop = await prisma.printShop.findUnique({
+        where: { shopId: shopId.trim().toUpperCase() },
+        select: { shopId: true, name: true, priceBW: true, priceColor: true, isActive: true, duplexRateApplicable: true },
+      });
+
+      if (!newShop || !newShop.isActive) {
+        return res.status(404).json({ error: "Selected print shop is not active or does not exist." });
+      }
+
+      const shopPricing = { priceBW: newShop.priceBW, priceColor: newShop.priceColor, duplexRateApplicable: newShop.duplexRateApplicable };
+
+      // 3. Recalculate file costs under the new shop pricing
+      const updatedFiles = oldJob.files.map((file) => {
+        if (!file.option) {
+          throw new PrintJobAnalysisError(`${file.name}: missing print options.`, 400);
+        }
+        const cost = calculateFileCost(file.pages, {
+          paperSize: file.option.paperSize as "A4",
+          colorMode: file.option.colorMode,
+          orientation: file.option.orientation,
+          scaleMode: file.option.scaleMode,
+          pageRange: file.option.pageRange,
+          customRange: file.option.customRange,
+          duplex: file.option.duplex,
+          copies: file.option.copies,
+          pagesPerSheet: file.option.pagesPerSheet || 1,
+        }, shopPricing);
+
+        return {
+          ...file,
+          newCost: cost,
+        };
+      });
+
+      const newTotalCost = updatedFiles.reduce((sum, f) => sum + f.newCost, 0);
+
+      // 4. Perform creation of new job and deletion of old job inside a transaction
+      const result = await prisma.$transaction(async (tx) => {
+        // Generate new unique verification code/OTP for the new shop
+        const newVerificationCode = await generateUniqueVerificationCode(newShop.shopId, tx);
+
+        // Create new print job
+        const newJob = await tx.printJob.create({
+          data: {
+            userId: oldJob.userId,
+            totalCost: newTotalCost,
+            source: oldJob.source,
+            userMetadataId: oldJob.userMetadataId,
+            totalPages: oldJob.totalPages,
+            estimatedTime: oldJob.estimatedTime,
+            colorMode: oldJob.colorMode,
+            status: oldJob.status,
+            verificationCode: newVerificationCode,
+            shopId: newShop.shopId,
+            files: {
+              create: updatedFiles.map((f) => ({
+                name: f.name,
+                mimeType: f.mimeType,
+                messageId: f.messageId,
+                createdAt: f.createdAt,
+                pages: f.pages,
+                url: f.url,
+                fileCost: f.newCost,
+                uploadedByUserId: f.uploadedByUserId,
+                uploadedByPhoneNumber: f.uploadedByPhoneNumber,
+                uploadedByDisplayName: f.uploadedByDisplayName,
+                uploadedByRole: f.uploadedByRole,
+                option: {
+                  create: {
+                    paperSize: f.option!.paperSize,
+                    colorMode: f.option!.colorMode,
+                    orientation: f.option!.orientation,
+                    scaleMode: f.option!.scaleMode,
+                    pageRange: f.option!.pageRange,
+                    customRange: f.option!.customRange,
+                    duplex: f.option!.duplex,
+                    copies: f.option!.copies,
+                    pagesPerSheet: f.option!.pagesPerSheet || 1,
+                  },
+                },
+              })),
+            },
+            owners: {
+              create: oldJob.owners.map((o) => ({
+                userId: o.userId,
+                isDone: o.isDone,
+              })),
+            },
+          },
+        });
+
+        // Delete the old job (which cascade deletes old files, options, and owners)
+        await tx.printJob.delete({
+          where: { id: oldJob.id },
+        });
+
+        return { newJobId: newJob.id, verificationCode: newJob.verificationCode };
+      });
+
+      // Emit socket updates
+      if (oldJob.userId) {
+        const msg = `Your print job has been moved to ${newShop.name || newShop.shopId} with verification code ${result.verificationCode}.`;
+        socket.emit("job-status-updated", oldJob.userId, result.newJobId, msg);
+        // Also notify the admin dashboards
+        socket.emit("job-created", "admin");
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      console.error("Failed to change shop for job:", error);
+      if (error instanceof PrintJobAnalysisError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      return res.status(500).json({ error: "Failed to change print shop." });
     }
   },
 );

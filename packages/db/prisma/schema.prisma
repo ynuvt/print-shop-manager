@@ -399,6 +399,7 @@ model PrintShop {
   isActive              Boolean           @default(true)
   platformChargeEnabled   Boolean           @default(false)
   platformChargeEnabledAt DateTime?
+  duplexRateApplicable    Boolean           @default(true)
   createdAt               DateTime          @default(now())
   printJobs             PrintJob[]
   platformPayments      PlatformPayment[]

@@ -6,8 +6,10 @@ import {
   getUserPrintJobById,
   getUserPrintJobs,
   resubmitCompletedPrintJob,
+  getShops,
+  changeJobShop,
 } from "../api/api";
-import type { UserPrintJob, UserPrintJobFile } from "../api/api";
+import type { UserPrintJob, UserPrintJobFile, PrintShopInfo } from "../api/api";
 import { getSocket } from "../services/getSocket";
 import { useNotifications } from "./NotificationCenter";
 
@@ -198,12 +200,15 @@ function JobDetailPanel({
   onJobDeleted: (jobId: string) => void;
   paymentStatus?: "success" | "failure" | "submitted" | null;
 }) {
-  const { notify } = useNotifications();
+  const { notify, dismiss } = useNotifications();
   const [job, setJob] = useState<UserPrintJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResubmitting, setIsResubmitting] = useState(false);
+  const [shops, setShops] = useState<PrintShopInfo[]>([]);
+  const [showShopDropdown, setShowShopDropdown] = useState(false);
+  const [isChangingShop, setIsChangingShop] = useState(false);
 
   const loadJob = useCallback(async () => {
     setLoading(true);
@@ -253,6 +258,38 @@ function JobDetailPanel({
 
   const handleRefreshStatus = async () => { await loadJob(); };
 
+  // Load available shops for the Change Shop dropdown
+  useEffect(() => {
+    void getShops().then((list) => setShops(list)).catch(() => {});
+  }, []);
+
+  const handleChangeShop = async (newShop: PrintShopInfo) => {
+    if (!job || isChangingShop) return;
+    if (newShop.id === job.shopId) {
+      setShowShopDropdown(false);
+      return;
+    }
+    setIsChangingShop(true);
+    try {
+      const result = await changeJobShop(job.id, newShop.id);
+      notify(`Job moved to ${newShop.name}`, { variant: "success" });
+      // The old job is deleted by the backend; open the new one
+      onJobDeleted(job.id);
+      onJobUpdated({
+        ...job,
+        id: result.newJobId,
+        shopName: newShop.name,
+        verificationCode: String(result.verificationCode).padStart(4, "0"),
+      });
+      setShowShopDropdown(false);
+      onClose();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Failed to change shop", { variant: "error" });
+    } finally {
+      setIsChangingShop(false);
+    }
+  };
+
   const handleDeleteJob = async () => {
     if (!job || !canDelete || isDeleting) return;
     const confirmed = window.confirm(
@@ -261,6 +298,12 @@ function JobDetailPanel({
     if (!confirmed) return;
     setIsDeleting(true);
     try {
+      const code = job.verificationCode !== null && job.verificationCode !== undefined
+        ? String(job.verificationCode).padStart(4, "0")
+        : (job.oldOtp ? String(job.oldOtp) : "");
+      dismiss(`job-status-${code}`);
+      dismiss(`job-status-${job.id}`);
+
       await deleteUserPrintJob(job.id);
       notify("Job deleted successfully", { variant: "success" });
       onJobDeleted(job.id);
@@ -350,6 +393,41 @@ function JobDetailPanel({
                   <div className="skeleton skeleton-modal-otp" style={{ margin: 0 }} />
                 ) : job ? (
                   <>
+                    {/* Shop name + change shop */}
+                    <div className="otp-shop-row">
+                      <div className="otp-shop-name">
+                        <span className="otp-shop-label">Shop</span>
+                        <span className="otp-shop-value">{job.shopName ?? "Unknown Shop"}</span>
+                      </div>
+                      {!isExpired && (
+                        <div style={{ position: "relative" }}>
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => setShowShopDropdown((v) => !v)}
+                            disabled={isChangingShop}
+                          >
+                            {isChangingShop ? "Changing..." : "Change Shop"}
+                          </button>
+                          {showShopDropdown && shops.length > 0 && (
+                            <div className="shop-dropdown">
+                              {shops.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  className={`shop-dropdown-item${s.id === job.shopId ? " shop-dropdown-item--active" : ""}`}
+                                  onClick={() => void handleChangeShop(s)}
+                                >
+                                  {s.name}
+                                  {s.id === job.shopId && <span className="shop-dropdown-current"> (current)</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <p className="otp-title">
                       {isExpired ? "Previous Verification Code" : "Verification Code"}
                     </p>
@@ -742,11 +820,11 @@ export default function PrintJobsList({
         <div className="modal-shell" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="modal-head">
-              <div><h2>Sync WhatsApp</h2></div>
+              <div><h2>Login with WhatsApp</h2></div>
               <button type="button" className="icon-btn" onClick={() => setShowLinkWhatsappModal(false)}>x</button>
             </div>
             <p className="modal-helper" style={{ marginTop: "16px", marginBottom: "24px" }}>
-              You are not synced with WhatsApp. Click sync below and send "sync" on WhatsApp to continue.
+              You are not logged in with WhatsApp. Click Login below and send "login" on WhatsApp to continue.
             </p>
             <div className="modal-actions">
               <button type="button" className="btn" onClick={() => setShowLinkWhatsappModal(false)}>Close</button>
@@ -754,11 +832,11 @@ export default function PrintJobsList({
                 type="button"
                 className="btn btn-primary"
                 onClick={() => {
-                  window.open(`https://wa.me/918369757906?text=sync`, "_blank", "noopener,noreferrer");
+                  window.open(`https://wa.me/918369757906?text=login`, "_blank", "noopener,noreferrer");
                   setShowLinkWhatsappModal(false);
                 }}
               >
-                Sync
+                Login
               </button>
             </div>
           </div>

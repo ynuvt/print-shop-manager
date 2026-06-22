@@ -386,9 +386,9 @@ export default function HomePage({
   const pricingForCards = useMemo(
     () =>
       selectedShop
-        ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor }
+        ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor, duplexRateApplicable: selectedShop.duplexRateApplicable }
         : undefined,
-    [selectedShop?.priceBW, selectedShop?.priceColor],
+    [selectedShop?.priceBW, selectedShop?.priceColor, selectedShop?.duplexRateApplicable],
   );
 
   const debounceSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -692,7 +692,12 @@ export default function HomePage({
     
     const handleJobStatusUpdated = (uid: string, _jobId: string, msg: string) => {
       if (uid === userId) {
-        notify(msg, { variant: "success" });
+        const match = msg.match(/verification code (\d+)/);
+        const code = match ? match[1] : _jobId;
+        notify(msg, {
+          variant: "success",
+          key: `job-status-${code}`,
+        });
       }
     };
 
@@ -1123,7 +1128,7 @@ export default function HomePage({
     }
   };
 
-  const totals = buildJobTotals(printFiles, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor } : undefined);
+  const totals = buildJobTotals(printFiles, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor, duplexRateApplicable: selectedShop.duplexRateApplicable } : undefined);
   const platformFeeEnabled = !!(selectedShop?.platformChargeEnabled && totals.totalCost > 0);
   const platformFee = platformFeeEnabled
     ? (totals.totalCost > 100 ? 4 : totals.totalCost > 20 ? 2 : 0)
@@ -1372,7 +1377,7 @@ export default function HomePage({
                     onClick={handleForwardFromWhatsapp}
                   >
                     <MessageCircle size={15} />
-                    SYNC
+                    LOGIN
                   </button>
                 )}
               </div>
@@ -1416,6 +1421,11 @@ export default function HomePage({
                         : "Uploading files. Please wait..."
                     : "PDF, Word, PowerPoint, or Images."}
                 </p>
+                {!isPreparingFiles && (
+                  <p style={{ margin: "4px 0 0", fontSize: "11px", opacity: 0.65, fontWeight: 500 }}>
+                    Limit: Max 30 files · 50 MB total per job
+                  </p>
+                )}
                 {isPreparingFiles && (
                   <div
                     className="upload-inline-loader"
@@ -1793,7 +1803,7 @@ export default function HomePage({
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "420px" }}>
             <div className="modal-head">
               <div>
-                <h2>Sync WhatsApp</h2>
+                <h2>Login with WhatsApp</h2>
               </div>
               <button
                 type="button"
@@ -1808,7 +1818,7 @@ export default function HomePage({
                 Connect your WhatsApp to send documents directly from your phone.
               </p>
               <ol className="sync-steps">
-                <li>Tap <strong>Sync on WhatsApp</strong> below</li>
+                <li>Tap <strong>Login on WhatsApp</strong> below</li>
                 <li>It opens WhatsApp — just send the message</li>
                 <li>You'll receive a link — tap it to connect</li>
               </ol>
@@ -1828,7 +1838,7 @@ export default function HomePage({
                 onClick={() => {
                   const digits = "918369757906";
                   window.open(
-                    `https://wa.me/${digits}?text=sync`,
+                    `https://wa.me/${digits}?text=login`,
                     "_blank",
                     "noopener,noreferrer",
                   );
@@ -1836,7 +1846,7 @@ export default function HomePage({
                 }}
               >
                 <MessageCircle size={16} />
-                Sync on WhatsApp
+                Login on WhatsApp
               </button>
             </div>
           </div>
@@ -2194,7 +2204,7 @@ export default function HomePage({
               </p>
               <ul className="confirm-files-list">
                 {printFiles.map((pf, idx) => {
-                  const cost = calculateFileCost(pf.detectedPages, pf.options, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor } : undefined);
+                  const cost = calculateFileCost(pf.detectedPages, pf.options, selectedShop ? { priceBW: selectedShop.priceBW, priceColor: selectedShop.priceColor, duplexRateApplicable: selectedShop.duplexRateApplicable } : undefined);
                   return (
                     <li key={pf.id || idx} className="confirm-file-row">
                       <div className="confirm-file-row-head">

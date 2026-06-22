@@ -19,6 +19,7 @@ interface ShopInfo {
   priceBW: number;
   priceColor: number;
   platformChargeEnabled: boolean;
+  duplexRateApplicable: boolean;
 }
 
 interface DashboardStats {
@@ -508,6 +509,7 @@ export default function ShopDashboard({
                   ["Shop ID", shopId],
                   ["B&W Price", `₹${shop?.priceBW ?? 2}/page`],
                   ["Color Price", `₹${shop?.priceColor ?? 7}/page`],
+                  ["Duplex Discount", shop?.duplexRateApplicable ? "Applicable (B&W Billed Per Sheet)" : "Not Applicable (B&W Billed Per Page)"],
                   ...(shop?.landmark ? [["Landmark", shop.landmark]] : []),
                 ] as [string, string][]).map(([label, val]) => (
                   <div key={label}>

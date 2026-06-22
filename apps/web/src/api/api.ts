@@ -76,6 +76,7 @@ export type UserPrintJob = {
   } | null;
   shopUpiId?: string | null;
   shopName?: string | null;
+  shopId?: string | null;
   shopPlatformChargeEnabled?: boolean;
 };
 
@@ -369,6 +370,7 @@ export type PrintShopInfo = {
   priceColor: number;
   upiId?: string | null;
   platformChargeEnabled: boolean;
+  duplexRateApplicable: boolean;
 };
 
 export async function getShops(): Promise<PrintShopInfo[]> {
@@ -641,4 +643,22 @@ export async function claimCoupon(code: string): Promise<{ message: string; coup
     { headers: { authorization: `Bearer ${token}` } }
   );
   return data;
+}
+
+export async function changeJobShop(
+  jobId: string,
+  shopId: string,
+): Promise<{ newJobId: string; verificationCode: number }> {
+  const token = getToken();
+  const res = await axios.post(
+    `${BASE_URL}/jobs/change-shop/${jobId}`,
+    { shopId },
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    },
+  );
+  invalidateApiCache("user-jobs");
+  return res.data;
 }

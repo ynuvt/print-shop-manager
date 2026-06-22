@@ -463,10 +463,10 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                     data: { lastUploadStickerSentAt: new Date() },
                   }).catch(() => {});
 
-                  sendWhatsAppStickerFromFile({
+                  sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    filePath: UPLOAD_STICKER_FILE_PATH,
+                    message: "_Receiving file(s)..._",
                   }).catch((err) => console.error("[upload-sticker] send error:", err));
                 }
 
@@ -874,10 +874,10 @@ Please try again.`,
                     data: { lastUploadStickerSentAt: new Date() },
                   }).catch(() => {});
 
-                  sendWhatsAppStickerFromFile({
+                  sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
-                    filePath: UPLOAD_STICKER_FILE_PATH,
+                    message: "_Receiving file(s)..._",
                   }).catch((err) => console.error("[upload-sticker] send error:", err));
                 }
 
@@ -1318,12 +1318,12 @@ Please try again.`,
                   to: userData.displayPhoneNumber,
                   phoneNumberId,
                   message: [
-                    `${waBold("Sync to edit your draft")} 🔗`,
-                    `Your files are saved! To set print options & submit, sync first:`,
+                    `${waBold("Login to edit your draft")} 🔗`,
+                    `Your files are saved! To set print options & submit, login first:`,
                     "",
                     syncLink ?? "https://zopy.co.in",
                     "",
-                    `_Open this link in your browser to sync, then you'll be redirected to edit your draft._`,
+                    `_Open this link in your browser to login, then you'll be redirected to edit your draft._`,
                   ].join("\n"),
                 }).catch((err) => console.error("[sync-edit] send error:", err));
               } else {
@@ -1380,12 +1380,12 @@ Please try again.`,
                       `${waBold("Welcome to Zopy!")} 🚀`,
                       `Send your ${waBold("PDF, Word, or image files")} here.`,
                       ``,
-                      `▸ ${waBold("Sync")} › Connect to web to edit & print`,
+                      `▸ ${waBold("Login")} › Connect to web to edit & print`,
                       `▸ ${waBold("Steps")} › See how it works`,
                       `▸ ${waBold("Help")} › View all commands`,
                     ].join("\n"),
                     buttons: [
-                      { type: "reply", reply: { id: "sync", title: "Sync" } },
+                      { type: "reply", reply: { id: "login", title: "Login" } },
                       { type: "reply", reply: { id: "steps", title: "Steps" } },
                       { type: "reply", reply: { id: "help", title: "Help" } },
                     ],
@@ -1408,6 +1408,8 @@ Please try again.`,
               !isAuthenticated &&
               messageText !== "sync" &&
               messageText !== "sync web" &&
+              messageText !== "login" &&
+              messageText !== "login web" &&
               messageText !== "status" &&
               messageText !== "help" &&
               messageText !== "menu" &&
@@ -1428,12 +1430,12 @@ Please try again.`,
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
                     "",
-                    `▸ ${waBold("Sync")} › Connect to web to edit & print`,
+                    `▸ ${waBold("Login")} › Connect to web to edit & print`,
                     `▸ ${waBold("Steps")} › See how it works`,
                     `▸ ${waBold("Help")} › View all commands`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "sync", title: "Sync" } },
+                    { type: "reply", reply: { id: "login", title: "Login" } },
                     { type: "reply", reply: { id: "steps", title: "Steps" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
@@ -1565,12 +1567,12 @@ Please try again.`,
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
                     "",
-                    `▸ ${waBold("Sync")} › Connect to web to edit & print`,
+                    `▸ ${waBold("Login")} › Connect to web to edit & print`,
                     `▸ ${waBold("Steps")} › See how it works`,
                     `▸ ${waBold("Help")} › View all commands`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "sync", title: "Sync" } },
+                    { type: "reply", reply: { id: "login", title: "Login" } },
                     { type: "reply", reply: { id: "steps", title: "Steps" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],
@@ -1611,14 +1613,14 @@ Please try again.`,
                     `▸ ${waBold("Edit")} › set print options & submit`,
                     `▸ ${waBold("Current")} › check your print job`,
                     `▸ ${waBold("Steps")} › how it works`,
-                    `▸ ${waBold("Sync")} › connect WhatsApp to web`,
+                    `▸ ${waBold("Login")} › connect WhatsApp to web`,
                     `▸ ${waBold("Clear")} › delete your draft`,
                     "",
                     `_Send files, then tap ${waBold("Edit")} when done._`,
                     ...(!isAuthenticated
                       ? [
                           "",
-                          `\ud83d\udd17 *Sync your WhatsApp:*`,
+                          `🔗 *Login your WhatsApp:*`,
                           (await getOrCreateWhatsAppSyncLink(userData.displayPhoneNumber)) ??
                             `${FRONTEND_BASE_URL}/`,
                         ]
@@ -1707,7 +1709,7 @@ Please try again.`,
                       ...(!isAuthenticated
                         ? [
                             "",
-                            `*Sync to edit on the web:*`,
+                            `*Login to edit on the web:*`,
                             (await getOrCreateWhatsAppSyncLink(userData.displayPhoneNumber)) ??
                               `${FRONTEND_BASE_URL}/`,
                           ]
@@ -1716,7 +1718,7 @@ Please try again.`,
                     buttons: [
                       { type: "reply", reply: { id: "help", title: "Help" } },
                       { type: "reply", reply: { id: "steps", title: "Steps" } },
-                      { type: "reply", reply: { id: "sync", title: "Sync" } },
+                      { type: "reply", reply: { id: "login", title: "Login" } },
                     ],
                   });
                 } else {
@@ -1734,7 +1736,7 @@ Please try again.`,
                       ...(!isAuthenticated
                         ? [
                             "",
-                            `*Sync to edit on the web:*`,
+                            `*Login to edit on the web:*`,
                             (await getOrCreateWhatsAppSyncLink(userData.displayPhoneNumber)) ??
                               `${FRONTEND_BASE_URL}/`,
                           ]
@@ -1880,14 +1882,14 @@ Please try again.`,
                     });
                 }
               }
-            } else if (messageText === "sync" || messageText === "sync web") {
-              const isFromWeb = messageText === "sync web";
+            } else if (messageText === "login" || messageText === "login web" || messageText === "sync" || messageText === "sync web") {
+              const isFromWeb = messageText === "login web" || messageText === "sync web";
               if (!FRONTEND_BASE_URL) {
                 if (phoneNumberId && userData.displayPhoneNumber) {
                   await sendWhatsAppTextMessage({
                     to: userData.displayPhoneNumber,
                     message:
-                      "*Sync link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
+                      "*Login link unavailable* \u26a0\ufe0f\n\nPlease try again later.",
                     phoneNumberId,
                   });
                 }
@@ -1922,7 +1924,7 @@ Please try again.`,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     message: [
-                      `${waBold("Tap the link below to sync:")}`,
+                      `${waBold("Tap the link below to login:")}`,
                       loginUrl ?? "Link unavailable",
                     ].join("\n"),
                   });
@@ -1937,12 +1939,12 @@ Please try again.`,
                     `${waBold("Welcome to Zopy!")} 🚀`,
                     `Send your ${waBold("PDF, Word, or image files")} here.`,
                     "",
-                    `▸ ${waBold("Sync")} › Connect to web to edit & print`,
+                    `▸ ${waBold("Login")} › Connect to web to edit & print`,
                     `▸ ${waBold("Steps")} › See how it works`,
                     `▸ ${waBold("Help")} › View all commands`,
                   ].join("\n"),
                   buttons: [
-                    { type: "reply", reply: { id: "sync", title: "Sync" } },
+                    { type: "reply", reply: { id: "login", title: "Login" } },
                     { type: "reply", reply: { id: "steps", title: "Steps" } },
                     { type: "reply", reply: { id: "help", title: "Help" } },
                   ],

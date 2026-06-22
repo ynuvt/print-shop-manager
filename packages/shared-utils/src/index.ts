@@ -103,12 +103,13 @@ export function getSelectedPageCount(
 export function calculateSheetCount(
   totalPages: number,
   options: PrintOptions,
+  duplexRateApplicable: boolean = true,
 ): number {
   const selectedPages = getSelectedPageCount(totalPages, options);
   const pagesPerSheet = options.pagesPerSheet || 1;
   const layoutPages = Math.ceil(selectedPages / pagesPerSheet);
   
-  return options.duplex === "BOTH" && options.colorMode != "COLOR"
+  return options.duplex === "BOTH" && options.colorMode != "COLOR" && duplexRateApplicable
     ? Math.ceil(layoutPages / 2)
     : layoutPages;
 }
@@ -116,12 +117,13 @@ export function calculateSheetCount(
 export function calculateFileCost(
   totalPages: number,
   options: PrintOptions,
-  pricing?: { priceBW?: number; priceColor?: number },
+  pricing?: { priceBW?: number; priceColor?: number; duplexRateApplicable?: boolean },
 ): number {
   const priceBW = pricing?.priceBW ?? PRICE_BW;
   const priceColor = pricing?.priceColor ?? PRICE_COLOR;
+  const duplexRateApplicable = pricing?.duplexRateApplicable ?? true;
   const pricePerSheet = options.colorMode === "COLOR" ? priceColor : priceBW;
-  const sheets = calculateSheetCount(totalPages, options);
+  const sheets = calculateSheetCount(totalPages, options, duplexRateApplicable);
 
   return sheets * pricePerSheet * options.copies;
 }
@@ -164,7 +166,7 @@ export type PrintFileState = {
  */
 export function buildJobTotals(
   files: PrintFileState[],
-  pricing?: { priceBW?: number; priceColor?: number },
+  pricing?: { priceBW?: number; priceColor?: number; duplexRateApplicable?: boolean },
 ): {
   totalCost: number;
   totalPages: number;

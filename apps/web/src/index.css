@@ -1266,6 +1266,102 @@ body {
   text-align: center;
 }
 
+/* Shop row inside the OTP card */
+.otp-shop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.otp-shop-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.otp-shop-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.otp-shop-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+/* Dropdown for changing shops */
+.shop-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.shop-dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.14s;
+}
+
+.shop-dropdown-item:hover {
+  background: var(--panel-muted);
+}
+
+.shop-dropdown-item--active {
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.shop-dropdown-current {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Small button variant */
+.btn-sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+
 .success-stack {
   display: grid;
   gap: 12px;

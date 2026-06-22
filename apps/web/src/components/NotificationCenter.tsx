@@ -20,8 +20,9 @@ type Notification = {
 type NotificationContextValue = {
   notify: (
     message: string,
-    options?: { variant?: NotificationVariant; duration?: number },
+    options?: { variant?: NotificationVariant; duration?: number; key?: string },
   ) => void;
+  dismiss: (id: string) => void;
 };
 
 const NotificationContext = createContext<NotificationContextValue | null>(
@@ -38,9 +39,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const notify = useCallback(
     (
       message: string,
-      options: { variant?: NotificationVariant; duration?: number } = {},
+      options: { variant?: NotificationVariant; duration?: number; key?: string } = {},
     ) => {
-      const id = createId();
+      const id = options.key ?? createId();
       const next: Notification = {
         id,
         message,
@@ -48,16 +49,19 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         duration: options.duration ?? 14000,
       };
 
-      setItems((prev) => [next, ...prev]);
+      setItems((prev) => {
+        const filtered = prev.filter((item) => item.id !== id);
+        return [next, ...filtered];
+      });
     },
     [],
   );
 
-  const handleDismiss = useCallback((id: string) => {
+  const dismiss = useCallback((id: string) => {
     setItems((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
-  const value = useMemo(() => ({ notify }), [notify]);
+  const value = useMemo(() => ({ notify, dismiss }), [notify, dismiss]);
 
   return (
     <NotificationContext.Provider value={value}>
@@ -69,7 +73,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             message={item.message}
             variant={item.variant}
             duration={item.duration}
-            onDismiss={() => handleDismiss(item.id)}
+            onDismiss={() => dismiss(item.id)}
           />
         ))}
       </div>

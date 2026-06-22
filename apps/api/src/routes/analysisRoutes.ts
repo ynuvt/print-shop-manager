@@ -601,6 +601,7 @@ app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
         isActive: shop.isActive,
         platformChargeEnabled: shop.platformChargeEnabled,
         platformPayable: payableMap.get(shop.shopId) ?? 0,
+        duplexRateApplicable: shop.duplexRateApplicable,
         createdAt: shop.createdAt,
         completedJobsCount: s.completedCount,
         totalPagesPrinted: s.totalPages,
@@ -620,7 +621,7 @@ app.get("/shops", authMiddleware(["admin"]), async (req, res) => {
 
 app.post("/shops", authMiddleware(["admin"]), async (req, res) => {
   try {
-    const { username, password, shopId, name, landmark, imageUrl, latitude, longitude, priceBW, priceColor, upiId } = req.body;
+    const { username, password, shopId, name, landmark, imageUrl, latitude, longitude, priceBW, priceColor, upiId, duplexRateApplicable } = req.body;
     if (!username || !password || !shopId) {
       return res.status(400).json({ error: "username, password, and shopId are required." });
     }
@@ -656,6 +657,7 @@ app.post("/shops", authMiddleware(["admin"]), async (req, res) => {
         priceColor: typeof priceColor === "number" && priceColor > 0 ? priceColor : 7,
         upiId: typeof upiId === "string" && upiId.trim() ? upiId.trim() : null,
         isActive: true,
+        duplexRateApplicable: typeof duplexRateApplicable === "boolean" ? duplexRateApplicable : true,
       },
     });
 
@@ -673,6 +675,7 @@ app.post("/shops", authMiddleware(["admin"]), async (req, res) => {
       priceBW: shop.priceBW,
       priceColor: shop.priceColor,
       isActive: shop.isActive,
+      duplexRateApplicable: shop.duplexRateApplicable,
       createdAt: shop.createdAt,
     });
   } catch (error) {
@@ -695,7 +698,7 @@ function computePlatformCharge(totalCost: number): number {
 
 app.patch("/shops/:shopId", authMiddleware(["admin"]), async (req, res) => {
   const shopId = req.params.shopId as string;
-  const { name, landmark, imageUrl, latitude, longitude, priceBW, priceColor, upiId, isActive, platformChargeEnabled } = req.body;
+  const { name, landmark, imageUrl, latitude, longitude, priceBW, priceColor, upiId, isActive, platformChargeEnabled, duplexRateApplicable } = req.body;
 
   try {
     const existing = await prisma.printShop.findUnique({ where: { shopId } });
@@ -714,6 +717,7 @@ app.patch("/shops/:shopId", authMiddleware(["admin"]), async (req, res) => {
     if (typeof upiId === "string") updateData.upiId = upiId.trim() || null;
     if (upiId === null) updateData.upiId = null;
     if (typeof isActive === "boolean") updateData.isActive = isActive;
+    if (typeof duplexRateApplicable === "boolean") updateData.duplexRateApplicable = duplexRateApplicable;
     if (typeof platformChargeEnabled === "boolean") {
       updateData.platformChargeEnabled = platformChargeEnabled;
       // Record when fees were first enabled so payable starts from this date
@@ -746,6 +750,7 @@ app.patch("/shops/:shopId", authMiddleware(["admin"]), async (req, res) => {
       priceColor: updated.priceColor,
       isActive: updated.isActive,
       platformChargeEnabled: updated.platformChargeEnabled,
+      duplexRateApplicable: updated.duplexRateApplicable,
     });
   } catch (error) {
     console.error("[analysis/shops] Patch error:", error);
@@ -831,6 +836,7 @@ app.get("/shops/:shopId/dashboard", authMiddleware(["admin"]), async (req, res) 
         priceBW: shop.priceBW,
         priceColor: shop.priceColor,
         platformChargeEnabled: shop.platformChargeEnabled,
+        duplexRateApplicable: shop.duplexRateApplicable,
       },
       stats: {
         completedJobsCount: statsJobs.length,
