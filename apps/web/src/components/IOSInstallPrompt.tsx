@@ -30,8 +30,9 @@ export default function IOSInstallPrompt() {
   useEffect(() => {
     // Already running as an installed PWA — never show.
     if (isStandalone()) return;
-    // User previously dismissed — never show again.
-    if (localStorage.getItem(DISMISSED_KEY)) return;
+    // Dismissed earlier this session — hide for now, but show again next
+    // session as long as the app still isn't installed.
+    if (sessionStorage.getItem(DISMISSED_KEY)) return;
 
     // iPhone/iPad: show on every page (no native install on iOS).
     if (isIOS()) {
@@ -54,7 +55,7 @@ export default function IOSInstallPrompt() {
   }, []);
 
   const dismiss = () => {
-    localStorage.setItem(DISMISSED_KEY, "1");
+    sessionStorage.setItem(DISMISSED_KEY, "1");
     setShow(false);
     setExpanded(false);
   };

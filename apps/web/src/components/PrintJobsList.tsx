@@ -413,9 +413,10 @@ function JobDetailPanel({
                     {/* Shop name + change shop */}
                     <div className="otp-shop-row">
                       <div className="otp-shop-name">
-                        <span className="otp-shop-label">Shop</span>
+                        <span className="otp-shop-label">Submitted to</span>
                         <span className="otp-shop-value">{job.shopName ?? "Unknown Shop"}</span>
                       </div>
+                      {/* TODO: Change Shop temporarily disabled — re-enable once the flow is finished.
                       {!isExpired && (
                         <button
                           type="button"
@@ -426,6 +427,7 @@ function JobDetailPanel({
                           {isChangingShop ? "Changing..." : "Change Shop"}
                         </button>
                       )}
+                      */}
                     </div>
 
                     <p className="otp-title">
