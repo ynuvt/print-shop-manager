@@ -14,33 +14,39 @@ function isIOS(): boolean {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
+// Android/Desktop only ever shows on the operator portals, never on the
+// home page used by normal customers.
+function isPortalPath(): boolean {
+  const path = window.location.pathname;
+  return path.startsWith("/shop") || path.startsWith("/brand");
+}
+
 export default function IOSInstallPrompt() {
   const [show, setShow] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [platform, setPlatform] = useState<"ios" | "android" | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [ios, setIos] = useState(false);
 
   useEffect(() => {
-    // Already in PWA — never show
+    // Already running as an installed PWA — never show.
     if (isStandalone()) return;
-    // User previously dismissed — never show again
+    // User previously dismissed — never show again.
     if (localStorage.getItem(DISMISSED_KEY)) return;
 
-    const path = window.location.pathname;
-    const iosDevice = isIOS();
-    setIos(iosDevice);
-
-    if (iosDevice) {
+    // iPhone/iPad: show on every page (no native install on iOS).
+    if (isIOS()) {
+      setPlatform("ios");
       setShow(true);
       return;
     }
 
-    // Android/Desktop: only on portal pages, not home
-    if (!path.startsWith("/shop") && !path.startsWith("/brand")) return;
+    // Android/Desktop: only on the shop/brand portals, never the home page.
+    if (!isPortalPath()) return;
 
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      setPlatform("android");
       setShow(true);
     };
     window.addEventListener("beforeinstallprompt", handler);
@@ -60,34 +66,26 @@ export default function IOSInstallPrompt() {
     if (outcome === "accepted") dismiss();
   };
 
-  // Double-check: never render if already running as PWA
-  if (!show || isStandalone()) return null;
+  // Double-check: never render once installed.
+  if (!show || !platform || isStandalone()) return null;
 
   return (
     <div
       style={{
         position: "fixed",
-        bottom: 0,
+        // Sits right below the sticky navbar (min-height 64px).
+        top: "64px",
         left: 0,
         right: 0,
-        zIndex: 1000,
+        zIndex: 19,
         background: "var(--panel, #111113)",
-        borderTop: "1px solid var(--border, rgba(255,255,255,0.08))",
-        borderRadius: "20px 20px 0 0",
-        boxShadow: "0 -6px 36px rgba(0,0,0,0.28)",
+        borderBottom: "1px solid var(--border, rgba(255,255,255,0.08))",
+        borderRadius: "0 0 18px 18px",
+        boxShadow: "0 8px 28px rgba(0,0,0,0.22)",
       }}
     >
-      {/* Drag pill */}
-      <div style={{
-        width: "36px",
-        height: "4px",
-        borderRadius: "99px",
-        background: "var(--border, rgba(255,255,255,0.15))",
-        margin: "10px auto 0",
-      }} />
-
       {/* Header row — tappable area + dismiss */}
-      <div style={{ display: "flex", alignItems: "center", padding: "10px 16px 12px", gap: "10px", position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", padding: "10px 16px", gap: "10px", position: "relative" }}>
         <button
           type="button"
           onClick={() => setExpanded((x) => !x)}
@@ -118,8 +116,8 @@ export default function IOSInstallPrompt() {
             </div>
           </div>
           {expanded
-            ? <ChevronDown size={16} color="var(--text-muted, #71717a)" style={{ flexShrink: 0 }} />
-            : <ChevronUp   size={16} color="var(--text-muted, #71717a)" style={{ flexShrink: 0 }} />
+            ? <ChevronUp size={16} color="var(--text-muted, #71717a)" style={{ flexShrink: 0 }} />
+            : <ChevronDown size={16} color="var(--text-muted, #71717a)" style={{ flexShrink: 0 }} />
           }
         </button>
 
@@ -144,8 +142,8 @@ export default function IOSInstallPrompt() {
 
       {/* Expanded content */}
       {expanded && (
-        <div style={{ padding: "0 16px 28px" }}>
-          {ios ? (
+        <div style={{ padding: "0 16px 16px" }}>
+          {platform === "ios" ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               <div style={{
                 display: "flex", alignItems: "center", gap: "12px",

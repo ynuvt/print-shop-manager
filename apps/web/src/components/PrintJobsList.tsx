@@ -11,7 +11,9 @@ import {
 } from "../api/api";
 import type { UserPrintJob, UserPrintJobFile, PrintShopInfo } from "../api/api";
 import { getSocket } from "../services/getSocket";
+import { suppressJobToast } from "../services/suppressJobToast";
 import { useNotifications } from "./NotificationCenter";
+import ShopPickerModal, { saveRecentShop } from "./ShopPickerModal";
 
 type JobsTab = "ACTIVE" | "COMPLETED" | "HISTORY";
 
@@ -207,7 +209,8 @@ function JobDetailPanel({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResubmitting, setIsResubmitting] = useState(false);
   const [shops, setShops] = useState<PrintShopInfo[]>([]);
-  const [showShopDropdown, setShowShopDropdown] = useState(false);
+  const [showShopPicker, setShowShopPicker] = useState(false);
+  const [pendingShop, setPendingShop] = useState<PrintShopInfo | null>(null);
   const [isChangingShop, setIsChangingShop] = useState(false);
 
   const loadJob = useCallback(async () => {
@@ -263,25 +266,35 @@ function JobDetailPanel({
     void getShops().then((list) => setShops(list)).catch(() => {});
   }, []);
 
-  const handleChangeShop = async (newShop: PrintShopInfo) => {
-    if (!job || isChangingShop) return;
+  // Step 1: user picked a new shop from the picker panel -> stage it for confirmation
+  const handleShopPicked = (newShop: PrintShopInfo) => {
+    if (!job) return;
+    setShowShopPicker(false);
     if (newShop.id === job.shopId) {
-      setShowShopDropdown(false);
+      notify("That's already the current shop for this job", { variant: "info" });
       return;
     }
+    setPendingShop(newShop);
+  };
+
+  // Step 2: user confirmed -> delete the old job and resubmit to the new shop
+  const handleConfirmChangeShop = async () => {
+    if (!job || !pendingShop || isChangingShop) return;
     setIsChangingShop(true);
     try {
-      const result = await changeJobShop(job.id, newShop.id);
-      notify(`Job moved to ${newShop.name}`, { variant: "success" });
+      const result = await changeJobShop(job.id, pendingShop.id);
+      saveRecentShop(pendingShop);
+      notify(`Job moved to ${pendingShop.name}`, { variant: "success" });
       // The old job is deleted by the backend; open the new one
       onJobDeleted(job.id);
       onJobUpdated({
         ...job,
         id: result.newJobId,
-        shopName: newShop.name,
+        shopId: pendingShop.id,
+        shopName: pendingShop.name,
         verificationCode: String(result.verificationCode).padStart(4, "0"),
       });
-      setShowShopDropdown(false);
+      setPendingShop(null);
       onClose();
     } catch (err) {
       notify(err instanceof Error ? err.message : "Failed to change shop", { variant: "error" });
@@ -304,6 +317,9 @@ function JobDetailPanel({
       dismiss(`job-status-${code}`);
       dismiss(`job-status-${job.id}`);
 
+      // We show our own toast below; suppress the backend's follow-up
+      // job-status-updated toast for this same job so it isn't duplicated.
+      suppressJobToast(job.id);
       await deleteUserPrintJob(job.id);
       notify("Job deleted successfully", { variant: "success" });
       onJobDeleted(job.id);
@@ -332,6 +348,7 @@ function JobDetailPanel({
   };
 
   return (
+    <>
     <div
       className="job-detail-panel"
       onClick={onClose}
@@ -400,31 +417,14 @@ function JobDetailPanel({
                         <span className="otp-shop-value">{job.shopName ?? "Unknown Shop"}</span>
                       </div>
                       {!isExpired && (
-                        <div style={{ position: "relative" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            onClick={() => setShowShopDropdown((v) => !v)}
-                            disabled={isChangingShop}
-                          >
-                            {isChangingShop ? "Changing..." : "Change Shop"}
-                          </button>
-                          {showShopDropdown && shops.length > 0 && (
-                            <div className="shop-dropdown">
-                              {shops.map((s) => (
-                                <button
-                                  key={s.id}
-                                  type="button"
-                                  className={`shop-dropdown-item${s.id === job.shopId ? " shop-dropdown-item--active" : ""}`}
-                                  onClick={() => void handleChangeShop(s)}
-                                >
-                                  {s.name}
-                                  {s.id === job.shopId && <span className="shop-dropdown-current"> (current)</span>}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => setShowShopPicker(true)}
+                          disabled={isChangingShop}
+                        >
+                          {isChangingShop ? "Changing..." : "Change Shop"}
+                        </button>
                       )}
                     </div>
 
@@ -541,6 +541,70 @@ function JobDetailPanel({
         </div>
       </div>
     </div>
+
+    {/* Change-shop flow: pick a new shop from the full shop selection panel */}
+    {showShopPicker && (
+      <ShopPickerModal
+        shops={shops}
+        onSelect={handleShopPicked}
+        onClose={() => setShowShopPicker(false)}
+      />
+    )}
+
+    {/* Change-shop flow: confirm before deleting the old job and resubmitting */}
+    {pendingShop && job && (
+      <div
+        className="modal-shell"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="change-shop-confirm-title"
+        onClick={() => { if (!isChangingShop) setPendingShop(null); }}
+      >
+        <div className="modal-card confirm-submit-card" onClick={(e) => e.stopPropagation()}>
+          <div className="confirm-modal-header">
+            <h2 className="confirm-modal-title" id="change-shop-confirm-title">Change Shop</h2>
+            <p className="confirm-modal-subtitle">
+              Move this print job to a different shop
+            </p>
+          </div>
+
+          <div className="change-shop-confirm-body">
+            <div className="change-shop-confirm-row">
+              <span className="change-shop-confirm-label">From</span>
+              <span className="change-shop-confirm-value">{job.shopName ?? "Current shop"}</span>
+            </div>
+            <div className="change-shop-confirm-row">
+              <span className="change-shop-confirm-label">To</span>
+              <span className="change-shop-confirm-value">{pendingShop.name}</span>
+            </div>
+            <p className="change-shop-confirm-note">
+              Your current job will be deleted and a new one created at{" "}
+              <strong>{pendingShop.name}</strong> with a fresh verification code.
+            </p>
+          </div>
+
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setPendingShop(null)}
+              disabled={isChangingShop}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void handleConfirmChangeShop()}
+              disabled={isChangingShop}
+            >
+              {isChangingShop ? "Moving..." : "Confirm & Resubmit"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

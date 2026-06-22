@@ -1303,52 +1303,41 @@ body {
 }
 
 /* Dropdown for changing shops */
-.shop-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  min-width: 180px;
-  max-height: 220px;
-  overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-  z-index: 100;
+/* Change-shop confirmation modal */
+.change-shop-confirm-body {
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  gap: 10px;
+  padding: 4px 0 12px;
 }
 
-.shop-dropdown-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.14s;
+.change-shop-confirm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.shop-dropdown-item:hover {
-  background: var(--panel-muted);
-}
-
-.shop-dropdown-item--active {
-  font-weight: 700;
-  color: var(--brand);
-}
-
-.shop-dropdown-current {
-  font-size: 11px;
+.change-shop-confirm-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--text-muted);
-  font-weight: 400;
+}
+
+.change-shop-confirm-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+
+.change-shop-confirm-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 /* Small button variant */

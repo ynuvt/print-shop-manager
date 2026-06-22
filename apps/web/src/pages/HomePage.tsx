@@ -46,6 +46,7 @@ import {
 import { defaultPrintOptions } from "../printing/types";
 import type { PrintFileState } from "../printing/types";
 import { getSocket } from "../services/getSocket";
+import { isJobToastSuppressed } from "../services/suppressJobToast";
 import type { ThemeMode } from "../App";
 import Navbar from "../components/Navbar";
 
@@ -692,6 +693,8 @@ export default function HomePage({
     
     const handleJobStatusUpdated = (uid: string, _jobId: string, msg: string) => {
       if (uid === userId) {
+        // Skip if this client just acted on the job and already showed a toast.
+        if (isJobToastSuppressed(_jobId)) return;
         const match = msg.match(/verification code (\d+)/);
         const code = match ? match[1] : _jobId;
         notify(msg, {
