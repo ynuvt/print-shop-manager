@@ -1,22 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { Bookmark, BookmarkCheck, ChevronRight, Navigation, Search, X, Image, ExternalLink } from "lucide-react";
 import type { PrintShopInfo } from "../api/api";
+import { getBookmarks, saveBookmarks } from "../services/shopBookmarks";
 
-const BOOKMARKS_KEY = "printowl_bookmarked_shops";
 const RECENTS_KEY = "printowl_recent_shops";
 const MAX_RECENTS = 5;
-
-function getBookmarks(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(BOOKMARKS_KEY) ?? "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveBookmarks(ids: string[]) {
-  localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(ids));
-}
 
 function getRecents(): PrintShopInfo[] {
   try {

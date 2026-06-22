@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Copy, FileText } from "lucide-react";
+import { ArrowLeft, Bookmark, BookmarkCheck, Check, Copy, ExternalLink, FileText, Image as ImageIcon, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   deleteUserPrintJob,
@@ -12,6 +12,7 @@ import {
 import type { UserPrintJob, UserPrintJobFile, PrintShopInfo } from "../api/api";
 import { getSocket } from "../services/getSocket";
 import { suppressJobToast } from "../services/suppressJobToast";
+import { isBookmarked, toggleBookmark } from "../services/shopBookmarks";
 import { useNotifications } from "./NotificationCenter";
 import ShopPickerModal, { saveRecentShop } from "./ShopPickerModal";
 
@@ -212,6 +213,23 @@ function JobDetailPanel({
   const [showShopPicker, setShowShopPicker] = useState(false);
   const [pendingShop, setPendingShop] = useState<PrintShopInfo | null>(null);
   const [isChangingShop, setIsChangingShop] = useState(false);
+  const [shopLightboxUrl, setShopLightboxUrl] = useState<string | null>(null);
+  const [shopBookmarked, setShopBookmarked] = useState(false);
+
+  // Full details for the shop this job was submitted to (name/landmark/id/image).
+  const shopInfo = useMemo(
+    () => (job ? shops.find((s) => s.id === job.shopId) : undefined),
+    [shops, job],
+  );
+
+  useEffect(() => {
+    setShopBookmarked(shopInfo ? isBookmarked(shopInfo.shopId) : false);
+  }, [shopInfo]);
+
+  const handleToggleBookmark = () => {
+    if (!shopInfo) return;
+    setShopBookmarked(toggleBookmark(shopInfo.shopId));
+  };
 
   const loadJob = useCallback(async () => {
     setLoading(true);
@@ -410,12 +428,57 @@ function JobDetailPanel({
                   <div className="skeleton skeleton-modal-otp" style={{ margin: 0 }} />
                 ) : job ? (
                   <>
-                    {/* Shop name + change shop */}
-                    <div className="otp-shop-row">
-                      <div className="otp-shop-name">
-                        <span className="otp-shop-label">Submitted to</span>
-                        <span className="otp-shop-value">{job.shopName ?? "Unknown Shop"}</span>
+                    {/* Shop this job was submitted to */}
+                    <div className="job-shop-card">
+                      <div className="job-shop-card-main">
+                        <div className="shop-row-id-badge">
+                          <span
+                            className="shop-row-id-value"
+                            style={{ fontSize: (shopInfo?.shopId ?? "").length > 3 ? "11px" : (shopInfo?.shopId ?? "").length > 2 ? "14px" : "18px" }}
+                          >
+                            {(shopInfo?.shopId ?? "?").slice(0, 4).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="shop-row-info">
+                          <span className="otp-shop-label">Submitted to</span>
+                          <span className="shop-row-name">{shopInfo?.name ?? job.shopName ?? "Unknown Shop"}</span>
+                          <div className="shop-row-meta">
+                            {shopInfo?.landmark && (
+                              <span className="shop-row-landmark">📍 {shopInfo.landmark}</span>
+                            )}
+                            {shopInfo?.shopId && (
+                              <span className="shop-row-distance-badge">ID: {shopInfo.shopId}</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
+
+                      {shopInfo && (
+                        <div className="shop-row-actions">
+                          {shopInfo.imageUrl && (
+                            <button
+                              type="button"
+                              className="shop-view-photo-btn"
+                              onClick={() => setShopLightboxUrl(shopInfo.imageUrl!)}
+                              aria-label="View shop photo"
+                              title="View shop photo"
+                            >
+                              <ImageIcon size={13} />
+                              <span className="shop-view-photo-label">See Photo</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={`shop-bookmark-btn${shopBookmarked ? " active" : ""}`}
+                            onClick={handleToggleBookmark}
+                            aria-label={shopBookmarked ? "Remove bookmark" : "Save shop"}
+                            title={shopBookmarked ? "Remove from saved" : "Save for later"}
+                          >
+                            {shopBookmarked ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+                          </button>
+                        </div>
+                      )}
+
                       {/* TODO: Change Shop temporarily disabled — re-enable once the flow is finished.
                       {!isExpired && (
                         <button
@@ -543,6 +606,52 @@ function JobDetailPanel({
         </div>
       </div>
     </div>
+
+    {/* Shop photo lightbox */}
+    {shopLightboxUrl && (
+      <div
+        className="shop-lightbox-overlay"
+        onClick={() => setShopLightboxUrl(null)}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Shop photo"
+      >
+        <div className="shop-lightbox-card" onClick={(e) => e.stopPropagation()}>
+          <div className="shop-lightbox-header">
+            <span className="shop-lightbox-title">Shop Photo</span>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <a
+                href={shopLightboxUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shop-lightbox-external"
+                title="Open in new tab"
+              >
+                <ExternalLink size={14} />
+              </a>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setShopLightboxUrl(null)}
+                aria-label="Close photo"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+          <div className="shop-lightbox-img-wrap">
+            <img
+              src={shopLightboxUrl}
+              alt="Shop photo"
+              className="shop-lightbox-img"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Change-shop flow: pick a new shop from the full shop selection panel */}
     {showShopPicker && (

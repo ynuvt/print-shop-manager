@@ -73,16 +73,13 @@ export default function IOSInstallPrompt() {
   return (
     <div
       style={{
-        position: "fixed",
-        // Sits right below the sticky navbar (min-height 64px).
-        top: "64px",
-        left: 0,
-        right: 0,
-        zIndex: 19,
+        // In normal document flow so it reserves its own space and never
+        // overlaps the navbar / login button below it.
+        position: "relative",
+        zIndex: 21,
         background: "var(--panel, #111113)",
         borderBottom: "1px solid var(--border, rgba(255,255,255,0.08))",
-        borderRadius: "0 0 18px 18px",
-        boxShadow: "0 8px 28px rgba(0,0,0,0.22)",
+        boxShadow: "0 4px 18px rgba(0,0,0,0.18)",
       }}
     >
       {/* Header row — tappable area + dismiss */}

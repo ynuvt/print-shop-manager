@@ -1276,6 +1276,27 @@ body {
   gap: 8px;
 }
 
+/* Shop the job was submitted to — full details card */
+.job-shop-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--panel-muted, rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.job-shop-card-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .otp-shop-name {
   display: flex;
   flex-direction: column;
