@@ -303,6 +303,7 @@ export default function RewardsPage({
 }) {
   const [coupons, setCoupons] = useState<CouponData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<"active" | "past">("active");
 
   const loadData = () => {
     setLoading(true);
@@ -325,50 +326,89 @@ export default function RewardsPage({
       <Navbar theme={theme} onToggleTheme={onToggleTheme} />
       <main className="main-wrap">
 
-        {/* Active Rewards Section */}
-        <section style={{ marginBottom: "24px" }}>
-          <h2 style={{ fontSize: "20px", fontWeight: 800, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
-            <img src={`${import.meta.env.BASE_URL || "/"}img/rewardicon.png`} alt="Rewards" style={{ width: "24px", height: "24px", objectFit: "contain" }} />
-            My Active Rewards
-          </h2>
+        {/* Active / Past tab switcher */}
+        <div className="jobs-tabs" role="tablist" aria-label="Filter rewards" style={{ marginTop: 0, marginBottom: "16px" }}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "active"}
+            className={`jobs-tab ${view === "active" ? "active" : ""}`}
+            onClick={() => setView("active")}
+          >
+            Active{activeCoupons.length > 0 ? ` (${activeCoupons.length})` : ""}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "past"}
+            className={`jobs-tab ${view === "past" ? "active" : ""}`}
+            onClick={() => setView("past")}
+          >
+            Past{usedCoupons.length > 0 ? ` (${usedCoupons.length})` : ""}
+          </button>
+        </div>
 
-          {loading && (
+        {/* Active Rewards Section */}
+        {view === "active" && (
+          <section style={{ marginBottom: "24px" }}>
+            <h2 style={{ fontSize: "20px", fontWeight: 800, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
+              <img src={`${import.meta.env.BASE_URL || "/"}img/rewardicon.png`} alt="Rewards" style={{ width: "24px", height: "24px", objectFit: "contain" }} />
+              My Active Rewards
+            </h2>
+
+            {loading && (
+              <div style={{ display: "grid", gap: "16px" }}>
+                {[...Array(2)].map((_, i) => (
+                  <div key={i} style={{ height: "200px", borderRadius: "24px", background: "var(--panel-muted)", animation: "pulse 2s ease-in-out infinite" }} />
+                ))}
+              </div>
+            )}
+
+            {!loading && activeCoupons.length === 0 && (
+              <div style={{
+                textAlign: "center", padding: "48px 16px",
+                background: "var(--panel-muted)", borderRadius: "20px",
+                border: "1px solid var(--border)",
+              }}>
+                <Ticket size={40} color="var(--text-muted)" style={{ marginBottom: "12px" }} />
+                <p style={{ fontWeight: 700, fontSize: "16px", margin: "0 0 4px" }}>No active rewards</p>
+                <p style={{ color: "var(--text-muted)", fontSize: "13px", margin: 0 }}>
+                  Complete a print job or claim a promo to unlock exclusive cafe discounts!
+                </p>
+              </div>
+            )}
+
             <div style={{ display: "grid", gap: "16px" }}>
-              {[...Array(2)].map((_, i) => (
-                <div key={i} style={{ height: "200px", borderRadius: "24px", background: "var(--panel-muted)", animation: "pulse 2s ease-in-out infinite" }} />
+              {activeCoupons.map((c) => (
+                <CouponCard key={c.id} coupon={c} />
               ))}
             </div>
-          )}
+          </section>
+        )}
 
-          {!loading && activeCoupons.length === 0 && (
-            <div style={{
-              textAlign: "center", padding: "48px 16px",
-              background: "var(--panel-muted)", borderRadius: "20px",
-              border: "1px solid var(--border)",
-            }}>
-              <Ticket size={40} color="var(--text-muted)" style={{ marginBottom: "12px" }} />
-              <p style={{ fontWeight: 700, fontSize: "16px", margin: "0 0 4px" }}>No active rewards</p>
-              <p style={{ color: "var(--text-muted)", fontSize: "13px", margin: 0 }}>
-                Complete a print job or claim a promo to unlock exclusive cafe discounts!
-              </p>
-            </div>
-          )}
-
-          <div style={{ display: "grid", gap: "16px" }}>
-            {activeCoupons.map((c) => (
-              <CouponCard key={c.id} coupon={c} />
-            ))}
-          </div>
-        </section>
-
-        {/* Used/Expired Rewards */}
-        {usedCoupons.length > 0 && (
+        {/* Past Rewards Section */}
+        {view === "past" && (
           <section style={{ marginBottom: "24px" }}>
-            <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px", color: "var(--text-muted)" }}>
-              <Clock size={18} />
+            <h2 style={{ fontSize: "20px", fontWeight: 800, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", color: "var(--text-muted)" }}>
+              <Clock size={22} />
               Past Rewards
             </h2>
-            <div style={{ display: "grid", gap: "12px" }}>
+
+            {!loading && usedCoupons.length === 0 && (
+              <div style={{
+                textAlign: "center", padding: "48px 16px",
+                background: "var(--panel-muted)", borderRadius: "20px",
+                border: "1px solid var(--border)",
+              }}>
+                <Clock size={40} color="var(--text-muted)" style={{ marginBottom: "12px" }} />
+                <p style={{ fontWeight: 700, fontSize: "16px", margin: "0 0 4px" }}>No past rewards yet</p>
+                <p style={{ color: "var(--text-muted)", fontSize: "13px", margin: 0 }}>
+                  Redeemed and expired rewards will show up here.
+                </p>
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: "16px" }}>
               {usedCoupons.map((c) => (
                 <CouponCard key={c.id} coupon={c} />
               ))}

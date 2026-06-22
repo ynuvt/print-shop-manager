@@ -204,7 +204,10 @@ interface PendingBatch {
 const fileBatchQueue = new Map<string, PendingBatch>();
 const limitReachedSent = new Map<string, number>(); // phone → timestamp
 
-const BATCH_WINDOW_MS = 5000;
+// Wait only briefly after the last file before sending the consolidated
+// "files received" reply. Long enough to group a multi-file send (WhatsApp
+// delivers them within ~1s of each other), short enough to feel instant.
+const BATCH_WINDOW_MS = 1800;
 
 function friendlyFileName(rawName: string): string {
   // Image-converted files: show "Photo" instead of "whatsapp-image-173849384.pdf"
@@ -227,9 +230,11 @@ async function flushFileBatch(phoneNumber: string): Promise<void> {
 
   const now = Date.now();
   const lastSentAt = waUser?.lastFileBatchSentAt?.getTime() || 0;
-  
-  // Cross-process synchronization: only send one message per 4s window
-  if (now - lastSentAt < 4000) {
+
+  // Cross-process de-duplication: if another instance just sent the batch
+  // message, skip this one. Kept just under the batch window so genuinely
+  // later bursts still get their own confirmation.
+  if (now - lastSentAt < 1500) {
     console.log(`[file-batch] Skipping redundant flush for ${phoneNumber} (DB-synced)`);
     fileBatchQueue.delete(phoneNumber);
     return;
@@ -693,7 +698,7 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
               const mimeType = incomingMessage.document?.mime_type || "";
               console.log("Received document:", incomingMessage.document);
 
-              // Send sticker IMMEDIATELY — coordinate via DB
+              // Send the instant acknowledgement ASAP — don't block on DB writes.
                 const waUserForSticker = await prisma.whatsAppUser.findUnique({
                   where: { phoneNumber: userData.displayPhoneNumber },
                   select: { lastUploadStickerSentAt: true },
@@ -701,7 +706,8 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                 const lastStickerSentAt = waUserForSticker?.lastUploadStickerSentAt?.getTime() || 0;
 
                 if (phoneNumberId && userData.displayPhoneNumber && (Date.now() - lastStickerSentAt > 15000)) {
-                  await prisma.whatsAppUser.update({
+                  // Fire-and-forget both the throttle write and the message.
+                  prisma.whatsAppUser.update({
                     where: { phoneNumber: userData.displayPhoneNumber },
                     data: { lastUploadStickerSentAt: new Date() },
                   }).catch(() => {});
@@ -924,7 +930,7 @@ Please try again.`,
 
               console.log("Received image:", imageData);
 
-              // Send sticker IMMEDIATELY — coordinate via DB
+              // Send the instant acknowledgement ASAP — don't block on DB writes.
                 const waUserForSticker = await prisma.whatsAppUser.findUnique({
                   where: { phoneNumber: userData.displayPhoneNumber },
                   select: { lastUploadStickerSentAt: true },
@@ -932,7 +938,8 @@ Please try again.`,
                 const lastStickerSentAt = waUserForSticker?.lastUploadStickerSentAt?.getTime() || 0;
 
                 if (phoneNumberId && userData.displayPhoneNumber && (Date.now() - lastStickerSentAt > 15000)) {
-                  await prisma.whatsAppUser.update({
+                  // Fire-and-forget both the throttle write and the message.
+                  prisma.whatsAppUser.update({
                     where: { phoneNumber: userData.displayPhoneNumber },
                     data: { lastUploadStickerSentAt: new Date() },
                   }).catch(() => {});
