@@ -98,6 +98,12 @@ enum FileOwnerRole {
   COLLABORATOR
 }
 
+enum FileConversionStatus {
+  PENDING // file row created instantly on receipt; conversion/upload still running in the background
+  READY   // converted, uploaded to R2, page count known — safe to view, cost, and submit
+  FAILED  // conversion or upload failed; user should resend
+}
+
 
 
 model printOption {
@@ -123,7 +129,9 @@ model file {
   messageId  String?
   createdAt DateTime @default(now())
   pages    Int
-  url      String
+  url      String   @default("")
+  previewUrl String?
+  conversionStatus FileConversionStatus @default(READY)
   fileCost Float    @default(0)
   uploadedByUserId String?
   uploadedByUser   User?        @relation("UserUploadedFiles", fields: [uploadedByUserId], references: [id], map: "file_uploadedByUserId_fkey")

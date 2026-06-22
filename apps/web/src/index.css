@@ -1249,13 +1249,41 @@ body {
 .modal-summary {
   margin-top: 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 16px;
+  padding: 18px 16px;
   background: linear-gradient(
     160deg,
     color-mix(in srgb, var(--panel) 68%, transparent),
     color-mix(in srgb, var(--panel-muted) 90%, transparent)
   );
+}
+
+.otp-card {
+  gap: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Soft brand glow behind the verification code for a premium voucher feel. */
+.otp-card::before {
+  content: "";
+  position: absolute;
+  top: -40%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 70%;
+  height: 70%;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--brand) 14%, transparent),
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.otp-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .success-card,
@@ -1283,11 +1311,15 @@ body {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  background: var(--panel-muted, rgba(255,255,255,0.04));
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  margin-bottom: 14px;
+  padding: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel) 80%, transparent),
+    color-mix(in srgb, var(--panel-muted) 92%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 14px;
 }
 
 .job-shop-card-main {
@@ -1496,6 +1528,212 @@ body {
   border-color: var(--brand);
   background: var(--panel-muted);
   color: var(--text);
+}
+
+/* "View File" button shown while a file is still converting (looks like the
+   link but muted/disabled to signal it isn't ready yet). */
+.review-file-actions .file-view-pending {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--border);
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #888);
+  background: var(--panel);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.review-file-actions .file-view-pending:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.file-converting-note {
+  margin: 0;
+  padding: 6px 16px 10px;
+  font-size: 12px;
+  color: var(--muted, #888);
+  font-style: italic;
+}
+
+/* Options / Preview segmented tabs. */
+.file-tabs {
+  display: inline-flex;
+  justify-self: start;
+  width: fit-content;
+  padding: 3px;
+  margin-bottom: 12px;
+  border-radius: 9999px;
+  background: var(--panel-muted, #f4f4f5);
+  border: 1px solid var(--border);
+}
+
+.file-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 6px 18px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted, #888);
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.file-tab.active {
+  background: var(--brand);
+  color: #1a1a1a;
+}
+
+/* Sliding tab track: Options and Preview sit side by side; we translate the
+   track to swap them in the same space (smooth, constant height). */
+.file-tab-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+
+.file-tab-track {
+  display: flex;
+  width: 200%;
+  align-items: stretch;
+  transition: transform 0.3s ease;
+}
+
+.file-tab-panel {
+  width: 50%;
+  flex: 0 0 50%;
+  box-sizing: border-box;
+}
+
+.file-tab-options {
+  display: grid;
+  gap: 14px;
+  /* keep a little breathing room so the preview tab can fill the same height */
+  align-content: start;
+  padding-right: 2px;
+}
+
+.file-tab-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.file-preview-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex: 1;
+  min-height: 280px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  /* Neutral backdrop so the white printed sheet stands out like real paper. */
+  background:
+    repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--border) 30%, transparent),
+      color-mix(in srgb, var(--border) 30%, transparent) 1px,
+      transparent 1px,
+      transparent 10px
+    ),
+    var(--panel-muted, #2a2a2a);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* The rendered print sheet — looks like a sheet of paper with a drop shadow. */
+.file-preview-sheet {
+  max-width: 100%;
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  border-radius: 3px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  transition: filter 0.2s ease;
+}
+
+.file-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.file-preview-placeholder {
+  font-size: 12px;
+  color: var(--muted, #888);
+  font-style: italic;
+}
+
+.file-preview-hint {
+  font-size: 11px;
+  color: var(--muted, #888);
+  text-align: center;
+}
+
+.submit-panel-converting {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted, #888);
+  font-style: italic;
+  text-align: center;
+}
+
+/* Fullscreen preview lightbox (opens in-tab when the preview image is tapped). */
+.preview-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(2px);
+}
+
+.preview-lightbox-img {
+  max-width: 100%;
+  max-height: 85vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+
+.preview-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.preview-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .review-error-card {
@@ -2649,50 +2887,60 @@ body {
 }
 
 .otp-title {
-  margin: 0;
-  font-size: 12px;
+  margin: 2px 0 0;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  letter-spacing: 0.16em;
+  font-weight: 800;
+  color: color-mix(in srgb, var(--brand) 65%, var(--text-muted));
 }
 
 .otp-digits {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   align-items: center;
   width: 100%;
 }
 
 .otp-digit {
-  min-width: 52px;
-  height: 62px;
+  min-width: 54px;
+  height: 64px;
   padding: 0 8px;
   display: grid;
   place-items: center;
   border-radius: 14px;
-  border: 2px solid var(--brand);
-  background: color-mix(in srgb, var(--brand) 12%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 16%, #ffffff),
+    color-mix(in srgb, var(--brand) 6%, #ffffff)
+  );
   font-family: "IBM Plex Mono", "Menlo", monospace;
-  font-size: 34px;
+  font-size: 32px;
   font-weight: 800;
   line-height: 1;
   color: var(--brand-strong, var(--brand));
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--brand) 20%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 55%, transparent),
+    0 4px 12px color-mix(in srgb, var(--brand) 14%, transparent);
 }
 
 .otp-helper {
   display: block;
-  margin-top: 8px;
+  width: 100%;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 90%, transparent);
   font-size: 12px;
   color: var(--text-muted);
 }
 
 .modal-summary {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
@@ -3139,9 +3387,9 @@ body {
   }
 
   .otp-digit {
-    min-width: 56px;
-    height: 62px;
-    font-size: 34px;
+    min-width: 54px;
+    height: 64px;
+    font-size: 32px;
   }
 }
 
@@ -3154,9 +3402,16 @@ body {
 }
 
 [data-theme="dark"] .otp-digit {
-  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
-  background: color-mix(in srgb, var(--brand) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--brand) 38%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 15%, var(--panel)),
+    color-mix(in srgb, var(--brand) 4%, #000000)
+  );
   color: var(--brand);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent),
+    0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 [data-theme="dark"] .highlight-text {
@@ -3562,11 +3817,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--brand) 16%, var(--panel));
-  border: 1.5px solid color-mix(in srgb, var(--brand) 28%, transparent);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--brand) 24%, var(--panel)),
+    color-mix(in srgb, var(--brand) 10%, var(--panel))
+  );
+  border: 1px solid color-mix(in srgb, var(--brand) 32%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
   flex-shrink: 0;
 }
 
@@ -3582,6 +3842,7 @@ body {
 .shop-row-info {
   flex: 1;
   min-width: 0;
+  text-align: left;
 }
 
 .shop-row-name {

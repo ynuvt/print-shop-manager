@@ -45,6 +45,7 @@ import {
 } from "../printing/costCalculator";
 import { defaultPrintOptions } from "../printing/types";
 import type { PrintFileState } from "../printing/types";
+import { renderSheetPreview } from "../printing/pdfPreview";
 import { getSocket } from "../services/getSocket";
 import { isJobToastSuppressed } from "../services/suppressJobToast";
 import type { ThemeMode } from "../App";
@@ -116,8 +117,73 @@ const FileCard = memo(function FileCard({
 }) {
   const cost = calculateFileCost(pf.detectedPages, pf.options, pricing);
 
+  const status = pf.conversionStatus ?? "READY";
+  const isPending = status === "PENDING";
+  const isFailed = status === "FAILED";
+  const isReady = status === "READY";
+  const [showPendingHint, setShowPendingHint] = useState(false);
+  const [activeTab, setActiveTab] = useState<"options" | "preview">("options");
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [sheet, setSheet] = useState<{
+    dataUrl: string | null;
+    pagesShown: number;
+    totalSheets: number;
+  }>({ dataUrl: null, pagesShown: 0, totalSheets: 0 });
+  const touchStartX = useRef<number | null>(null);
+
+  // Render the actual first printed SHEET on white, matching ZopyPrinter's
+  // N-up layout, orientation, scale and (custom) page range. Recomputes when
+  // any of those options change. Only when the card is open and file is ready.
+  const optColorMode = pf.options.colorMode;
+  const optOrientation = pf.options.orientation;
+  const optScaleMode = pf.options.scaleMode;
+  const optPageRange = pf.options.pageRange;
+  const optCustomRange = pf.options.customRange ?? "";
+  const optPagesPerSheet = pf.options.pagesPerSheet || 1;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (expanded && isReady && pf.url) {
+      void renderSheetPreview(pf.url, {
+        pagesPerSheet: optPagesPerSheet,
+        orientation: optOrientation,
+        scaleMode: optScaleMode,
+        pageRange: optPageRange,
+        customRange: optCustomRange,
+      }).then((res) => {
+        if (!cancelled) setSheet(res);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    expanded,
+    isReady,
+    pf.url,
+    optPagesPerSheet,
+    optOrientation,
+    optScaleMode,
+    optPageRange,
+    optCustomRange,
+  ]);
+
+  const hasPreview = isReady && !!sheet.dataUrl;
+  // Orientation/scale/N-up are baked into the rendered sheet; only color mode
+  // is applied as a live CSS filter (instant, no re-render).
+  const previewFilter = optColorMode === "BW" ? "grayscale(1)" : "none";
+  const previewHint = [
+    optPagesPerSheet > 1 ? `${optPagesPerSheet}-up` : null,
+    optPageRange === "CUSTOM" ? `pages ${optCustomRange || "—"}` : "all pages",
+    sheet.totalSheets > 0
+      ? `sheet 1 of ${sheet.totalSheets}`
+      : `${pf.detectedPages} pages`,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+
   return (
-    <motion.article 
+    <motion.article
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -141,7 +207,11 @@ const FileCard = memo(function FileCard({
           <div>
             <p>{pf.name}</p>
             <span>
-              {pf.detectedPages} pages • Rs {cost}
+              {isPending
+                ? "Processing…"
+                : isFailed
+                  ? "Couldn't process — resend on WhatsApp"
+                  : `${pf.detectedPages} pages • Rs ${cost}`}
             </span>
           </div>
         </button>
@@ -154,10 +224,23 @@ const FileCard = memo(function FileCard({
             <SlidersHorizontal size={12} />
             Edit details
           </button>
-          {pf.url && (
+          {isReady && pf.url ? (
             <a href={pf.url} target="_blank" rel="noreferrer">
               View File
             </a>
+          ) : (
+            !isFailed && (
+              <button
+                type="button"
+                className="file-view-pending"
+                onClick={() => {
+                  setShowPendingHint(true);
+                  window.setTimeout(() => setShowPendingHint(false), 3000);
+                }}
+              >
+                View File
+              </button>
+            )
           )}
           <button
             type="button"
@@ -169,6 +252,12 @@ const FileCard = memo(function FileCard({
           </button>
         </div>
       </div>
+
+      {showPendingHint && (
+        <p className="file-converting-note">
+          This file is still being converted. Please wait a moment…
+        </p>
+      )}
 
       <AnimatePresence initial={false}>
         {expanded && (
@@ -185,6 +274,52 @@ const FileCard = memo(function FileCard({
                 : "upload-file-body"
             }
           >
+            <div className="file-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "options"}
+                className={`file-tab ${activeTab === "options" ? "active" : ""}`}
+                onClick={() => setActiveTab("options")}
+              >
+                Options
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "preview"}
+                className={`file-tab ${activeTab === "preview" ? "active" : ""}`}
+                onClick={() => setActiveTab("preview")}
+              >
+                Preview
+              </button>
+            </div>
+
+            <div
+              className="file-tab-viewport"
+              onTouchStart={(e) => {
+                touchStartX.current = e.touches[0]?.clientX ?? null;
+              }}
+              onTouchEnd={(e) => {
+                const start = touchStartX.current;
+                touchStartX.current = null;
+                if (start == null) return;
+                const dx = (e.changedTouches[0]?.clientX ?? start) - start;
+                // Swipe left → preview, swipe right → options.
+                if (dx < -40) setActiveTab("preview");
+                else if (dx > 40) setActiveTab("options");
+              }}
+            >
+              <div
+                className="file-tab-track"
+                style={{
+                  transform:
+                    activeTab === "preview"
+                      ? "translateX(-50%)"
+                      : "translateX(0)",
+                }}
+              >
+                <div className="file-tab-panel file-tab-options">
             <div>
             <p className="field-label">Color Mode</p>
             <ToggleGroup
@@ -295,6 +430,67 @@ const FileCard = memo(function FileCard({
               </button>
             </div>
           </div>
+                </div>
+
+                <div className="file-tab-panel file-tab-preview">
+                  <button
+                    type="button"
+                    className="file-preview-stage"
+                    onClick={() => {
+                      if (hasPreview) setLightboxOpen(true);
+                    }}
+                    aria-label={hasPreview ? "Enlarge preview" : "Preview"}
+                  >
+                    {hasPreview ? (
+                      <img
+                        src={sheet.dataUrl!}
+                        alt={`Print preview of ${pf.name}`}
+                        className="file-preview-sheet"
+                        style={{ filter: previewFilter }}
+                      />
+                    ) : (
+                      <div className="file-preview-placeholder">
+                        {isFailed
+                          ? "Couldn't prepare a preview"
+                          : isPending
+                            ? "Converting file…"
+                            : "Preparing preview…"}
+                      </div>
+                    )}
+                  </button>
+                  {hasPreview && (
+                    <span className="file-preview-hint">
+                      {previewHint} • tap to enlarge
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {lightboxOpen && hasPreview && (
+              <div
+                className="preview-lightbox"
+                onClick={() => setLightboxOpen(false)}
+                role="dialog"
+                aria-modal="true"
+              >
+                <button
+                  type="button"
+                  className="preview-lightbox-close"
+                  aria-label="Close preview"
+                  onClick={() => setLightboxOpen(false)}
+                >
+                  <X size={20} />
+                </button>
+                <img
+                  src={sheet.dataUrl!}
+                  alt={`Print preview of ${pf.name}`}
+                  className="preview-lightbox-img"
+                  style={{ filter: previewFilter }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+            )}
         </motion.div>
         )}
       </AnimatePresence>
@@ -586,6 +782,8 @@ export default function HomePage({
             return {
               id: f.id,
               url: f.url,
+              previewUrl: f.previewUrl ?? null,
+              conversionStatus: f.conversionStatus ?? "READY",
               name: f.name,
               detectedPages: f.pages,
               options,
@@ -610,6 +808,27 @@ export default function HomePage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  // Keep a stable ref to fetchWebDraft so the converting-poll interval below
+  // doesn't tear down/recreate on every refetch.
+  const fetchWebDraftRef = useRef(fetchWebDraft);
+  useEffect(() => {
+    fetchWebDraftRef.current = fetchWebDraft;
+  }, [fetchWebDraft]);
+
+  // While any file is still converting in the background, poll the draft so the
+  // UI flips PENDING → READY on its own even if the socket event is missed
+  // (socket drop, multi-instance backend, etc.). Stops once none are pending.
+  const hasConvertingFiles = printFiles.some(
+    (f) => (f.conversionStatus ?? "READY") === "PENDING",
+  );
+  useEffect(() => {
+    if (!userId || !hasConvertingFiles) return;
+    const interval = window.setInterval(() => {
+      void fetchWebDraftRef.current();
+    }, 2500);
+    return () => window.clearInterval(interval);
+  }, [userId, hasConvertingFiles]);
 
   const refreshShops = useCallback(() => {
     if (!userId) return;
@@ -906,6 +1125,8 @@ export default function HomePage({
             return {
               id: f.id,
               url: f.url,
+              previewUrl: f.previewUrl ?? null,
+              conversionStatus: f.conversionStatus ?? "READY",
               name: f.name,
               detectedPages: f.pages,
               options,
@@ -1144,11 +1365,18 @@ export default function HomePage({
       (f.options.pageRange === "CUSTOM" && !f.options.customRange?.trim()),
   );
 
+  // Files still converting in the background block submission so the cost split
+  // stays correct (pending files have unknown pages/cost until READY).
+  const convertingCount = printFiles.filter(
+    (f) => (f.conversionStatus ?? "READY") === "PENDING",
+  ).length;
+
   const canSubmit =
     !!userId &&
     printFiles.length > 0 &&
     !hasErrors &&
     !isSubmitting &&
+    convertingCount === 0 &&
     totalBytes <= MAX_JOB_UPLOAD_BYTES;
   const [confirmModalOpenedPicker, setConfirmModalOpenedPicker] = useState(false);
   const handleShopSelected = (shop: PrintShopInfo) => {
@@ -1751,6 +1979,14 @@ export default function HomePage({
                       <span className="shop-inline-change">Change</span>
                     </button>
 
+                    {convertingCount > 0 && (
+                      <p className="submit-panel-converting">
+                        Converting {convertingCount} file
+                        {convertingCount !== 1 ? "s" : ""}… you can review once
+                        they're ready.
+                      </p>
+                    )}
+
                     <div className="submit-panel-action">
                       <button
                         type="button"
@@ -1765,7 +2001,9 @@ export default function HomePage({
                       >
                         {isSubmitting
                           ? "Uploading and Submitting..."
-                          : "Review Order"}
+                          : convertingCount > 0
+                            ? `Converting ${convertingCount} file${convertingCount !== 1 ? "s" : ""}…`
+                            : "Review Order"}
                       </button>
                     </div>
                   </div>

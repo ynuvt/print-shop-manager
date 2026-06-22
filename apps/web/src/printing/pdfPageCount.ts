@@ -6,9 +6,27 @@
  * Returns 1 as a safe fallback if detection fails.
  */
 
+interface PdfViewport {
+  width: number;
+  height: number;
+}
+
+interface PdfPage {
+  getViewport(opts: { scale: number }): PdfViewport;
+  render(opts: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: PdfViewport;
+  }): { promise: Promise<void> };
+}
+
+interface PdfDocument {
+  numPages: number;
+  getPage(pageNumber: number): Promise<PdfPage>;
+}
+
 interface PdfJsLib {
   getDocument(src: { data: ArrayBuffer }): {
-    promise: Promise<{ numPages: number }>;
+    promise: Promise<PdfDocument>;
   };
   GlobalWorkerOptions: { workerSrc: string };
 }
@@ -43,7 +61,7 @@ function injectPdfJsScript(): Promise<void> {
 // Shared promise so concurrent calls don't inject the script multiple times.
 let pdfJsReady: Promise<void> | null = null;
 
-async function ensurePdfJs(): Promise<PdfJsLib> {
+export async function ensurePdfJs(): Promise<PdfJsLib> {
   if (!window.pdfjsLib) {
     pdfJsReady ??= injectPdfJsScript();
     await pdfJsReady;

@@ -22,7 +22,10 @@ import {
 } from "../utils/r2Storage.js";
 import { convertToPdfFromBuffer } from "../utils/convertToPdf.js";
 import { generateTokenForUser, generateUserToken } from "../utils/token.js";
-import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
+import {
+  PrintJobStatus,
+  FileConversionStatus,
+} from "../../../../packages/db/dist/generated/prisma/enums.js";
 import socket from "../config/socket.js";
 import {
   initWaTrackingCache,
@@ -240,14 +243,18 @@ async function flushFileBatch(phoneNumber: string): Promise<void> {
 
   // 3) Fetch ALL files for this job from DB (ensures we see files from ALL cores)
   let totalFiles = 0;
-  let fileList: { name: string; pages: number }[] = [];
-  
+  let fileList: {
+    name: string;
+    pages: number;
+    conversionStatus?: FileConversionStatus;
+  }[] = [];
+
   if (batch.jobId) {
     try {
       const dbFiles = await prisma.file.findMany({
         where: { printJobId: batch.jobId },
         orderBy: { createdAt: "asc" },
-        select: { name: true, pages: true },
+        select: { name: true, pages: true, conversionStatus: true },
       });
       totalFiles = dbFiles.length;
       fileList = dbFiles;
@@ -267,7 +274,17 @@ async function flushFileBatch(phoneNumber: string): Promise<void> {
   const MAX_LISTED = 15;
   const listedFiles = fileList.slice(0, MAX_LISTED);
   const fileLines = listedFiles.map((f, i) => {
-    return `${i + 1}. ${friendlyFileName(f.name)} \u2022 ${f.pages} pg`;
+    // Pages aren't known until background conversion finishes; show a
+    // "processing" hint instead of "0 pg" for files still converting.
+    let detail: string;
+    if (f.conversionStatus === FileConversionStatus.FAILED) {
+      detail = "couldn't process";
+    } else if (f.pages > 0) {
+      detail = `${f.pages} pg`;
+    } else {
+      detail = "processing\u2026";
+    }
+    return `${i + 1}. ${friendlyFileName(f.name)} \u2022 ${detail}`;
   });
   if (totalFiles > MAX_LISTED) {
     fileLines.push(`... and ${totalFiles - MAX_LISTED} more`);
@@ -347,6 +364,232 @@ function queueFileConfirmation(args: {
       jobId: args.jobId,
       userId: args.userId,
     });
+  }
+}
+
+// ── Async conversion helpers ─────────────────────────────────────────────────
+// Files are acknowledged instantly with a PENDING row, then converted, uploaded
+// and page-counted in the background. The row flips to READY (or FAILED) once
+// done, and connected web clients refetch via the "job-file-added" socket event.
+
+const DEFAULT_PRINT_OPTIONS: PrintOptions = {
+  paperSize: "A4",
+  colorMode: "BW",
+  orientation: "PORTRAIT",
+  scaleMode: "FIT",
+  pageRange: "ALL",
+  customRange: "",
+  duplex: "ONE",
+  copies: 1,
+  pagesPerSheet: 1,
+};
+
+// Notify both the job room (collaborators) and the user room (their own web app).
+function emitJobFileEvent(jobId: string, userId: string | null): void {
+  socket.emit("job-file-added", jobId);
+  if (userId) {
+    socket.emit("job-file-added", userId);
+  }
+}
+
+// Recompute job totals from the file rows currently in the DB. Pending files
+// have pages/cost 0, so totals fill in as files become READY.
+async function recomputeJobTotalsFromDb(jobId: string): Promise<void> {
+  const job = await prisma.printJob.findUnique({
+    where: { id: jobId },
+    select: { id: true, files: { select: { pages: true, fileCost: true } } },
+  });
+  if (!job) return;
+  const totalPages = job.files.reduce((sum, f) => sum + (f.pages ?? 0), 0);
+  const totalCost = job.files.reduce((sum, f) => sum + (f.fileCost ?? 0), 0);
+  await prisma.printJob.update({
+    where: { id: jobId },
+    data: {
+      totalPages,
+      totalCost,
+      estimatedTime: calculateEstimatedTime(totalPages),
+    },
+  });
+}
+
+/**
+ * Find the unified DRAFT job for a WhatsApp user (userId-based, falling back to
+ * phone number), creating one if needed. Enforces the 30-file limit.
+ */
+async function findOrCreateDraftForWaUser(waUser: {
+  phoneNumber: string;
+  userId: string | null;
+}): Promise<
+  | { ok: true; jobId: string }
+  | { ok: false; atLimit: true; jobId: string; fileCount: number }
+> {
+  const draftSelect = {
+    id: true,
+    userId: true,
+    _count: { select: { files: true } },
+  } as const;
+
+  let existingJob:
+    | { id: string; userId: string | null; _count: { files: number } }
+    | null = null;
+
+  if (waUser.userId) {
+    existingJob = await prisma.printJob.findFirst({
+      where: {
+        userId: waUser.userId,
+        status: PrintJobStatus.DRAFT,
+        expired: false,
+      },
+      select: draftSelect,
+    });
+  }
+
+  if (!existingJob) {
+    existingJob = await prisma.printJob.findFirst({
+      where: {
+        userMetadata: { phoneNumber: waUser.phoneNumber },
+        status: PrintJobStatus.DRAFT,
+        expired: false,
+      },
+      select: draftSelect,
+    });
+  }
+
+  if (existingJob && existingJob._count.files >= 30) {
+    return {
+      ok: false,
+      atLimit: true,
+      jobId: existingJob.id,
+      fileCount: existingJob._count.files,
+    };
+  }
+
+  if (!existingJob) {
+    const createData: any = {
+      totalCost: 0,
+      totalPages: 0,
+      estimatedTime: 0,
+      source: "WHATSAPP",
+      status: PrintJobStatus.DRAFT,
+      userMetadata: { connect: { phoneNumber: waUser.phoneNumber } },
+    };
+    if (waUser.userId) {
+      createData.user = { connect: { id: waUser.userId } };
+    }
+    const newJob = await prisma.printJob.create({ data: createData });
+    return { ok: true, jobId: newJob.id };
+  }
+
+  // Attach userId to a phone-only draft once the user syncs.
+  if (waUser.userId && !existingJob.userId) {
+    await prisma.printJob.update({
+      where: { id: existingJob.id },
+      data: { userId: waUser.userId },
+    });
+  }
+
+  return { ok: true, jobId: existingJob.id };
+}
+
+/**
+ * Background phase: download the media, convert to PDF if needed, count pages,
+ * upload to R2, flip the row to READY and recompute job totals — then kick off
+ * preview generation. On any failure the row is marked FAILED and the user is
+ * told to resend. Never awaited by the webhook handler.
+ */
+async function finalizeFileInBackground(args: {
+  fileId: string;
+  jobId: string;
+  userId: string | null;
+  phoneNumber: string;
+  phoneNumberId: string | undefined;
+  rawFileName: string;
+  isPdf: boolean;
+  isImage: boolean;
+  download: () => Promise<Buffer>;
+}): Promise<void> {
+  try {
+    const buffer = await args.download();
+
+    let pdfBuffer: Buffer = buffer;
+    let pdfFileName = args.rawFileName.toLowerCase().endsWith(".pdf")
+      ? args.rawFileName
+      : `${args.rawFileName}.pdf`;
+    let pages: number;
+    let previewSource: Buffer = buffer;
+    let previewKind: "image" | "pdf" = "pdf";
+
+    if (args.isImage) {
+      const converted = await convertToPdfFromBuffer(buffer, args.rawFileName);
+      pdfBuffer = converted.pdfBuffer;
+      pdfFileName = converted.pdfFileName;
+      pages = 1; // images always produce exactly one page
+      previewSource = buffer; // preview from the original image (fast, no LO)
+      previewKind = "image";
+    } else if (!args.isPdf) {
+      const converted = await convertToPdfFromBuffer(buffer, args.rawFileName);
+      pdfBuffer = converted.pdfBuffer;
+      pdfFileName = converted.pdfFileName;
+      pages = await getPdfPageCountFromBuffer(pdfBuffer);
+      previewSource = pdfBuffer;
+      previewKind = "pdf";
+    } else {
+      pages = await getPdfPageCountFromBuffer(pdfBuffer);
+      previewSource = pdfBuffer;
+      previewKind = "pdf";
+    }
+
+    const key = buildR2ObjectKey(args.phoneNumber || "whatsapp", pdfFileName);
+    const uploaded = await uploadBufferToR2({
+      key,
+      buffer: pdfBuffer,
+      contentType: "application/pdf",
+    });
+
+    const cost = calculateFileCost(pages, DEFAULT_PRINT_OPTIONS);
+
+    // updateMany (not update) so a file removed mid-conversion just updates 0
+    // rows instead of throwing P2025.
+    const updated = await prisma.file.updateMany({
+      where: { id: args.fileId },
+      data: {
+        url: uploaded.url,
+        name: pdfFileName,
+        pages,
+        fileCost: cost,
+        conversionStatus: FileConversionStatus.READY,
+      },
+    });
+
+    if (updated.count === 0) {
+      // The file was removed while converting — clean up the uploaded object.
+      await deleteObjectFromR2ByUrl(uploaded.url).catch(() => {});
+      return;
+    }
+
+    await recomputeJobTotalsFromDb(args.jobId);
+    emitJobFileEvent(args.jobId, args.userId);
+
+    // Previews are rendered on demand client-side from the PDF (pdf.js); no
+    // server-side image is generated or stored.
+  } catch (error) {
+    console.error("[finalize] conversion failed:", error);
+    await prisma.file
+      .updateMany({
+        where: { id: args.fileId },
+        data: { conversionStatus: FileConversionStatus.FAILED },
+      })
+      .catch(() => {});
+    emitJobFileEvent(args.jobId, args.userId);
+    if (args.phoneNumberId && args.phoneNumber) {
+      sendWhatsAppTextMessage({
+        to: args.phoneNumber,
+        phoneNumberId: args.phoneNumberId,
+        message: `${waBold(`Couldn't process ${friendlyFileName(args.rawFileName)}`)}\nPlease try sending the file again.`,
+      }).catch((err) =>
+        console.error("[finalize-error-notify] send error:", err),
+      );
+    }
   }
 }
 
@@ -533,114 +776,10 @@ export const handleWhatsAppWebhook = async (req: Request, res: Response) => {
                   }).catch(() => { /* non-critical */ });
                 }
 
-                const response = await fetch(incomingMessage.document.url, {
-                  headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                  },
-                });
-
-                if (!response.ok) {
-                  console.log(
-                    "Failed to download WhatsApp document:",
-                    response.status,
-                  );
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    await sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      message: `${waBold("Upload failed")}
-Couldn't download ${waBold(rawFileName)}.
-Please try sending the file again.`,
-                      phoneNumberId,
-                    });
-                  }
-                  continue;
-                }
-
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-
-                // NEW: Handle Word files
-                /*
-                if (isWordFile) {
-                  console.log(`Converting Word file: ${rawFileName}`);
-                  try {
-                    const converted = await convertToPdfFromBuffer(
-                      buffer,
-                      rawFileName,
-                    );
-                    // Use the same name as input file but with .pdf extension.
-                    // WhatsApp sometimes repeats extensions like: file.docx.doc.docx
-                    let baseName = (rawFileName || "document").trim();
-                    if (!baseName) baseName = "document";
-                  while (/\.(docx|doc)$/i.test(baseName)) {
-                      baseName = baseName.replace(/\.(docx|doc)$/i, "");
-                    }
-                    if (!baseName.trim()) baseName = "document";
-                    const pdfFileName = `${baseName}.pdf`;
-
-                    if (phoneNumberId && userData.displayPhoneNumber) {
-                      await sendWhatsAppPdfDocument({
-                        to: userData.displayPhoneNumber,
-                        phoneNumberId,
-                        buffer: converted.pdfBuffer,
-                        fileName: pdfFileName,
-                      });
-                      console.log(`Sent converted PDF to user: ${pdfFileName}`);
-                    }
-                  } catch (conversionError) {
-                    console.error("Word to PDF conversion failed:", conversionError);
-                    if (phoneNumberId && userData.displayPhoneNumber) {
-                      await sendWhatsAppTextMessage({
-                        to: userData.displayPhoneNumber,
-                        message: `${waBold("Conversion failed")}
-Couldn't convert ${waBold(rawFileName)} to PDF.
-Please try again or send a different file.`,
-                        phoneNumberId,
-                      });
-                    }
-                  }
-                  continue;
-                }
-                */
-
-                let pdfBuffer: Buffer = buffer;
-                let pdfFileName = rawFileName.toLowerCase().endsWith(".pdf")
+                // Display name for the (still-converting) file row.
+                const pdfFileName = rawFileName.toLowerCase().endsWith(".pdf")
                   ? rawFileName
                   : `${rawFileName}.pdf`;
-
-                if (!isPdf) {
-                  const converted = await convertToPdfFromBuffer(
-                    buffer,
-                    rawFileName,
-                  );
-                  pdfBuffer = converted.pdfBuffer;
-                  pdfFileName = converted.pdfFileName;
-                }
-
-                const pages = await getPdfPageCountFromBuffer(pdfBuffer);
-
-                const key = buildR2ObjectKey(
-                  userData.displayPhoneNumber || "whatsapp",
-                  pdfFileName,
-                );
-                const uploaded = await uploadBufferToR2({
-                  key,
-                  buffer: pdfBuffer,
-                  contentType: "application/pdf",
-                });
-
-                const defaultOptions: PrintOptions = {
-                  paperSize: "A4",
-                  colorMode: "BW",
-                  orientation: "PORTRAIT",
-                  scaleMode: "FIT",
-                  pageRange: "ALL",
-                  customRange: "",
-                  duplex: "ONE",
-                  copies: 1,
-                  pagesPerSheet: 1,
-                };
-                const cost = calculateFileCost(pages, defaultOptions);
 
                 // Look up the WhatsApp user to check if they're synced (have a userId)
                 const waUser = await prisma.whatsAppUser.findUnique({
@@ -652,68 +791,10 @@ Please try again or send a different file.`,
                   throw new Error("WhatsApp user record not found.");
                 }
 
-                // Find existing draft: prefer userId-based lookup (unified), fall back to userMetadataId
-                let existingJob: {
-                  id: string;
-                  totalCost: number;
-                  totalPages: number;
-                  userId: string | null;
-                  files: { createdAt: Date }[];
-                  _count?: { files: number };
-                } | null = null;
+                const draft = await findOrCreateDraftForWaUser(waUser);
 
-                if (waUser.userId) {
-                  existingJob = await prisma.printJob.findFirst({
-                    where: {
-                      userId: waUser.userId,
-                      status: PrintJobStatus.DRAFT,
-                      expired: false,
-                    },
-                    select: {
-                      id: true,
-                      totalCost: true,
-                      totalPages: true,
-                      userId: true,
-                      _count: { select: { files: true } },
-                      files: {
-                        orderBy: { createdAt: "desc" },
-                        take: 1,
-                        select: { createdAt: true },
-                      },
-                    },
-                  });
-                }
-
-                if (!existingJob) {
-                  existingJob = await prisma.printJob.findFirst({
-                    where: {
-                      userMetadata: {
-                        phoneNumber: userData.displayPhoneNumber,
-                      },
-                      status: PrintJobStatus.DRAFT,
-                      expired: false,
-                    },
-                    select: {
-                      id: true,
-                      totalCost: true,
-                      totalPages: true,
-                      userId: true,
-                      _count: { select: { files: true } },
-                      files: {
-                        orderBy: { createdAt: "desc" },
-                        take: 1,
-                        select: { createdAt: true },
-                      },
-                    },
-                  });
-                }
-
-                if (
-                  existingJob &&
-                  existingJob._count &&
-                  existingJob._count.files >= 30
-                ) {
-                  // Only send the limit message once per 30 seconds to avoid rate limits
+                if (!draft.ok) {
+                  // Limit reached — notify at most once per 30s to avoid rate limits.
                   const lastSent = limitReachedSent.get(userData.displayPhoneNumber || "") ?? 0;
                   const now = Date.now();
                   if (phoneNumberId && userData.displayPhoneNumber && now - lastSent > 30000) {
@@ -723,7 +804,7 @@ Please try again or send a different file.`,
                       phoneNumberId,
                       body: [
                         `${waBold("Limit reached")}`,
-                        `You already have ${existingJob._count.files} files in your draft (max 30).`,
+                        `You already have ${draft.fileCount} files in your draft (max 30).`,
                         "",
                         `_Tap Edit to set print options & submit, or Clear to start a new one._`,
                       ].join("\n"),
@@ -738,68 +819,25 @@ Please try again or send a different file.`,
                     socket.emit(
                       "job-status-updated",
                       waUser.userId,
-                      existingJob.id,
+                      draft.jobId,
                       "Limit reached: Maximum 30 files allowed per job.",
                     );
                   }
                   continue;
                 }
 
-                let printJobId: string;
+                const printJobId = draft.jobId;
 
-                if (!existingJob) {
-                  // Create a new unified draft
-                  const createData: any = {
-                    totalCost: cost,
-                    totalPages: pages,
-                    estimatedTime: 0,
-                    source: "WHATSAPP",
-                    status: PrintJobStatus.DRAFT,
-                    userMetadata: {
-                      connect: { phoneNumber: waUser.phoneNumber },
-                    },
-                  };
-                  if (waUser.userId) {
-                    createData.user = { connect: { id: waUser.userId } };
-                  }
-
-                  const newJob = await prisma.printJob.create({
-                    data: createData,
-                  });
-                  printJobId = newJob.id;
-                } else {
-                  printJobId = existingJob.id;
-
-                  // If draft exists but doesn't have userId yet, attach it now
-                  if (waUser.userId && !existingJob.userId) {
-                    await prisma.printJob.update({
-                      where: { id: existingJob.id },
-                      data: { userId: waUser.userId },
-                    });
-                  }
-
-                  const nextTotalPages = (existingJob.totalPages ?? 0) + pages;
-                  const nextTotalCost = (existingJob.totalCost ?? 0) + cost;
-                  await prisma.printJob.update({
-                    where: {
-                      id: existingJob.id,
-                    },
-                    data: {
-                      totalPages: nextTotalPages,
-                      totalCost: nextTotalCost,
-                      estimatedTime: 0,
-                    },
-                  });
-                }
-
-                await prisma.file.create({
+                // ── Phase 1 (instant): create a PENDING row and acknowledge ──
+                const createdFile = await prisma.file.create({
                   data: {
                     name: pdfFileName,
                     mimeType: "application/pdf",
                     messageId: incomingMessage.id,
-                    pages,
-                    url: uploaded.url,
-                    printJobId: printJobId,
+                    pages: 0,
+                    url: "",
+                    conversionStatus: FileConversionStatus.PENDING,
+                    printJobId,
                     uploadedByPhoneNumber: userData.displayPhoneNumber || null,
                     uploadedByDisplayName:
                       userData.displayName ||
@@ -822,12 +860,37 @@ Please try again or send a different file.`,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     fileName: pdfFileName,
-                    pages,
+                    pages: 0,
                     isSynced: !!waUser.userId,
                     jobId: printJobId,
                     userId: waUser.userId ?? null,
                   });
                 }
+                emitJobFileEvent(printJobId, waUser.userId ?? null);
+
+                // ── Phase 2 (background): download, convert, upload, count ──
+                const documentUrl = incomingMessage.document!.url;
+                void finalizeFileInBackground({
+                  fileId: createdFile.id,
+                  jobId: printJobId,
+                  userId: waUser.userId ?? null,
+                  phoneNumber: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  rawFileName,
+                  isPdf,
+                  isImage: false,
+                  download: async () => {
+                    const response = await fetch(documentUrl, {
+                      headers: { Authorization: `Bearer ${accessToken}` },
+                    });
+                    if (!response.ok) {
+                      throw new Error(
+                        `Failed to download WhatsApp document: ${response.status}`,
+                      );
+                    }
+                    return Buffer.from(await response.arrayBuffer());
+                  },
+                });
               } catch (error) {
                 console.log("Failed to process document:", error);
                 if (phoneNumberId && userData.displayPhoneNumber) {
@@ -895,50 +958,28 @@ Please try again.`,
               }
 
               try {
-                // Step 1: Get the media URL from the image ID
-                const mediaUrlRes = await fetch(
-                  `https://graph.facebook.com/v21.0/${imageData.id}`,
-                  { headers: { Authorization: `Bearer ${accessToken}` } },
-                );
-                if (!mediaUrlRes.ok) {
-                  console.log(
-                    "Failed to get media URL for image:",
-                    mediaUrlRes.status,
-                  );
-                  continue;
-                }
-                const mediaUrlData = (await mediaUrlRes.json()) as {
-                  url?: string;
-                };
-                const imageUrl = mediaUrlData.url;
-                if (!imageUrl) {
-                  console.log("No URL in media response for image.");
-                  continue;
-                }
+                if (userData.displayPhoneNumber) {
+                  // Instant: update file-backed tracking cache (no DB round-trip)
+                  trackFileProcessingStarted(userData.displayPhoneNumber);
 
-                // Step 2: Download the image binary
-                const imageResponse = await fetch(imageUrl, {
-                  headers: { Authorization: `Bearer ${accessToken}` },
-                });
-                if (!imageResponse.ok) {
-                  console.log(
-                    "Failed to download WhatsApp image:",
-                    imageResponse.status,
-                  );
-                  if (phoneNumberId && userData.displayPhoneNumber) {
-                    await sendWhatsAppTextMessage({
-                      to: userData.displayPhoneNumber,
-                      message: `${waBold("Upload failed")}\nCouldn't download the image. Please try sending it again.`,
-                      phoneNumberId,
-                    });
-                  }
-                  continue;
+                  // Fire-and-forget: persist to DB in background
+                  prisma.whatsAppUser.upsert({
+                    where: { phoneNumber: userData.displayPhoneNumber },
+                    create: {
+                      phoneNumber: userData.displayPhoneNumber,
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: new Date(),
+                    },
+                    update: {
+                      name: userData.displayName || null,
+                      lastFileStartedProcessingAt: new Date(),
+                    },
+                    select: { phoneNumber: true },
+                  }).catch(() => { /* non-critical */ });
                 }
 
-                const imageArrayBuffer = await imageResponse.arrayBuffer();
-                const imageBuffer = Buffer.from(imageArrayBuffer);
-
-                // Step 3: Generate a filename based on mime type
+                // Generate a filename based on mime type (the original file we
+                // download in the background uses this name to drive conversion).
                 const mimeToExt: Record<string, string> = {
                   "image/png": ".png",
                   "image/jpeg": ".jpg",
@@ -950,65 +991,7 @@ Please try again.`,
                 };
                 const ext = mimeToExt[imageData.mime_type || ""] || ".jpg";
                 const rawFileName = `whatsapp-image-${Date.now()}${ext}`;
-
-                // Step 4: Convert image to PDF
-                const converted = await convertToPdfFromBuffer(
-                  imageBuffer,
-                  rawFileName,
-                );
-                const pdfBuffer = converted.pdfBuffer;
-                const pdfFileName = converted.pdfFileName;
-
-                console.log(
-                  `Image converted to PDF: ${rawFileName} → ${pdfFileName}`,
-                );
-
-                // Images always produce exactly 1 page; skip pdf-parse
-                const pages = 1;
-
-                const startedProcessingAt = new Date();
-                if (userData.displayPhoneNumber) {
-                  // Instant: update file-backed tracking cache (no DB round-trip)
-                  trackFileProcessingStarted(userData.displayPhoneNumber);
-
-                  // Fire-and-forget: persist to DB in background
-                  prisma.whatsAppUser.upsert({
-                    where: { phoneNumber: userData.displayPhoneNumber },
-                    create: {
-                      phoneNumber: userData.displayPhoneNumber,
-                      name: userData.displayName || null,
-                      lastFileStartedProcessingAt: startedProcessingAt,
-                    },
-                    update: {
-                      name: userData.displayName || null,
-                      lastFileStartedProcessingAt: startedProcessingAt,
-                    },
-                    select: { phoneNumber: true },
-                  }).catch(() => { /* non-critical */ });
-                }
-
-                const key = buildR2ObjectKey(
-                  userData.displayPhoneNumber || "whatsapp",
-                  pdfFileName,
-                );
-                const uploaded = await uploadBufferToR2({
-                  key,
-                  buffer: pdfBuffer,
-                  contentType: "application/pdf",
-                });
-
-                const defaultOptions: PrintOptions = {
-                  paperSize: "A4",
-                  colorMode: "BW",
-                  orientation: "PORTRAIT",
-                  scaleMode: "FIT",
-                  pageRange: "ALL",
-                  customRange: "",
-                  duplex: "ONE",
-                  copies: 1,
-                  pagesPerSheet: 1,
-                };
-                const cost = calculateFileCost(pages, defaultOptions);
+                const pdfFileName = rawFileName.replace(/\.[^.]+$/, ".pdf");
 
                 const waUser = await prisma.whatsAppUser.findUnique({
                   where: { phoneNumber: userData.displayPhoneNumber },
@@ -1019,49 +1002,16 @@ Please try again.`,
                   throw new Error("WhatsApp user record not found.");
                 }
 
-                let existingJob: {
-                  id: string;
-                  totalCost: number;
-                  totalPages: number;
-                  userId: string | null;
-                  files: { createdAt: Date }[];
-                  _count?: { files: number };
-                } | null = null;
+                const draft = await findOrCreateDraftForWaUser(waUser);
 
-                if (waUser.userId) {
-                  existingJob = await prisma.printJob.findFirst({
-                    where: {
-                      userId: waUser.userId,
-                      status: PrintJobStatus.DRAFT,
-                      expired: false,
-                    },
-                    select: {
-                      id: true,
-                      totalCost: true,
-                      totalPages: true,
-                      userId: true,
-                      _count: { select: { files: true } },
-                      files: {
-                        orderBy: { createdAt: "desc" },
-                        take: 1,
-                        select: { createdAt: true },
-                      },
-                    },
-                  });
-                }
-
-                if (
-                  existingJob &&
-                  existingJob._count &&
-                  existingJob._count.files >= 30
-                ) {
+                if (!draft.ok) {
                   if (phoneNumberId && userData.displayPhoneNumber) {
                     await sendWhatsAppButtonMessage({
                       to: userData.displayPhoneNumber,
                       phoneNumberId,
                       body: [
                         `${waBold("Limit reached")}`,
-                        `You already have ${existingJob._count.files} files in your draft (max 30).`,
+                        `You already have ${draft.fileCount} files in your draft (max 30).`,
                         "",
                         `_Tap Edit to set print options & submit, or Clear to start a new one._`,
                       ].join("\n"),
@@ -1075,83 +1025,81 @@ Please try again.`,
                   continue;
                 }
 
-                if (existingJob) {
-                  // Update existing draft totals
-                  await prisma.printJob.update({
-                    where: { id: existingJob.id },
-                    data: {
-                      totalCost: existingJob.totalCost + cost,
-                      totalPages: existingJob.totalPages + pages,
-                    },
-                  });
+                const printJobId = draft.jobId;
 
-                  // Create the file separately
-                  await prisma.file.create({
-                    data: {
-                      name: pdfFileName,
-                      url: uploaded.url,
-                      pages,
-                      fileCost: cost,
-                      printJobId: existingJob.id,
-                      uploadedByPhoneNumber:
-                        userData.displayPhoneNumber || null,
-                      uploadedByDisplayName:
-                        userData.displayName ||
-                        userData.displayPhoneNumber ||
-                        null,
-                      uploadedByUserId: waUser.userId ?? null,
-                      uploadedByRole: "OWNER",
-                      option: { create: defaultOptions },
-                    },
-                  });
-                } else if (waUser.userId) {
-                  // No verificationCode for drafts — OTP is generated on submission from the web.
-                  const newJob = await prisma.printJob.create({
-                    data: {
-                      userId: waUser.userId,
-                      totalCost: cost,
-                      totalPages: pages,
-                      estimatedTime: 1,
-                      source: "WHATSAPP",
-                      status: PrintJobStatus.DRAFT,
-                    },
-                  });
+                // ── Phase 1 (instant): create a PENDING row (images are 1 page) ──
+                const createdFile = await prisma.file.create({
+                  data: {
+                    name: pdfFileName,
+                    mimeType: "application/pdf",
+                    messageId: incomingMessage.id,
+                    pages: 1,
+                    url: "",
+                    conversionStatus: FileConversionStatus.PENDING,
+                    printJobId,
+                    uploadedByPhoneNumber: userData.displayPhoneNumber || null,
+                    uploadedByDisplayName:
+                      userData.displayName ||
+                      userData.displayPhoneNumber ||
+                      null,
+                    uploadedByUserId: waUser.userId ?? null,
+                    uploadedByRole: "OWNER",
+                    option: { create: { copies: 1, pagesPerSheet: 1 } },
+                  },
+                });
 
-                  await prisma.file.create({
-                    data: {
-                      name: pdfFileName,
-                      url: uploaded.url,
-                      pages,
-                      fileCost: cost,
-                      printJobId: newJob.id,
-                      uploadedByPhoneNumber:
-                        userData.displayPhoneNumber || null,
-                      uploadedByDisplayName:
-                        userData.displayName ||
-                        userData.displayPhoneNumber ||
-                        null,
-                      uploadedByUserId: waUser.userId ?? null,
-                      uploadedByRole: "OWNER",
-                      option: { create: defaultOptions },
-                    },
-                  });
-
-                  existingJob = { ...newJob, files: [], _count: { files: 0 } };
-                }
-
-                // Queue confirmation — batched with other files arriving within 3s
-                if (phoneNumberId && userData.displayPhoneNumber && existingJob) {
+                if (phoneNumberId && userData.displayPhoneNumber) {
                   queueFileConfirmation({
                     phoneNumber: userData.displayPhoneNumber,
                     to: userData.displayPhoneNumber,
                     phoneNumberId,
                     fileName: pdfFileName,
-                    pages,
-                    isSynced: !!waUser?.userId,
-                    jobId: existingJob.id,
+                    pages: 1,
+                    isSynced: !!waUser.userId,
+                    jobId: printJobId,
                     userId: waUser.userId ?? null,
                   });
                 }
+                emitJobFileEvent(printJobId, waUser.userId ?? null);
+
+                // ── Phase 2 (background): fetch media URL, download, convert ──
+                const imageId = imageData.id;
+                void finalizeFileInBackground({
+                  fileId: createdFile.id,
+                  jobId: printJobId,
+                  userId: waUser.userId ?? null,
+                  phoneNumber: userData.displayPhoneNumber,
+                  phoneNumberId,
+                  rawFileName,
+                  isPdf: false,
+                  isImage: true,
+                  download: async () => {
+                    const mediaUrlRes = await fetch(
+                      `https://graph.facebook.com/v21.0/${imageId}`,
+                      { headers: { Authorization: `Bearer ${accessToken}` } },
+                    );
+                    if (!mediaUrlRes.ok) {
+                      throw new Error(
+                        `Failed to get media URL for image: ${mediaUrlRes.status}`,
+                      );
+                    }
+                    const mediaUrlData = (await mediaUrlRes.json()) as {
+                      url?: string;
+                    };
+                    if (!mediaUrlData.url) {
+                      throw new Error("No URL in media response for image.");
+                    }
+                    const imageResponse = await fetch(mediaUrlData.url, {
+                      headers: { Authorization: `Bearer ${accessToken}` },
+                    });
+                    if (!imageResponse.ok) {
+                      throw new Error(
+                        `Failed to download WhatsApp image: ${imageResponse.status}`,
+                      );
+                    }
+                    return Buffer.from(await imageResponse.arrayBuffer());
+                  },
+                });
               } catch (imageError) {
                 console.error("Image processing failed:", imageError);
                 if (phoneNumberId && userData.displayPhoneNumber) {

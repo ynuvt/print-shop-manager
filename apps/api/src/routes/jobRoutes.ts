@@ -26,7 +26,10 @@ import {
 import { verifyTurnstileToken } from "../utils/turnstileVerification.js";
 import { sendWhatsAppTextMessage, isWithinWhatsAppWindow } from "../modules/whatsappServices.js";
 import { shopListCache } from "../utils/cache.js";
-import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
+import {
+  PrintJobStatus,
+  FileConversionStatus,
+} from "../../../../packages/db/dist/generated/prisma/enums.js";
 import {
   ColorMode,
   PaperSize,
@@ -48,6 +51,175 @@ const upload = multer({
     fileSize: CREATE_WITH_FILES_MAX_UPLOAD_MB * 1024 * 1024,
   },
 });
+
+const WEB_OFFICE_EXTENSIONS = /\.(docx?|pptx?)$/i;
+const WEB_IMAGE_EXTENSIONS = /\.(png|jpe?g|bmp|tiff?|webp|gif)$/i;
+
+// Recompute a draft job's totals from its current file rows. Pending files
+// contribute 0 pages/cost, so totals fill in as files become READY.
+async function recomputeWebJobTotals(jobId: string): Promise<void> {
+  const allFiles = await prisma.file.findMany({
+    where: { printJobId: jobId },
+    include: { option: true },
+  });
+  const totalPages = allFiles.reduce((sum, f) => sum + (f.pages ?? 0), 0);
+  const totalCost = allFiles.reduce((sum, f) => {
+    const opt = f.option;
+    if (!opt) return sum + (f.fileCost ?? 0);
+    return (
+      sum +
+      calculateFileCost(f.pages, {
+        paperSize: "A4",
+        colorMode: opt.colorMode === "COLOR" ? "COLOR" : "BW",
+        orientation: opt.orientation === "LANDSCAPE" ? "LANDSCAPE" : "PORTRAIT",
+        scaleMode:
+          opt.scaleMode === "SHRINK"
+            ? "SHRINK"
+            : opt.scaleMode === "NOSCALE"
+              ? "NOSCALE"
+              : "FIT",
+        pageRange: opt.pageRange === "CUSTOM" ? "CUSTOM" : "ALL",
+        customRange: opt.customRange || "",
+        duplex: opt.duplex === "BOTH" ? "BOTH" : "ONE",
+        copies: opt.copies,
+        pagesPerSheet: opt.pagesPerSheet || 1,
+      })
+    );
+  }, 0);
+  await prisma.printJob.update({
+    where: { id: jobId },
+    data: {
+      totalPages,
+      totalCost,
+      estimatedTime: calculateEstimatedTime(totalPages),
+    },
+  });
+}
+
+/**
+ * Background phase for a web-uploaded draft file: download the original from
+ * R2, convert Office/image files to PDF (LibreOffice), count pages, upload the
+ * converted PDF, flip the row to READY, recompute totals and generate a
+ * preview. On failure the row is marked FAILED. Never awaited by the handler.
+ */
+async function finalizeWebDraftFile(args: {
+  fileId: string;
+  jobId: string;
+  userId: string;
+  originalUrl: string;
+  originalName: string;
+  isOffice: boolean;
+  isImage: boolean;
+  defaultOptions: {
+    paperSize: "A4";
+    colorMode: "BW" | "COLOR";
+    orientation: "PORTRAIT" | "LANDSCAPE";
+    scaleMode: "FIT" | "NOSCALE" | "SHRINK";
+    pageRange: "ALL" | "CUSTOM";
+    customRange?: string;
+    duplex: "ONE" | "BOTH";
+    copies: number;
+    pagesPerSheet?: number;
+  };
+}): Promise<void> {
+  try {
+    const response = await fetch(args.originalUrl);
+    if (!response.ok) {
+      throw new Error(
+        `Unable to fetch ${args.originalName} from storage (${response.status}).`,
+      );
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    if (buffer.byteLength > CREATE_WITH_URLS_MAX_TOTAL_BYTES) {
+      throw new Error(
+        `File too large (max ${CREATE_WITH_URLS_MAX_TOTAL_MB} MB).`,
+      );
+    }
+
+    let finalUrl = args.originalUrl;
+    let finalName = args.originalName;
+    let pages: number;
+    let previewSource: Buffer = buffer;
+    let previewKind: "image" | "pdf" = "pdf";
+
+    if (args.isOffice || args.isImage) {
+      const { convertToPdfFromBuffer } = await import(
+        "../utils/convertToPdf.js"
+      );
+      const converted = await convertToPdfFromBuffer(buffer, args.originalName);
+      let baseName = args.originalName.replace(
+        /\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i,
+        "",
+      );
+      if (!baseName.trim()) baseName = "document";
+      finalName = `${baseName}.pdf`;
+      const key = buildR2ObjectKey(args.userId, finalName);
+      const uploaded = await uploadBufferToR2({
+        key,
+        buffer: converted.pdfBuffer,
+        contentType: "application/pdf",
+      });
+      finalUrl = uploaded.url;
+      // Remove the original (non-PDF) object now that we have the PDF.
+      await deleteObjectFromR2ByUrl(args.originalUrl).catch(() => {});
+      pages = args.isImage
+        ? 1
+        : await getPdfPageCountFromBuffer(converted.pdfBuffer);
+      previewSource = args.isImage ? buffer : converted.pdfBuffer;
+      previewKind = args.isImage ? "image" : "pdf";
+    } else {
+      pages = await getPdfPageCountFromBuffer(buffer);
+      previewSource = buffer;
+      previewKind = "pdf";
+    }
+
+    const cost = calculateFileCost(pages, {
+      ...args.defaultOptions,
+      customRange: args.defaultOptions.customRange ?? "",
+      pagesPerSheet: args.defaultOptions.pagesPerSheet || 1,
+    });
+
+    // updateMany (not update) so a file removed mid-conversion just updates 0
+    // rows instead of throwing P2025.
+    const updated = await prisma.file.updateMany({
+      where: { id: args.fileId },
+      data: {
+        url: finalUrl,
+        name: finalName,
+        pages,
+        fileCost: cost,
+        conversionStatus: FileConversionStatus.READY,
+      },
+    });
+
+    if (updated.count === 0) {
+      // The file was removed while converting — clean up the converted object
+      // we just uploaded so it doesn't orphan in R2.
+      if (finalUrl && finalUrl !== args.originalUrl) {
+        await deleteObjectFromR2ByUrl(finalUrl).catch(() => {});
+      }
+      return;
+    }
+
+    await recomputeWebJobTotals(args.jobId);
+    socket.emit("job-file-added", args.jobId);
+    socket.emit("job-file-added", args.userId);
+
+    // Previews are rendered on demand client-side from the PDF (pdf.js); no
+    // server-side image is generated or stored.
+  } catch (err) {
+    console.error("[web-draft/finalize] failed:", err);
+    await prisma.file
+      .updateMany({
+        where: { id: args.fileId },
+        data: { conversionStatus: FileConversionStatus.FAILED },
+      })
+      .catch(() => {});
+    socket.emit("job-file-added", args.jobId);
+    socket.emit("job-file-added", args.userId);
+  }
+}
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -810,6 +982,8 @@ app.post(
         return tx.printJob.create({ data });
       });
 
+      // Previews are rendered on demand client-side from the PDF (pdf.js).
+
       return res.status(201).json({
         message: "Job created successfully!",
         verificationCode: createdJob.verificationCode,
@@ -940,155 +1114,95 @@ app.post(
         copies: 1,
       });
 
-      const OFFICE_EXTENSIONS = /\.(docx?|pptx?)$/i;
-      const IMAGE_EXTENSIONS = /\.(png|jpe?g|bmp|tiff?|webp|gif)$/i;
-
-      const processedFiles: UploadedFileForCreate[] = [];
-      let totalBytes = 0;
+      // ── Phase 1 (fast): create PENDING rows and respond immediately ──
+      // Conversion + page counting happen in the background; each row flips to
+      // READY once done and the web refetches via the "job-file-added" socket.
+      const pendingFiles: {
+        fileId: string;
+        originalUrl: string;
+        originalName: string;
+        isOffice: boolean;
+        isImage: boolean;
+      }[] = [];
 
       for (const file of incomingFiles) {
-        const response = await fetch(file.url);
-        if (!response.ok) {
-          throw new PrintJobAnalysisError(
-            `Unable to fetch ${file.name} from storage. Please re-upload and try again.`,
-            502,
-          );
-        }
+        const isOffice = WEB_OFFICE_EXTENSIONS.test(file.name);
+        const isImage = WEB_IMAGE_EXTENSIONS.test(file.name);
+        // Office/image files become a PDF; show that name from the start.
+        const displayName =
+          isOffice || isImage
+            ? `${
+                file.name.replace(
+                  /\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i,
+                  "",
+                ) || "document"
+              }.pdf`
+            : file.name;
 
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        totalBytes += buffer.byteLength;
-
-        if (totalBytes > CREATE_WITH_URLS_MAX_TOTAL_BYTES) {
-          throw new PrintJobAnalysisError(
-            `Total upload too large. Max combined size is ${CREATE_WITH_URLS_MAX_TOTAL_MB} MB.`,
-            413,
-          );
-        }
-
-        const isOffice = OFFICE_EXTENSIONS.test(file.name);
-        const isImage = IMAGE_EXTENSIONS.test(file.name);
-
-        let finalUrl = file.url;
-        let finalName = file.name;
-        let pages: number;
-
-        if (isOffice || isImage) {
-          // Office/Image files: convert to PDF server-side using LibreOffice
-          const { convertToPdfFromBuffer } = await import("../utils/convertToPdf.js");
-          const converted = await convertToPdfFromBuffer(buffer, file.name);
-
-          // Strip original extension and add .pdf
-          let baseName = file.name.replace(/\.(docx?|pptx?|png|jpe?g|bmp|tiff?|webp|gif)$/i, "");
-          if (!baseName.trim()) baseName = "document";
-          finalName = `${baseName}.pdf`;
-
-          // Upload the converted PDF to R2
-          const key = buildR2ObjectKey(req.user!.uid, finalName);
-          const uploaded = await uploadBufferToR2({
-            key,
-            buffer: converted.pdfBuffer,
-            contentType: "application/pdf",
-          });
-          finalUrl = uploaded.url;
-
-          // Delete the original non-PDF from R2
-          await deleteObjectFromR2ByUrl(file.url).catch(() => {});
-
-          // Images always produce exactly 1 page; skip pdf-parse to avoid flate warnings
-          pages = isImage ? 1 : await getPdfPageCountFromBuffer(converted.pdfBuffer);
-        } else {
-          // PDF: existing logic
-          pages = await getPdfPageCountFromBuffer(buffer);
-        }
-
-        const cost = calculateFileCost(pages, {
-          ...defaultOptions,
-        });
-
-        processedFiles.push({
-          name: finalName,
-          url: finalUrl,
-          pages,
-          cost,
-          option: defaultOptions,
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        for (const file of processedFiles) {
-          await tx.file.create({
-            data: {
-              name: file.name,
-              pages: file.pages,
-              url: file.url,
-              fileCost: file.cost,
-              printJobId: job!.id,
-              uploadedByUserId: req.user!.uid,
-              uploadedByRole: "OWNER",
-              option: {
-                create: {
-                  paperSize: mapPaperSizeToEnum(file.option.paperSize),
-                  colorMode: mapColorModeToEnum(file.option.colorMode),
-                  orientation: mapOrientationToEnum(file.option.orientation),
-                  scaleMode: mapScaleModeToEnum(file.option.scaleMode),
-                  duplex: mapDuplexToEnum(file.option.duplex),
-                  pageRange: mapPageRange(file.option.pageRange),
-                  customRange: file.option.customRange,
-                  copies: file.option.copies,
-                  pagesPerSheet: file.option.pagesPerSheet || 1,
-                },
+        const created = await prisma.file.create({
+          data: {
+            name: displayName,
+            pages: 0,
+            url: "",
+            conversionStatus: FileConversionStatus.PENDING,
+            printJobId: job!.id,
+            uploadedByUserId: req.user!.uid,
+            uploadedByRole: "OWNER",
+            option: {
+              create: {
+                paperSize: mapPaperSizeToEnum(defaultOptions.paperSize),
+                colorMode: mapColorModeToEnum(defaultOptions.colorMode),
+                orientation: mapOrientationToEnum(defaultOptions.orientation),
+                scaleMode: mapScaleModeToEnum(defaultOptions.scaleMode),
+                duplex: mapDuplexToEnum(defaultOptions.duplex),
+                pageRange: mapPageRange(defaultOptions.pageRange),
+                customRange: defaultOptions.customRange,
+                copies: defaultOptions.copies,
+                pagesPerSheet: defaultOptions.pagesPerSheet || 1,
               },
             },
-          });
-        }
-
-        const allFiles = await tx.file.findMany({
-          where: { printJobId: job!.id },
-          include: { option: true },
-        });
-
-        const newTotalPages = allFiles.reduce((sum, f) => sum + f.pages, 0);
-        const newTotalCost = allFiles.reduce((sum, f) => {
-          const opt = f.option!;
-          return sum + calculateFileCost(f.pages, {
-            paperSize: "A4",
-            colorMode: opt.colorMode === "COLOR" ? "COLOR" : "BW",
-            orientation: opt.orientation === "LANDSCAPE" ? "LANDSCAPE" : "PORTRAIT",
-            scaleMode: opt.scaleMode === "SHRINK" ? "SHRINK" : opt.scaleMode === "NOSCALE" ? "NOSCALE" : "FIT",
-            pageRange: opt.pageRange === "CUSTOM" ? "CUSTOM" : "ALL",
-            customRange: opt.customRange || "",
-            duplex: opt.duplex === "BOTH" ? "BOTH" : "ONE",
-            copies: opt.copies,
-            pagesPerSheet: opt.pagesPerSheet || 1,
-          });
-        }, 0);
-
-        await tx.printJob.update({
-          where: { id: job!.id },
-          data: {
-            totalPages: newTotalPages,
-            totalCost: newTotalCost,
-            estimatedTime: calculateEstimatedTime(newTotalPages),
           },
         });
-      });
+
+        pendingFiles.push({
+          fileId: created.id,
+          originalUrl: file.url,
+          originalName: file.name,
+          isOffice,
+          isImage,
+        });
+      }
 
       const updatedJob = await prisma.printJob.findUnique({
         where: { id: job!.id },
         include: {
           files: {
-            include: {
-              option: true,
-            },
+            include: { option: true },
             orderBy: { createdAt: "asc" },
           },
         },
       });
 
-      return res.status(200).json({ job: updatedJob });
+      // Respond right away with the pending rows so the UI shows metadata.
+      res.status(200).json({ job: updatedJob });
+
+      // ── Phase 2 (background): convert/count/upload, then flip to READY ──
+      for (const pf of pendingFiles) {
+        void finalizeWebDraftFile({
+          fileId: pf.fileId,
+          jobId: job!.id,
+          userId: req.user!.uid,
+          originalUrl: pf.originalUrl,
+          originalName: pf.originalName,
+          isOffice: pf.isOffice,
+          isImage: pf.isImage,
+          defaultOptions,
+        });
+      }
+      return;
     } catch (error) {
       console.error("[web-draft/add-files] error details:", error);
+      if (res.headersSent) return;
       if (error instanceof PrintJobAnalysisError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
@@ -1329,6 +1443,9 @@ app.post(
 
       socket.emit("job-file-added", jobId);
 
+      // Generate first-page previews for the newly added files (background).
+      // Previews are rendered on demand client-side from the PDF (pdf.js).
+
       return res.status(200).json({
         addedFilesCount: processedFiles.length,
         addedPages,
@@ -1478,14 +1595,20 @@ app.put("/update-status/:id", authMiddleware(["admin"]), async (req, res) => {
       },
       include: {
         files: {
-          select: { url: true },
+          select: { url: true, previewUrl: true },
         },
       },
     });
 
     if (status === "REJECTED" || status === "CANCELED") {
       await Promise.allSettled(
-        job.files.map((file) => deleteObjectFromR2ByUrl(file.url)),
+        job.files.flatMap((file) => {
+          const deletions: Promise<void>[] = [];
+          if (file.url) deletions.push(deleteObjectFromR2ByUrl(file.url));
+          if (file.previewUrl)
+            deletions.push(deleteObjectFromR2ByUrl(file.previewUrl));
+          return deletions;
+        }),
       );
     }
 
@@ -2327,6 +2450,7 @@ app.delete(
             select: {
               id: true,
               url: true,
+              previewUrl: true,
               option: {
                 select: {
                   id: true,
@@ -2351,6 +2475,9 @@ app.delete(
         for (const file of existingJob.files) {
           if (file.url) {
             await deleteObjectFromR2ByUrl(file.url);
+          }
+          if (file.previewUrl) {
+            await deleteObjectFromR2ByUrl(file.previewUrl).catch(() => {});
           }
         }
 
@@ -2383,6 +2510,9 @@ app.delete(
       for (const file of existingJob.files) {
         if (file.url) {
           await deleteObjectFromR2ByUrl(file.url);
+        }
+        if (file.previewUrl) {
+          await deleteObjectFromR2ByUrl(file.previewUrl).catch(() => {});
         }
       }
 
@@ -2632,6 +2762,8 @@ app.post(
                 createdAt: f.createdAt,
                 pages: f.pages,
                 url: f.url,
+                previewUrl: f.previewUrl,
+                conversionStatus: f.conversionStatus,
                 fileCost: f.newCost,
                 uploadedByUserId: f.uploadedByUserId,
                 uploadedByPhoneNumber: f.uploadedByPhoneNumber,

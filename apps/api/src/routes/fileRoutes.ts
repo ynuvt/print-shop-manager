@@ -14,6 +14,7 @@ import {
 } from "../../../../packages/db/dist/generated/prisma/client.js";
 import { optionsSchema } from "@printowl/types/dist/validators/fileValidator.js";
 import { PrintJobStatus } from "../../../../packages/db/dist/generated/prisma/enums.js";
+import { deleteObjectFromR2ByUrl } from "../utils/r2Storage.js";
 
 const app = express.Router();
 
@@ -135,10 +136,27 @@ app.delete(
       if (!access.ok) {
         return res.status(access.status).json({ error: access.error });
       }
+      // Grab the R2 object URLs before deleting the row so we can clean up
+      // storage (the PDF and its preview) and avoid orphaning objects.
+      const fileToDelete = await prisma.file.findUnique({
+        where: { id },
+        select: { url: true, previewUrl: true },
+      });
       await prisma.$transaction(async (tx) => {
         await tx.file.delete({ where: { id } });
         await recomputeJobTotals(tx, access.printJobId);
       });
+      // Best-effort R2 cleanup — never block the response on storage deletion.
+      if (fileToDelete?.url) {
+        deleteObjectFromR2ByUrl(fileToDelete.url).catch((err) =>
+          console.error("[file-delete] R2 cleanup (url) failed:", err),
+        );
+      }
+      if (fileToDelete?.previewUrl) {
+        deleteObjectFromR2ByUrl(fileToDelete.previewUrl).catch((err) =>
+          console.error("[file-delete] R2 cleanup (preview) failed:", err),
+        );
+      }
       socket.emit("job-file-added", access.printJobId);
       res.status(200).json({ message: "File removed successfully." });
     } catch (error) {
@@ -249,6 +267,7 @@ app.post(
         return created;
       });
       socket.emit("job-file-added", jobId);
+      // Previews are rendered on demand client-side from the PDF (pdf.js).
       res.status(201).json({ message: "File added successfully.", file });
     } catch (error) {
       console.log(error);

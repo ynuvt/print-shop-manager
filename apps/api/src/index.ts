@@ -7,9 +7,14 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import v1Routes from "./routes/index.js";
 import { initWaTrackingCache } from "./utils/waTrackingCache.js";
+import { startPendingFileSweeper } from "./utils/pendingFileSweeper.js";
 
 // Warm the file-backed tracking cache before handling requests
 initWaTrackingCache();
+
+// Safety net: flip files stuck in PENDING (e.g. crash mid-conversion) to FAILED
+// so the UI never waits on them indefinitely.
+startPendingFileSweeper();
 
 import { warmupStickerCache } from "./modules/whatsappServices.js";
 import { STICKER_FILE_PATH, UPLOAD_STICKER_FILE_PATH } from "./controllers/webhookController.js";

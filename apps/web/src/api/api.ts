@@ -29,6 +29,8 @@ export type UserPrintJobFile = {
   name: string;
   pages: number;
   url: string;
+  previewUrl?: string | null;
+  conversionStatus?: "PENDING" | "READY" | "FAILED";
   option: PrintFileOption | null;
   uploadedByUserId?: string | null;
   uploadedByPhoneNumber?: string | null;

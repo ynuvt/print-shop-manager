@@ -151,6 +151,10 @@ export const defaultPrintOptions = (): PrintOptions => ({
 export type PrintFileState = {
   id?: string;
   url?: string;
+  /** First-page preview image URL (null/undefined while still being prepared). */
+  previewUrl?: string | null;
+  /** Background conversion state for WhatsApp/async files. Web uploads are READY. */
+  conversionStatus?: "PENDING" | "READY" | "FAILED";
   /** Platform-specific file handle (browser File, RN DocumentPickerAsset, etc.) */
   file?: unknown;
   name: string;
